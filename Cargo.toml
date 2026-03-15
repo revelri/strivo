@@ -1,0 +1,48 @@
+[package]
+name = "streavo"
+version = "0.1.0"
+edition = "2024"
+description = "TUI Live Stream PVR for Twitch and YouTube"
+
+[dependencies]
+# TUI
+ratatui = "0.30"
+crossterm = "0.28"
+ratatui-image = "5"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "cookies", "rustls-tls"], default-features = false }
+
+# Config
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+directories = "6"
+
+# Credentials
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+# OAuth
+oauth2 = "5"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Notifications
+notify-rust = "4"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+# Image processing
+image = "0.25"
+
+# Misc
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1"
+async-trait = "0.1"
