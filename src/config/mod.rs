@@ -20,11 +20,16 @@ pub struct AppConfig {
 
     #[serde(default)]
     pub auto_record_channels: Vec<AutoRecordEntry>,
+
+    /// Tracks the path this config was loaded from, so save() can use it
+    #[serde(skip)]
+    pub config_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TwitchConfig {
     pub client_id: String,
+    pub client_secret: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -82,6 +87,7 @@ impl Default for AppConfig {
             youtube: None,
             recording: RecordingConfig::default(),
             auto_record_channels: Vec::new(),
+            config_path: None,
         }
     }
 }
@@ -119,21 +125,24 @@ impl AppConfig {
             .unwrap_or_else(Self::config_path);
 
         if !path.exists() {
-            let config = Self::default();
+            let mut config = Self::default();
+            config.config_path = Some(path.clone());
             config.save(Some(&path))?;
             return Ok(config);
         }
 
         let contents = std::fs::read_to_string(&path)
             .with_context(|| format!("Failed to read config from {}", path.display()))?;
-        let config: Self = toml::from_str(&contents)
+        let mut config: Self = toml::from_str(&contents)
             .with_context(|| format!("Failed to parse config from {}", path.display()))?;
+        config.config_path = Some(path);
         Ok(config)
     }
 
     pub fn save(&self, path: Option<&std::path::Path>) -> Result<()> {
         let path = path
             .map(|p| p.to_path_buf())
+            .or_else(|| self.config_path.clone())
             .unwrap_or_else(Self::config_path);
 
         if let Some(parent) = path.parent() {

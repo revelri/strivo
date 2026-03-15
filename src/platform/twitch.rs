@@ -19,6 +19,7 @@ struct DeviceCodeResponse {
     interval: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
     access_token: String,
@@ -27,12 +28,14 @@ struct TokenResponse {
     token_type: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct TokenErrorResponse {
     status: Option<u16>,
     message: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct TwitchUser {
     id: String,
@@ -63,6 +66,7 @@ struct Pagination {
     cursor: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct StreamData {
     id: String,
@@ -86,6 +90,7 @@ struct StreamsResponse {
 pub struct TwitchPlatform {
     client: Client,
     client_id: String,
+    client_secret: String,
     access_token: Arc<RwLock<Option<String>>>,
     refresh_token_value: Arc<RwLock<Option<String>>>,
     user_id: Arc<RwLock<Option<String>>>,
@@ -93,6 +98,7 @@ pub struct TwitchPlatform {
     pub pending_device_code: Arc<RwLock<Option<DeviceCodeInfo>>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DeviceCodeInfo {
     pub user_code: String,
@@ -100,10 +106,11 @@ pub struct DeviceCodeInfo {
 }
 
 impl TwitchPlatform {
-    pub fn new(client_id: String) -> Self {
+    pub fn new(client_id: String, client_secret: String) -> Self {
         Self {
             client: Client::new(),
             client_id,
+            client_secret,
             access_token: Arc::new(RwLock::new(None)),
             refresh_token_value: Arc::new(RwLock::new(None)),
             user_id: Arc::new(RwLock::new(None)),
@@ -212,6 +219,7 @@ impl TwitchPlatform {
                 .post(format!("{TWITCH_AUTH_URL}/token"))
                 .form(&[
                     ("client_id", self.client_id.as_str()),
+                    ("client_secret", self.client_secret.as_str()),
                     ("device_code", resp.device_code.as_str()),
                     ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
                 ])
@@ -255,6 +263,7 @@ impl TwitchPlatform {
             .post(format!("{TWITCH_AUTH_URL}/token"))
             .form(&[
                 ("client_id", self.client_id.as_str()),
+                ("client_secret", self.client_secret.as_str()),
                 ("refresh_token", refresh.as_str()),
                 ("grant_type", "refresh_token"),
             ])
@@ -293,7 +302,8 @@ impl TwitchPlatform {
             drop(resp);
             // Try refresh
             self.do_refresh_token().await?;
-            let token = self.access_token.read().await.clone().unwrap();
+            let token = self.access_token.read().await.clone()
+                .ok_or_else(|| anyhow::anyhow!("No access token after refresh"))?;
             let resp = self
                 .client
                 .get(url)
@@ -307,6 +317,7 @@ impl TwitchPlatform {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn is_authenticated(&self) -> bool {
         self.access_token.read().await.is_some()
     }

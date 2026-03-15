@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph},
 };
 
 use crate::tui::theme::Theme;
@@ -28,6 +28,7 @@ pub fn render(frame: &mut Frame, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Theme::border_focused())
         .title(" Setup Wizard ")
         .title_style(Theme::title());
@@ -67,6 +68,10 @@ pub fn render(frame: &mut Frame, area: Rect) {
         ),
         Line::styled(
             "  client_id = \"your_client_id\"",
+            Style::new().fg(Theme::GRAY),
+        ),
+        Line::styled(
+            "  client_secret = \"your_secret\"",
             Style::new().fg(Theme::GRAY),
         ),
         Line::raw(""),

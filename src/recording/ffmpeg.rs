@@ -119,3 +119,16 @@ impl FfmpegProcess {
             .unwrap_or(0)
     }
 }
+
+impl Drop for FfmpegProcess {
+    fn drop(&mut self) {
+        // If process already exited, nothing to do
+        match self.child.try_wait() {
+            Ok(Some(_)) => {}
+            _ => {
+                // Still running — kill to prevent zombie
+                let _ = self.child.start_kill();
+            }
+        }
+    }
+}

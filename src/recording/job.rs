@@ -36,6 +36,8 @@ pub struct RecordingJob {
     pub duration_secs: f64,
     pub transcode: bool,
     pub error: Option<String>,
+    pub stream_title: Option<String>,
+    pub watched: bool,
 }
 
 impl RecordingJob {
@@ -45,6 +47,7 @@ impl RecordingJob {
         platform: crate::platform::PlatformKind,
         output_path: PathBuf,
         transcode: bool,
+        stream_title: Option<String>,
     ) -> Self {
         Self {
             id: Uuid::new_v4(),
@@ -58,6 +61,8 @@ impl RecordingJob {
             duration_secs: 0.0,
             transcode,
             error: None,
+            stream_title,
+            watched: false,
         }
     }
 
@@ -73,6 +78,7 @@ impl RecordingJob {
         }
     }
 
+    #[allow(dead_code)]
     pub fn format_size(&self) -> String {
         let bytes = self.bytes_written;
         if bytes >= 1_073_741_824 {

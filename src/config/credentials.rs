@@ -21,6 +21,7 @@ pub fn get_secret(key: &str) -> Result<Option<String>> {
     }
 }
 
+#[allow(dead_code)]
 pub fn delete_secret(key: &str) -> Result<()> {
     let entry = keyring::Entry::new(SERVICE_NAME, key)
         .context("Failed to create keyring entry")?;

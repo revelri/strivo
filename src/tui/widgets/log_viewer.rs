@@ -1,9 +1,9 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 
 use crate::app::{ActivePane, AppState};
@@ -40,6 +40,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(border_style)
         .title(title)
         .title_style(if app.log_auto_scroll {
@@ -97,17 +98,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
 }
 
 fn colorize_log_line(line: &str) -> Line<'_> {
-    // Color based on log level
+    // Color based on log level (Dracula neon palette)
     let style = if line.contains(" ERROR ") {
-        Style::new().fg(Color::Rgb(243, 139, 168))
+        Style::new().fg(Theme::RED)
     } else if line.contains(" WARN ") {
-        Style::new().fg(Color::Rgb(249, 226, 175))
+        Style::new().fg(Theme::YELLOW)
     } else if line.contains(" INFO ") {
-        Style::new().fg(Color::Rgb(205, 214, 244))
+        Style::new().fg(Theme::FG)
     } else if line.contains(" DEBUG ") {
-        Style::new().fg(Color::Rgb(88, 91, 112))
+        Style::new().fg(Theme::GRAY)
     } else if line.contains(" TRACE ") {
-        Style::new().fg(Color::Rgb(69, 71, 90))
+        Style::new().fg(Theme::DIM)
     } else {
         Style::new().fg(Theme::GRAY)
     };

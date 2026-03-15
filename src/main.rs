@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 mod app;
 mod cli;
 mod config;
@@ -15,6 +13,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use clap::Parser;
 use tokio::sync::{mpsc, RwLock};
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 use crate::app::AppEvent;
@@ -58,12 +57,13 @@ fn handle_config_command(action: &ConfigAction, config_path: Option<&std::path::
             println!("recording.filename_template = {:?}", cfg.recording.filename_template);
             if let Some(ref tw) = cfg.twitch {
                 println!("twitch.client_id = {:?}", tw.client_id);
+                println!("twitch.client_secret = \"****\"");
             } else {
                 println!("twitch = <not configured>");
             }
             if let Some(ref yt) = cfg.youtube {
                 println!("youtube.client_id = {:?}", yt.client_id);
-                println!("youtube.client_secret = {:?}", yt.client_secret);
+                println!("youtube.client_secret = \"****\"");
                 if let Some(ref cp) = yt.cookies_path {
                     println!("youtube.cookies_path = {:?}", cp.display());
                 }
@@ -116,6 +116,11 @@ fn config_get(cfg: &config::AppConfig, key: &str) -> Result<String> {
             .as_ref()
             .map(|t| t.client_id.clone())
             .ok_or_else(|| anyhow::anyhow!("Twitch not configured")),
+        "twitch.client_secret" => cfg
+            .twitch
+            .as_ref()
+            .map(|t| t.client_secret.clone())
+            .ok_or_else(|| anyhow::anyhow!("Twitch not configured")),
         "youtube.client_id" => cfg
             .youtube
             .as_ref()
@@ -135,7 +140,8 @@ fn config_get(cfg: &config::AppConfig, key: &str) -> Result<String> {
         _ => Err(anyhow::anyhow!(
             "Unknown key: {key}\n\nValid keys:\n  \
              recording_dir, poll_interval, transcode, filename_template,\n  \
-             twitch.client_id, youtube.client_id, youtube.client_secret, youtube.cookies_path"
+             twitch.client_id, twitch.client_secret,\n  \
+             youtube.client_id, youtube.client_secret, youtube.cookies_path"
         )),
     }
 }
@@ -169,6 +175,17 @@ fn config_set(cfg: &mut config::AppConfig, key: &str, value: &str) -> Result<()>
             } else {
                 cfg.twitch = Some(config::TwitchConfig {
                     client_id: value.to_string(),
+                    client_secret: String::new(),
+                });
+            }
+        }
+        "twitch.client_secret" => {
+            if let Some(ref mut tw) = cfg.twitch {
+                tw.client_secret = value.to_string();
+            } else {
+                cfg.twitch = Some(config::TwitchConfig {
+                    client_id: String::new(),
+                    client_secret: value.to_string(),
                 });
             }
         }
@@ -209,7 +226,8 @@ fn config_set(cfg: &mut config::AppConfig, key: &str, value: &str) -> Result<()>
             anyhow::bail!(
                 "Unknown key: {key}\n\nValid keys:\n  \
                  recording_dir, poll_interval, transcode, filename_template,\n  \
-                 twitch.client_id, youtube.client_id, youtube.client_secret, youtube.cookies_path"
+                 twitch.client_id, twitch.client_secret,\n  \
+                 youtube.client_id, youtube.client_secret, youtube.cookies_path"
             );
         }
     }
@@ -300,6 +318,22 @@ async fn tail_log(path: &std::path::Path, initial_lines: usize) -> Result<()> {
     }
 }
 
+fn check_external_tools() {
+    for tool in &["ffmpeg", "streamlink", "yt-dlp"] {
+        match std::process::Command::new("which")
+            .arg(tool)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+        {
+            Ok(status) if status.success() => {}
+            _ => {
+                eprintln!("Warning: '{tool}' not found in PATH. Some features may not work.");
+            }
+        }
+    }
+}
+
 async fn run_tui(args: cli::Args) -> Result<()> {
     // Initialize logging
     let state_dir = config::AppConfig::state_dir();
@@ -322,12 +356,18 @@ async fn run_tui(args: cli::Args) -> Result<()> {
 
     tracing::info!("StreaVo starting");
 
+    // Validate external tools
+    check_external_tools();
+
     // Load config
     let config = config::AppConfig::load(args.config.as_deref())?;
     tracing::info!(
         "Config loaded from {}",
         config::AppConfig::config_path().display()
     );
+
+    // Cancellation token for graceful shutdown
+    let cancel = CancellationToken::new();
 
     // Create event channel (backend → TUI)
     let (event_tx, event_rx) = mpsc::unbounded_channel::<AppEvent>();
@@ -340,7 +380,7 @@ async fn run_tui(args: cli::Args) -> Result<()> {
 
     if let Some(ref twitch_config) = config.twitch {
         let mut twitch =
-            platform::twitch::TwitchPlatform::new(twitch_config.client_id.clone());
+            platform::twitch::TwitchPlatform::new(twitch_config.client_id.clone(), twitch_config.client_secret.clone());
         match twitch.authenticate().await {
             Ok(()) => {
                 tracing::info!("Twitch authenticated");
@@ -381,8 +421,9 @@ async fn run_tui(args: cli::Args) -> Result<()> {
     // Spawn recording manager
     let rec_config = config.clone();
     let rec_tx = event_tx.clone();
+    let rec_cancel = cancel.clone();
     tokio::spawn(async move {
-        recording::run_manager(rec_config, recording_rx, rec_tx).await;
+        recording::run_manager(rec_config, recording_rx, rec_tx, rec_cancel).await;
     });
 
     // Spawn channel monitor
@@ -392,6 +433,7 @@ async fn run_tui(args: cli::Args) -> Result<()> {
             config.clone(),
             event_tx.clone(),
             recording_tx.clone(),
+            cancel.clone(),
         );
         tokio::spawn(async move {
             monitor.run().await;
@@ -405,6 +447,9 @@ async fn run_tui(args: cli::Args) -> Result<()> {
 
     // Run TUI (blocks until quit)
     tui::run(app_state, event_rx, recording_tx).await?;
+
+    // Signal all background tasks to stop
+    cancel.cancel();
 
     tracing::info!("StreaVo exiting");
     Ok(())

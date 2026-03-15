@@ -4,8 +4,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
 
-const SOCKET_PATH: &str = "/tmp/streavo-mpv.sock";
-
 pub struct MpvController {
     child: Option<Child>,
     socket_path: String,
@@ -13,9 +11,10 @@ pub struct MpvController {
 
 impl MpvController {
     pub fn new() -> Self {
+        let pid = std::process::id();
         Self {
             child: None,
-            socket_path: SOCKET_PATH.to_string(),
+            socket_path: format!("/tmp/streavo-mpv-{pid}.sock"),
         }
     }
 
@@ -91,18 +90,21 @@ impl MpvController {
     }
 
     /// Toggle play/pause
+    #[allow(dead_code)]
     pub async fn toggle_pause(&self) -> Result<()> {
         self.send_command(&["cycle", "pause"]).await?;
         Ok(())
     }
 
     /// Seek relative (seconds, can be negative)
+    #[allow(dead_code)]
     pub async fn seek(&self, seconds: f64) -> Result<()> {
         self.send_command(&["seek", &seconds.to_string(), "relative"]).await?;
         Ok(())
     }
 
     /// Get current playback position
+    #[allow(dead_code)]
     pub async fn get_position(&self) -> Result<f64> {
         let resp = self
             .send_command(&["get_property", "time-pos"])
@@ -114,6 +116,7 @@ impl MpvController {
     }
 
     /// Set volume (0-100)
+    #[allow(dead_code)]
     pub async fn set_volume(&self, volume: u32) -> Result<()> {
         self.send_command(&["set_property", "volume", &volume.to_string()])
             .await?;

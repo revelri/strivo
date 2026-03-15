@@ -5,6 +5,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::app::AppEvent;
@@ -22,6 +23,7 @@ pub enum RecordingCommand {
         platform: PlatformKind,
         transcode: bool,
         cookies_path: Option<PathBuf>,
+        stream_title: Option<String>,
     },
     Stop {
         job_id: Uuid,
@@ -33,12 +35,14 @@ struct ActiveRecording {
     job: RecordingJob,
     process: Option<FfmpegProcess>,
     retry_count: u32,
+    cookies_path: Option<PathBuf>,
 }
 
 pub async fn run_manager(
     config: AppConfig,
     mut cmd_rx: mpsc::UnboundedReceiver<RecordingCommand>,
     event_tx: mpsc::UnboundedSender<AppEvent>,
+    cancel: CancellationToken,
 ) {
     let mut active: HashMap<Uuid, ActiveRecording> = HashMap::new();
     let mut poll_interval = tokio::time::interval(std::time::Duration::from_secs(2));
@@ -50,7 +54,7 @@ pub async fn run_manager(
         tokio::select! {
             Some(cmd) = cmd_rx.recv() => {
                 match cmd {
-                    RecordingCommand::Start { channel_id, channel_name, platform, transcode, cookies_path } => {
+                    RecordingCommand::Start { channel_id, channel_name, platform, transcode, cookies_path, stream_title } => {
                         // Check if already recording this channel
                         let already = active.values().any(|r| {
                             r.job.channel_id == channel_id
@@ -63,21 +67,23 @@ pub async fn run_manager(
                             continue;
                         }
 
-                        let output_path = build_output_path(&config, &channel_name, platform);
+                        let output_path = build_output_path(&config, &channel_name, platform, stream_title.as_deref());
                         let job = RecordingJob::new(
                             channel_id.clone(),
                             channel_name.clone(),
                             platform,
                             output_path.clone(),
                             transcode,
+                            stream_title,
                         );
                         let job_id = job.id;
-                        let _ = event_tx.send(AppEvent::RecordingStarted { job_id });
+                        let _ = event_tx.send(AppEvent::RecordingStarted { job: job.clone() });
 
                         active.insert(job_id, ActiveRecording {
                             job,
                             process: None,
                             retry_count: 0,
+                            cookies_path: cookies_path.clone(),
                         });
 
                         // Spawn resolve + start task
@@ -109,7 +115,7 @@ pub async fn run_manager(
                         });
                     }
                     RecordingCommand::Stop { job_id } => {
-                        if let Some(rec) = active.get_mut(&job_id) {
+                        if let Some(mut rec) = active.remove(&job_id) {
                             rec.job.state = RecordingState::Stopping;
                             if let Some(ref mut proc) = rec.process {
                                 if let Err(e) = proc.stop().await {
@@ -123,7 +129,7 @@ pub async fn run_manager(
                     RecordingCommand::StopAll => {
                         let ids: Vec<Uuid> = active.keys().copied().collect();
                         for id in ids {
-                            if let Some(rec) = active.get_mut(&id) {
+                            if let Some(mut rec) = active.remove(&id) {
                                 if matches!(rec.job.state, RecordingState::Recording | RecordingState::ResolvingUrl) {
                                     rec.job.state = RecordingState::Stopping;
                                     if let Some(ref mut proc) = rec.process {
@@ -134,6 +140,7 @@ pub async fn run_manager(
                                 }
                             }
                         }
+                        let _ = event_tx.send(AppEvent::AllRecordingsStopped);
                     }
                 }
             }
@@ -153,6 +160,20 @@ pub async fn run_manager(
                         }
                     }
                 }
+            }
+            _ = cancel.cancelled() => {
+                tracing::info!("Recording manager shutting down, stopping all recordings");
+                let ids: Vec<Uuid> = active.keys().copied().collect();
+                for id in ids {
+                    if let Some(mut rec) = active.remove(&id) {
+                        if matches!(rec.job.state, RecordingState::Recording | RecordingState::ResolvingUrl) {
+                            if let Some(ref mut proc) = rec.process {
+                                proc.stop().await.ok();
+                            }
+                        }
+                    }
+                }
+                break;
             }
             _ = poll_interval.tick() => {
                 let mut finished = Vec::new();
@@ -187,16 +208,27 @@ pub async fn run_manager(
                                     rec.job.state = RecordingState::ResolvingUrl;
                                     rec.process = None;
 
+                                    // Generate retry-specific output path to avoid overwriting
+                                    let retry_path = {
+                                        let orig = &rec.job.output_path;
+                                        let stem = orig.file_stem().unwrap_or_default().to_string_lossy();
+                                        let ext = orig.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_default();
+                                        let parent = orig.parent().unwrap_or(orig);
+                                        parent.join(format!("{stem}_retry{}.{ext}", rec.retry_count))
+                                    };
+                                    rec.job.output_path = retry_path;
+
                                     // Re-resolve and restart
                                     let rtx = resolve_tx.clone();
                                     let job = rec.job.clone();
                                     let jid = *id;
+                                    let retry_cookies = rec.cookies_path.clone();
                                     tokio::spawn(async move {
                                         tokio::time::sleep(std::time::Duration::from_secs(wait_secs)).await;
                                         match resolver::resolve_stream_url(
                                             job.platform,
                                             &job.channel_name,
-                                            None,
+                                            retry_cookies.as_deref(),
                                         ).await {
                                             Ok(info) => {
                                                 match FfmpegBuilder::new(info.url, job.output_path)
@@ -226,6 +258,7 @@ pub async fn run_manager(
                     }
                 }
                 for id in finished {
+                    active.remove(&id);
                     let _ = event_tx.send(AppEvent::RecordingFinished { job_id: id });
                 }
             }
@@ -233,7 +266,12 @@ pub async fn run_manager(
     }
 }
 
-pub fn build_output_path(config: &AppConfig, channel_name: &str, platform: PlatformKind) -> PathBuf {
+pub fn build_output_path(
+    config: &AppConfig,
+    channel_name: &str,
+    platform: PlatformKind,
+    stream_title: Option<&str>,
+) -> PathBuf {
     let now = chrono::Local::now();
     let date = now.format("%Y-%m-%d_%H%M%S");
     let platform_str = match platform {
@@ -241,12 +279,24 @@ pub fn build_output_path(config: &AppConfig, channel_name: &str, platform: Platf
         PlatformKind::YouTube => "youtube",
     };
 
+    // Sanitize stream title for filesystem safety
+    let title = stream_title.unwrap_or("stream");
+    let safe_title: String = title
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>()
+        .trim()
+        .to_string();
+    let safe_title = if safe_title.is_empty() { "stream".to_string() } else { safe_title };
+    // Truncate to avoid excessively long filenames
+    let safe_title: String = safe_title.chars().take(80).collect();
+
     let filename = config
         .recording
         .filename_template
         .replace("{channel}", channel_name)
         .replace("{date}", &date.to_string())
-        .replace("{title}", "stream")
+        .replace("{title}", &safe_title)
         .replace("{platform}", platform_str);
 
     config.recording_dir.join(filename)

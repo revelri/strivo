@@ -9,6 +9,7 @@ use crate::playback::MpvController;
 use crate::recording::RecordingCommand;
 use crate::stream::resolver;
 use anyhow::Result;
+use ratatui_image::picker::Picker;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -40,8 +41,8 @@ async fn run_loop(
     recording_tx: &mpsc::UnboundedSender<RecordingCommand>,
     mpv: &mut MpvController,
 ) -> Result<()> {
-    // Internal sender for thumbnail download results
-    let (thumb_tx, mut thumb_rx) = mpsc::unbounded_channel::<AppEvent>();
+    // Internal sender for async results (thumbnails, watch resolution, etc.)
+    let (internal_tx, mut internal_rx) = mpsc::unbounded_channel::<AppEvent>();
 
     loop {
         terminal.draw(|frame| layout::render(frame, app))?;
@@ -49,7 +50,7 @@ async fn run_loop(
         // Poll crossterm events
         if let Some(event) = event::poll_event(FRAME_DURATION)? {
             if let Some(action) = app.handle_event(event) {
-                handle_action(action, app, recording_tx, mpv).await;
+                handle_action(action, app, recording_tx, mpv, &internal_tx).await;
             }
         }
 
@@ -57,16 +58,23 @@ async fn run_loop(
         while let Ok(event) = rx.try_recv() {
             // Check for channels updated to trigger thumbnail downloads
             if let AppEvent::ChannelsUpdated(ref channels) = event {
-                spawn_thumbnail_downloads(channels, app, &thumb_tx);
+                spawn_thumbnail_downloads(channels, app, &internal_tx);
             }
             if let Some(action) = app.handle_event(event) {
-                handle_action(action, app, recording_tx, mpv).await;
+                handle_action(action, app, recording_tx, mpv, &internal_tx).await;
             }
         }
 
-        // Drain thumbnail events
-        while let Ok(event) = thumb_rx.try_recv() {
-            app.handle_event(event);
+        // Drain internal async results (thumbnails, watch resolution, etc.)
+        while let Ok(event) = internal_rx.try_recv() {
+            if let Some(action) = app.handle_event(event) {
+                handle_action(action, app, recording_tx, mpv, &internal_tx).await;
+            }
+        }
+
+        // Clear watching_channel if mpv has exited
+        if app.watching_channel.is_some() && !mpv.is_running() {
+            app.watching_channel = None;
         }
 
         if app.should_quit {
@@ -82,14 +90,15 @@ fn spawn_thumbnail_downloads(
     tx: &mpsc::UnboundedSender<AppEvent>,
 ) {
     let cache_dir = AppConfig::cache_dir().join("thumbnails");
+    let picker = app.picker.clone();
 
     for channel in channels {
         let Some(ref thumb_url) = channel.thumbnail_url else {
             continue;
         };
 
-        // Skip if already cached
-        if app.thumbnail_protocols.contains_key(&channel.id) {
+        // Skip if already downloaded (even if protocol loading failed)
+        if app.thumbnail_cache.contains_key(&channel.id) {
             continue;
         }
 
@@ -97,9 +106,10 @@ fn spawn_thumbnail_downloads(
         let url = thumb_url.clone();
         let tx = tx.clone();
         let cache_dir = cache_dir.clone();
+        let picker = picker.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = download_thumbnail(&channel_id, &url, &cache_dir, &tx).await {
+            if let Err(e) = download_thumbnail(&channel_id, &url, &cache_dir, &tx, picker).await {
                 tracing::debug!("Thumbnail download failed for {channel_id}: {e}");
             }
         });
@@ -111,6 +121,7 @@ async fn download_thumbnail(
     url: &str,
     cache_dir: &PathBuf,
     tx: &mpsc::UnboundedSender<AppEvent>,
+    picker: Option<Picker>,
 ) -> Result<()> {
     std::fs::create_dir_all(cache_dir)?;
 
@@ -120,15 +131,34 @@ async fn download_thumbnail(
     let resp = reqwest::get(url).await?;
     let bytes = resp.bytes().await?;
 
-    // Resize to reasonable thumbnail size
-    let img = image::load_from_memory(&bytes)?;
-    let resized = img.resize(440, 248, image::imageops::FilterType::Triangle);
-    resized.save(&cache_path)?;
+    // Decode, resize, and create protocol off the event loop
+    let channel_id_owned = channel_id.to_string();
+    let cache_path_clone = cache_path.clone();
+    let decode_result = tokio::task::spawn_blocking(move || -> Result<Option<ratatui_image::protocol::StatefulProtocol>> {
+        let img = image::load_from_memory(&bytes)?;
+        let resized = img.resize(440, 248, image::imageops::FilterType::Triangle);
+        resized.save(&cache_path_clone)?;
+
+        // Create protocol if picker is available
+        if let Some(picker) = picker {
+            let proto = picker.new_resize_protocol(resized.into());
+            Ok(Some(proto))
+        } else {
+            Ok(None)
+        }
+    }).await??;
 
     let _ = tx.send(AppEvent::ThumbnailReady {
         channel_id: channel_id.to_string(),
         path: cache_path,
     });
+
+    if let Some(protocol) = decode_result {
+        let _ = tx.send(AppEvent::ThumbnailDecoded {
+            channel_id: channel_id_owned,
+            protocol,
+        });
+    }
 
     Ok(())
 }
@@ -138,6 +168,7 @@ async fn handle_action(
     app: &mut AppState,
     recording_tx: &mpsc::UnboundedSender<RecordingCommand>,
     mpv: &mut MpvController,
+    watch_tx: &mpsc::UnboundedSender<AppEvent>,
 ) {
     match action {
         AppAction::StartRecording {
@@ -155,26 +186,22 @@ async fn handle_action(
                 _ => None,
             };
 
-            let output_path = crate::recording::build_output_path(
-                &app.config,
-                &channel_name,
-                platform,
-            );
-            let job = crate::recording::job::RecordingJob::new(
-                channel_id.clone(),
-                channel_name.clone(),
-                platform,
-                output_path,
-                transcode,
-            );
-            app.register_recording(job);
+            // Look up stream_title from the channel
+            let stream_title = app
+                .channels
+                .iter()
+                .find(|ch| ch.id == channel_id)
+                .and_then(|ch| ch.stream_title.clone());
 
+            // Recording manager is the single source of truth for RecordingJob.
+            // The TUI registers the job when RecordingStarted arrives.
             let _ = recording_tx.send(RecordingCommand::Start {
                 channel_id,
                 channel_name,
                 platform,
                 transcode,
                 cookies_path,
+                stream_title,
             });
             app.status_message = "Starting recording...".to_string();
         }
@@ -193,20 +220,35 @@ async fn handle_action(
                 _ => None,
             };
 
-            match resolver::resolve_stream_url(platform, &channel_name, cookies_path.as_deref())
-                .await
-            {
-                Ok(info) => match mpv.play(&info.url).await {
-                    Ok(()) => {
-                        app.status_message = format!("Playing {channel_name} in mpv");
-                        app.watching_channel = Some(channel_name);
+            // Spawn resolution to avoid blocking the UI
+            let watch_tx = watch_tx.clone();
+            let ch_name = channel_name.clone();
+            tokio::spawn(async move {
+                match resolver::resolve_stream_url(platform, &ch_name, cookies_path.as_deref())
+                    .await
+                {
+                    Ok(info) => {
+                        let _ = watch_tx.send(AppEvent::WatchResolved {
+                            channel_name: ch_name,
+                            stream_url: info.url,
+                        });
                     }
                     Err(e) => {
-                        app.status_message = format!("mpv error: {e}");
+                        let _ = watch_tx.send(AppEvent::WatchFailed {
+                            error: format!("{e}"),
+                        });
                     }
-                },
+                }
+            });
+        }
+        AppAction::LaunchMpv { channel_name, url } => {
+            match mpv.play(&url).await {
+                Ok(()) => {
+                    app.status_message = format!("Playing {channel_name} in mpv");
+                }
                 Err(e) => {
-                    app.status_message = format!("Stream resolve error: {e}");
+                    app.status_message = format!("mpv error: {e}");
+                    app.watching_channel = None;
                 }
             }
         }
@@ -219,12 +261,10 @@ async fn handle_action(
             }
         },
         AppAction::Notify { title, body } => {
-            let t = title.clone();
-            let b = body.clone();
             tokio::task::spawn_blocking(move || {
                 let _ = notify_rust::Notification::new()
-                    .summary(&t)
-                    .body(&b)
+                    .summary(&title)
+                    .body(&body)
                     .appname("StreaVo")
                     .timeout(notify_rust::Timeout::Milliseconds(5000))
                     .show();

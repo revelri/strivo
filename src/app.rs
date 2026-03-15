@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use ratatui_image::picker::Picker;
@@ -10,6 +10,7 @@ use crate::platform::{ChannelEntry, PlatformKind};
 use crate::recording::job::{RecordingJob, RecordingState};
 use crate::recording::RecordingCommand;
 
+#[allow(dead_code)]
 pub enum AppEvent {
     Key(crossterm::event::KeyEvent),
     Resize(u16, u16),
@@ -22,7 +23,7 @@ pub enum AppEvent {
         url: String,
     },
     RecordingStarted {
-        job_id: Uuid,
+        job: RecordingJob,
     },
     RecordingProgress {
         job_id: Uuid,
@@ -36,10 +37,22 @@ pub enum AppEvent {
         channel_id: String,
         path: PathBuf,
     },
+    ThumbnailDecoded {
+        channel_id: String,
+        protocol: StatefulProtocol,
+    },
     Notification {
         title: String,
         body: String,
     },
+    WatchResolved {
+        channel_name: String,
+        stream_url: String,
+    },
+    WatchFailed {
+        error: String,
+    },
+    AllRecordingsStopped,
     Error(String),
 }
 
@@ -62,10 +75,9 @@ pub struct AppState {
     pub quit_confirm: bool,
     pub status_message: String,
     pub show_help: bool,
-    pub first_run: bool,
-
     // Recording state
     pub recordings: HashMap<Uuid, RecordingJob>,
+    pub active_recording_channels: HashSet<String>, // channel_ids with active recordings
     pub selected_recording: usize,
     pub transcode_mode: bool,
 
@@ -92,6 +104,15 @@ pub struct AppState {
     pub log_scroll: usize,
     pub log_auto_scroll: bool,
     pub log_path: PathBuf,
+
+    // Sidebar display order: indices into app.channels in visual sort order
+    pub sidebar_order: Vec<usize>,
+
+    // Sidebar scroll offsets for autoscroll (channel index → text scroll offset)
+    pub scroll_offsets: HashMap<usize, usize>,
+    pub tick_counter: u64,
+    // Track previously selected channel for resetting scroll offset
+    prev_selected_channel: usize,
 }
 
 impl AppState {
@@ -110,8 +131,8 @@ impl AppState {
             quit_confirm: false,
             status_message: String::new(),
             show_help: false,
-            first_run,
             recordings: HashMap::new(),
+            active_recording_channels: HashSet::new(),
             selected_recording: 0,
             transcode_mode: false,
             watching_channel: None,
@@ -126,6 +147,10 @@ impl AppState {
             log_scroll: 0,
             log_auto_scroll: true,
             log_path: AppConfig::state_dir().join("streavo.log"),
+            sidebar_order: Vec::new(),
+            scroll_offsets: HashMap::new(),
+            tick_counter: 0,
+            prev_selected_channel: 0,
         }
     }
 
@@ -144,12 +169,82 @@ impl AppState {
         recs
     }
 
+    /// Groups finished+active recordings by day label ("Today", "Yesterday", "March 12, 2026"), newest first
+    pub fn recordings_by_day(&self) -> Vec<(String, Vec<&RecordingJob>)> {
+        use chrono::Local;
+
+        let mut recs = self.sorted_recordings();
+        // sorted_recordings already sorts newest first
+        if recs.is_empty() {
+            return Vec::new();
+        }
+
+        let today = Local::now().date_naive();
+        let yesterday = today - chrono::Duration::days(1);
+
+        let mut groups: Vec<(String, Vec<&RecordingJob>)> = Vec::new();
+
+        for rec in recs.drain(..) {
+            let rec_date = rec.started_at.with_timezone(&Local).date_naive();
+            let label = if rec_date == today {
+                "Today".to_string()
+            } else if rec_date == yesterday {
+                "Yesterday".to_string()
+            } else {
+                rec_date.format("%B %-d, %Y").to_string()
+            };
+
+            if let Some(last) = groups.last_mut() {
+                if last.0 == label {
+                    last.1.push(rec);
+                    continue;
+                }
+            }
+            groups.push((label, vec![rec]));
+        }
+
+        groups
+    }
+
+    /// Counts finished recordings where `watched == false` for a given channel
+    pub fn unwatched_count_for_channel(&self, channel_id: &str) -> usize {
+        self.recordings
+            .values()
+            .filter(|r| {
+                r.channel_id == channel_id
+                    && r.state == RecordingState::Finished
+                    && !r.watched
+            })
+            .count()
+    }
+
     pub fn handle_event(&mut self, event: AppEvent) -> Option<AppAction> {
         match event {
             AppEvent::Key(key) => return self.handle_key(key),
             AppEvent::Resize(_, _) => {}
-            AppEvent::Tick => {}
+            AppEvent::Tick => {
+                self.tick_counter = self.tick_counter.wrapping_add(1);
+                // Reset scroll offset when selection changes
+                if self.selected_channel != self.prev_selected_channel {
+                    self.scroll_offsets.remove(&self.prev_selected_channel);
+                    self.prev_selected_channel = self.selected_channel;
+                }
+                // Autoscroll stream title for selected live channel in sidebar
+                if self.active_pane == ActivePane::Sidebar {
+                    if let Some(ch) = self.channels.get(self.selected_channel) {
+                        if ch.is_live && ch.stream_title.is_some() {
+                            if self.tick_counter % 6 == 0 {
+                                let offset = self.scroll_offsets.entry(self.selected_channel).or_insert(0);
+                                *offset += 1;
+                            }
+                        }
+                    }
+                }
+            }
             AppEvent::ChannelsUpdated(channels) => {
+                // Remember currently selected channel by ID
+                let prev_selected_id = self.channels.get(self.selected_channel).map(|ch| ch.id.clone());
+
                 // Preserve auto_record settings from config
                 let mut updated = channels;
                 for ch in &mut updated {
@@ -158,7 +253,15 @@ impl AppState {
                     });
                 }
                 self.channels = updated;
-                if self.selected_channel >= self.channels.len() {
+
+                // Restore selection by ID, fall back to clamping
+                if let Some(ref prev_id) = prev_selected_id {
+                    if let Some(new_idx) = self.channels.iter().position(|ch| &ch.id == prev_id) {
+                        self.selected_channel = new_idx;
+                    } else if self.selected_channel >= self.channels.len() {
+                        self.selected_channel = self.channels.len().saturating_sub(1);
+                    }
+                } else if self.selected_channel >= self.channels.len() {
                     self.selected_channel = self.channels.len().saturating_sub(1);
                 }
             }
@@ -178,8 +281,11 @@ impl AppState {
             AppEvent::StreamUrlResolved { channel_id, .. } => {
                 self.status_message = format!("Stream URL resolved for {channel_id}");
             }
-            AppEvent::RecordingStarted { .. } => {
-                self.status_message = "Recording started".to_string();
+            AppEvent::RecordingStarted { job } => {
+                self.status_message = format!("Recording started: {}", job.channel_name);
+                // Manager is single source of truth — always register its job
+                self.recordings.insert(job.id, job);
+                self.rebuild_active_channels();
             }
             AppEvent::RecordingProgress {
                 job_id,
@@ -198,23 +304,32 @@ impl AppState {
                         job.state = RecordingState::Finished;
                     }
                 }
+                self.rebuild_active_channels();
                 let active = self.active_recording_count();
                 self.status_message = format!("Recording finished ({active} active)");
             }
             AppEvent::ThumbnailReady { channel_id, path } => {
-                self.thumbnail_cache.insert(channel_id.clone(), path.clone());
-                // Load into protocol for rendering
-                if let Some(ref mut picker) = self.picker {
-                    if let Ok(img) = image::ImageReader::open(&path)
-                        .and_then(|r| r.decode().map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)))
-                    {
-                        let proto = picker.new_resize_protocol(img);
-                        self.thumbnail_protocols.insert(channel_id, proto);
-                    }
-                }
+                self.thumbnail_cache.insert(channel_id.clone(), path);
+            }
+            AppEvent::ThumbnailDecoded { channel_id, protocol } => {
+                self.thumbnail_protocols.insert(channel_id, protocol);
             }
             AppEvent::Notification { title, body } => {
                 return Some(AppAction::Notify { title, body });
+            }
+            AppEvent::WatchResolved { channel_name, stream_url } => {
+                self.watching_channel = Some(channel_name.clone());
+                return Some(AppAction::LaunchMpv {
+                    channel_name,
+                    url: stream_url,
+                });
+            }
+            AppEvent::WatchFailed { error } => {
+                self.status_message = format!("Watch failed: {error}");
+            }
+            AppEvent::AllRecordingsStopped => {
+                // All recordings have been stopped — safe to quit now
+                self.should_quit = true;
             }
             AppEvent::Error(msg) => {
                 self.status_message = format!("Error: {msg}");
@@ -234,11 +349,12 @@ impl AppState {
         if self.quit_confirm {
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    // Stop all recordings then quit
+                    // Stop all recordings — quit will happen when AllRecordingsStopped arrives
                     if let Some(ref tx) = self.recording_tx {
                         let _ = tx.send(RecordingCommand::StopAll);
                     }
-                    self.should_quit = true;
+                    self.status_message = "Stopping recordings...".to_string();
+                    self.quit_confirm = false;
                     return None;
                 }
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
@@ -300,17 +416,22 @@ impl AppState {
 
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
-                if !self.channels.is_empty() {
-                    self.selected_channel = (self.selected_channel + 1) % self.channels.len();
+                if !self.sidebar_order.is_empty() {
+                    // Navigate in sidebar display order
+                    let cur_pos = self.sidebar_order.iter().position(|&i| i == self.selected_channel).unwrap_or(0);
+                    let next_pos = (cur_pos + 1) % self.sidebar_order.len();
+                    self.selected_channel = self.sidebar_order[next_pos];
                 }
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                if !self.channels.is_empty() {
-                    self.selected_channel = if self.selected_channel == 0 {
-                        self.channels.len() - 1
+                if !self.sidebar_order.is_empty() {
+                    let cur_pos = self.sidebar_order.iter().position(|&i| i == self.selected_channel).unwrap_or(0);
+                    let next_pos = if cur_pos == 0 {
+                        self.sidebar_order.len() - 1
                     } else {
-                        self.selected_channel - 1
+                        cur_pos - 1
                     };
+                    self.selected_channel = self.sidebar_order[next_pos];
                 }
             }
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
@@ -321,7 +442,7 @@ impl AppState {
             KeyCode::Char('L') => {
                 self.active_pane = ActivePane::RecordingList;
             }
-            KeyCode::Char('s') => {
+            KeyCode::Char('s') | KeyCode::Char('C') => {
                 self.active_pane = ActivePane::Settings;
             }
             _ => {}
@@ -358,6 +479,11 @@ impl AppState {
                 if let Some(ch) = self.selected_channel() {
                     if !ch.is_live {
                         self.status_message = "Channel is not live".to_string();
+                        return None;
+                    }
+                    // Check if already recording this channel
+                    if self.is_channel_recording(&ch.id) {
+                        self.status_message = format!("Already recording {}", ch.display_name);
                         return None;
                     }
                     let ch = ch.clone();
@@ -437,6 +563,11 @@ impl AppState {
         let recordings = self.sorted_recordings();
         let count = recordings.len();
 
+        // Clamp selection to valid range
+        if count > 0 {
+            self.selected_recording = self.selected_recording.min(count - 1);
+        }
+
         match key.code {
             KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
                 self.active_pane = ActivePane::Sidebar;
@@ -475,9 +606,13 @@ impl AppState {
                 let recs = self.sorted_recordings();
                 if let Some(rec) = recs.get(self.selected_recording) {
                     if rec.state == RecordingState::Finished {
-                        return Some(AppAction::PlayFile {
-                            path: rec.output_path.clone(),
-                        });
+                        let job_id = rec.id;
+                        let path = rec.output_path.clone();
+                        // Mark as watched
+                        if let Some(job) = self.recordings.get_mut(&job_id) {
+                            job.watched = true;
+                        }
+                        return Some(AppAction::PlayFile { path });
                     }
                 }
             }
@@ -492,16 +627,17 @@ impl AppState {
     ) -> Option<AppAction> {
         use crossterm::event::KeyCode;
 
+        const SETTINGS_COUNT: usize = 5;
         match key.code {
             KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
                 self.active_pane = ActivePane::Sidebar;
             }
             KeyCode::Char('j') | KeyCode::Down => {
-                self.settings_selected = (self.settings_selected + 1) % 5;
+                self.settings_selected = (self.settings_selected + 1) % SETTINGS_COUNT;
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.settings_selected = if self.settings_selected == 0 {
-                    4
+                    SETTINGS_COUNT - 1
                 } else {
                     self.settings_selected - 1
                 };
@@ -576,8 +712,19 @@ impl AppState {
         self.channels.get(self.selected_channel)
     }
 
-    pub fn register_recording(&mut self, job: RecordingJob) {
-        self.recordings.insert(job.id, job);
+    /// Rebuild the set of channel_ids with active recordings
+    fn rebuild_active_channels(&mut self) {
+        self.active_recording_channels = self
+            .recordings
+            .values()
+            .filter(|r| matches!(r.state, RecordingState::Recording | RecordingState::ResolvingUrl))
+            .map(|r| r.channel_id.clone())
+            .collect();
+    }
+
+    /// Check if a channel has an active recording
+    pub fn is_channel_recording(&self, channel_id: &str) -> bool {
+        self.active_recording_channels.contains(channel_id)
     }
 }
 
@@ -592,6 +739,10 @@ pub enum AppAction {
     Watch {
         channel_name: String,
         platform: PlatformKind,
+    },
+    LaunchMpv {
+        channel_name: String,
+        url: String,
     },
     PlayFile {
         path: PathBuf,

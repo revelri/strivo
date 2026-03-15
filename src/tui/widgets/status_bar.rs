@@ -1,64 +1,87 @@
 use ratatui::{
     Frame,
     layout::Rect,
+    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
 };
 
-use crate::app::AppState;
+use crate::app::{ActivePane, AppState};
 use crate::tui::theme::Theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
-    let twitch_status = if app.twitch_connected {
-        Span::styled("● Twitch", Theme::status_live())
+    let bar_style = Theme::hotkey_bar();
+    let key_style = Theme::hotkey_key();
+
+    let mut spans: Vec<Span> = Vec::new();
+    spans.push(Span::styled(" ", bar_style));
+
+    // Context-sensitive buttons
+    match app.active_pane {
+        ActivePane::Detail => {
+            push_button(&mut spans, "Record", "r", bar_style, key_style);
+            push_button(&mut spans, "Watch", "w", bar_style, key_style);
+        }
+        ActivePane::RecordingList => {
+            push_button(&mut spans, "Stop", "s", bar_style, key_style);
+            push_button(&mut spans, "Play", "p", bar_style, key_style);
+        }
+        _ => {}
+    }
+
+    // Always-visible buttons
+    push_button(&mut spans, "Config", "C", bar_style, key_style);
+    push_button(&mut spans, "Help", "?", bar_style, key_style);
+    push_button(&mut spans, "Recordings", "L", bar_style, key_style);
+    push_button(&mut spans, "Log", "F", bar_style, key_style);
+    push_button(&mut spans, "Quit", "q", bar_style, key_style);
+
+    // Fill remaining space with background
+    // Calculate used width
+    let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
+    let total_width = area.width as usize;
+
+    // Connection status on far right: "● TW ● YT"
+    let tw_indicator = if app.twitch_connected {
+        Span::styled("● ", Style::new().fg(Theme::GREEN).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
     } else if app.config.twitch.is_some() {
-        Span::styled("○ Twitch", Style::new().fg(Theme::YELLOW))
+        Span::styled("○ ", Style::new().fg(Theme::YELLOW).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
     } else {
-        Span::styled("○ Twitch", Theme::status_offline())
+        Span::styled("○ ", Style::new().fg(Theme::GRAY).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
     };
-
-    let youtube_status = if app.youtube_connected {
-        Span::styled("● YouTube", Theme::status_live())
+    let tw_label = Span::styled("TW ", bar_style);
+    let yt_indicator = if app.youtube_connected {
+        Span::styled("● ", Style::new().fg(Theme::GREEN).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
     } else if app.config.youtube.is_some() {
-        Span::styled("○ YouTube", Style::new().fg(Theme::YELLOW))
+        Span::styled("○ ", Style::new().fg(Theme::YELLOW).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
     } else {
-        Span::styled("○ YouTube", Theme::status_offline())
+        Span::styled("○ ", Style::new().fg(Theme::GRAY).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
     };
+    let yt_label = Span::styled("YT", bar_style);
 
-    let active = app.active_recording_count();
-    let rec_style = if active > 0 {
-        Theme::status_recording()
-    } else {
-        Theme::status_bar()
-    };
-    let recording_count = Span::styled(
-        format!("{active} Rec"),
-        rec_style,
-    );
+    let right_width = 10; // "● TW ● YT" roughly
+    let pad = total_width.saturating_sub(used + right_width);
+    spans.push(Span::styled(" ".repeat(pad), bar_style));
+    spans.push(tw_indicator);
+    spans.push(tw_label);
+    spans.push(yt_indicator);
+    spans.push(yt_label);
 
-    let help_hint = Span::styled("?", Theme::key_hint());
-
-    let status_msg = if app.status_message.is_empty() {
-        Span::raw("")
-    } else {
-        Span::styled(&app.status_message, Theme::status_bar())
-    };
-
-    let line = Line::from(vec![
-        Span::raw(" "),
-        twitch_status,
-        Span::raw(" │ "),
-        youtube_status,
-        Span::raw(" │ "),
-        recording_count,
-        Span::raw(" │ "),
-        help_hint,
-        Span::raw("  "),
-        status_msg,
-    ]);
-
-    let bar = Paragraph::new(line).style(Theme::status_bar());
+    let line = Line::from(spans);
+    let bar = Paragraph::new(line).style(bar_style);
     frame.render_widget(bar, area);
 }
 
-use ratatui::style::Style;
+fn push_button<'a>(
+    spans: &mut Vec<Span<'a>>,
+    label: &'a str,
+    key: &'a str,
+    bar_style: Style,
+    key_style: Style,
+) {
+    spans.push(Span::styled(label, bar_style));
+    spans.push(Span::styled(" [", bar_style));
+    spans.push(Span::styled(key, key_style));
+    spans.push(Span::styled("]", bar_style));
+    spans.push(Span::styled(" ", bar_style)); // 1-char gap
+}

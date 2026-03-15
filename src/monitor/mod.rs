@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
+use tokio_util::sync::CancellationToken;
 
 use crate::app::AppEvent;
 use crate::config::AppConfig;
@@ -14,6 +15,7 @@ pub struct ChannelMonitor {
     config: AppConfig,
     event_tx: mpsc::UnboundedSender<AppEvent>,
     recording_tx: mpsc::UnboundedSender<RecordingCommand>,
+    cancel: CancellationToken,
     /// Track which channels were previously live for went-live/went-offline detection
     prev_live: HashMap<String, bool>,
     /// Auto-record channels we've already triggered for (avoid duplicate starts)
@@ -26,12 +28,14 @@ impl ChannelMonitor {
         config: AppConfig,
         event_tx: mpsc::UnboundedSender<AppEvent>,
         recording_tx: mpsc::UnboundedSender<RecordingCommand>,
+        cancel: CancellationToken,
     ) -> Self {
         Self {
             platforms,
             config,
             event_tx,
             recording_tx,
+            cancel,
             prev_live: HashMap::new(),
             auto_recorded: HashMap::new(),
         }
@@ -46,11 +50,17 @@ impl ChannelMonitor {
         tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
         loop {
-            interval.tick().await;
-
-            if let Err(e) = self.poll_all().await {
-                tracing::error!("Monitor poll error: {e}");
-                let _ = self.event_tx.send(AppEvent::Error(format!("Poll error: {e}")));
+            tokio::select! {
+                _ = interval.tick() => {
+                    if let Err(e) = self.poll_all().await {
+                        tracing::error!("Monitor poll error: {e}");
+                        let _ = self.event_tx.send(AppEvent::Error(format!("Poll error: {e}")));
+                    }
+                }
+                _ = self.cancel.cancelled() => {
+                    tracing::info!("Monitor shutting down");
+                    break;
+                }
             }
         }
     }
@@ -59,12 +69,25 @@ impl ChannelMonitor {
         let mut all_channels: Vec<ChannelEntry> = Vec::new();
 
         for platform in &self.platforms {
-            let plat = platform.read().await;
-            match plat.fetch_followed_channels().await {
+            // Clone necessary data before releasing the lock to avoid holding
+            // it across network calls
+            let (kind, channels_result) = {
+                let plat = platform.read().await;
+                let kind = plat.kind();
+                let result = plat.fetch_followed_channels().await;
+                (kind, result)
+            };
+
+            match channels_result {
                 Ok(mut channels) => {
-                    // Check live status
+                    // Check live status without holding the platform lock
                     let ids: Vec<String> = channels.iter().map(|c| c.id.clone()).collect();
-                    match plat.check_live_status(&ids).await {
+                    let live_result = {
+                        let plat = platform.read().await;
+                        plat.check_live_status(&ids).await
+                    };
+
+                    match live_result {
                         Ok(live_channels) => {
                             let live_map: HashMap<String, ChannelEntry> = live_channels
                                 .into_iter()
@@ -81,15 +104,16 @@ impl ChannelMonitor {
                                     ch.thumbnail_url = live.thumbnail_url.clone();
                                 }
 
-                                // Apply auto-record setting from config
+                                // Check auto-record from the channel data directly
+                                // (reflects fresh config state from TUI saves)
                                 ch.auto_record = self.config.auto_record_channels.iter().any(|a| {
                                     a.channel_id == ch.id
-                                        && a.platform == plat.kind().to_string()
+                                        && a.platform == kind.to_string()
                                 });
                             }
                         }
                         Err(e) => {
-                            tracing::warn!("{}: live status check failed: {e}", plat.kind());
+                            tracing::warn!("{kind}: live status check failed: {e}");
                         }
                     }
 
@@ -99,7 +123,7 @@ impl ChannelMonitor {
                         if ch.is_live && !was_live {
                             let _ = self.event_tx.send(AppEvent::ChannelWentLive(ch.clone()));
 
-                            // Auto-record trigger
+                            // Auto-record trigger: use ch.auto_record from fresh data
                             if ch.auto_record && !self.auto_recorded.get(&ch.id).copied().unwrap_or(false) {
                                 self.auto_recorded.insert(ch.id.clone(), true);
                                 let cookies_path = self.get_cookies_path(ch.platform);
@@ -109,6 +133,7 @@ impl ChannelMonitor {
                                     platform: ch.platform,
                                     transcode: self.config.recording.transcode,
                                     cookies_path,
+                                    stream_title: ch.stream_title.clone(),
                                 });
                             }
                         } else if !ch.is_live && was_live {
@@ -121,7 +146,7 @@ impl ChannelMonitor {
                     all_channels.extend(channels);
                 }
                 Err(e) => {
-                    tracing::warn!("{}: fetch channels failed: {e}", plat.kind());
+                    tracing::warn!("{kind}: fetch channels failed: {e}");
                 }
             }
         }
@@ -137,21 +162,14 @@ impl ChannelMonitor {
 
         let _ = self.event_tx.send(AppEvent::ChannelsUpdated(all_channels));
 
-        // Fetch thumbnails for live channels
-        self.fetch_thumbnails().await;
-
         Ok(())
     }
 
-    async fn fetch_thumbnails(&self) {
-        // Thumbnail fetching handled via events — send thumbnail URLs for the TUI to cache
-        // This is done in the poll_all by including thumbnail_url in ChannelEntry
-    }
-
     fn get_cookies_path(&self, platform: PlatformKind) -> Option<PathBuf> {
+        // Reload config to get fresh auto_record and cookies settings
+        let cfg = AppConfig::load(self.config.config_path.as_deref()).unwrap_or(self.config.clone());
         match platform {
-            PlatformKind::YouTube => self
-                .config
+            PlatformKind::YouTube => cfg
                 .youtube
                 .as_ref()
                 .and_then(|y| y.cookies_path.clone()),

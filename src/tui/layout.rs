@@ -14,7 +14,7 @@ pub fn render(frame: &mut Frame, app: &mut AppState) {
     .areas(frame.area());
 
     let [sidebar_area, detail_area] = Layout::horizontal([
-        Constraint::Length(22),
+        Constraint::Length(30),
         Constraint::Fill(1),
     ])
     .areas(main_area);
@@ -24,14 +24,17 @@ pub fn render(frame: &mut Frame, app: &mut AppState) {
 
     // Main panel depends on active pane
     match app.active_pane {
-        ActivePane::RecordingList => recording_list::render(frame, detail_area, app),
+        ActivePane::Detail => channel_detail::render(frame, detail_area, app),
         ActivePane::Settings => settings::render(frame, detail_area, app),
         ActivePane::Log => {
-            // Live-refresh log on every frame when in log view
-            app.refresh_log();
+            // Rate-limit log refresh (~every 30 ticks = ~1s at 30fps)
+            if app.tick_counter % 30 == 0 {
+                app.refresh_log();
+            }
             log_viewer::render(frame, detail_area, app);
         }
-        _ => channel_detail::render(frame, detail_area, app),
+        // Default: show recording list (Sidebar, RecordingList, or anything else)
+        _ => recording_list::render(frame, detail_area, app),
     }
 
     // Status bar

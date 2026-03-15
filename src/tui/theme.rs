@@ -2,25 +2,30 @@ use ratatui::style::{Color, Modifier, Style};
 
 pub struct Theme;
 
+#[allow(dead_code)]
 impl Theme {
-    // Base colors
-    pub const BG: Color = Color::Rgb(24, 24, 32);
-    pub const FG: Color = Color::Rgb(205, 214, 244);
-    pub const SURFACE: Color = Color::Rgb(30, 30, 46);
-    pub const OVERLAY: Color = Color::Rgb(49, 50, 68);
+    // Base colors (Dracula Neon)
+    pub const BG: Color = Color::Rgb(40, 42, 54);
+    pub const FG: Color = Color::Rgb(248, 248, 242);
+    pub const SURFACE: Color = Color::Rgb(48, 50, 64);
+    pub const OVERLAY: Color = Color::Rgb(68, 71, 90);
 
     // Accent colors
-    pub const PURPLE: Color = Color::Rgb(137, 180, 250);
-    pub const GREEN: Color = Color::Rgb(166, 227, 161);
-    pub const RED: Color = Color::Rgb(243, 139, 168);
-    pub const YELLOW: Color = Color::Rgb(249, 226, 175);
-    pub const BLUE: Color = Color::Rgb(116, 199, 236);
-    pub const GRAY: Color = Color::Rgb(88, 91, 112);
-    pub const DIM: Color = Color::Rgb(69, 71, 90);
+    pub const PURPLE: Color = Color::Rgb(189, 147, 249);
+    pub const GREEN: Color = Color::Rgb(80, 250, 123);
+    pub const RED: Color = Color::Rgb(255, 85, 85);
+    pub const YELLOW: Color = Color::Rgb(241, 250, 140);
+    pub const BLUE: Color = Color::Rgb(139, 233, 253);
+    pub const GRAY: Color = Color::Rgb(98, 114, 164);
+    pub const DIM: Color = Color::Rgb(68, 71, 90);
+    pub const PINK: Color = Color::Rgb(255, 121, 198);
 
     // Platform colors
     pub const TWITCH: Color = Color::Rgb(145, 70, 255);
     pub const YOUTUBE: Color = Color::Rgb(255, 0, 0);
+
+    // Hotkey bar background
+    const HOTKEY_BG: Color = Color::Rgb(58, 60, 78);
 
     pub fn title() -> Style {
         Style::new().fg(Self::PURPLE).add_modifier(Modifier::BOLD)
@@ -60,5 +65,28 @@ impl Theme {
 
     pub fn error() -> Style {
         Style::new().fg(Self::RED)
+    }
+
+    pub fn hotkey_bar() -> Style {
+        Style::new().fg(Self::FG).bg(Self::HOTKEY_BG)
+    }
+
+    pub fn hotkey_key() -> Style {
+        Style::new()
+            .fg(Self::YELLOW)
+            .bg(Self::HOTKEY_BG)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn day_header() -> Style {
+        Style::new()
+            .fg(Self::PURPLE)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    pub fn stream_subtitle() -> Style {
+        Style::new()
+            .fg(Self::GRAY)
+            .add_modifier(Modifier::ITALIC)
     }
 }

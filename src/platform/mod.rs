@@ -34,6 +34,7 @@ pub struct ChannelEntry {
     pub auto_record: bool,
 }
 
+#[allow(dead_code)]
 #[async_trait::async_trait]
 pub trait Platform: Send + Sync {
     fn kind(&self) -> PlatformKind;

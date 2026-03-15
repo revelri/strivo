@@ -3,11 +3,10 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, BorderType, Borders, Paragraph},
 };
 
 use crate::app::{ActivePane, AppState};
-use crate::recording::job::RecordingState;
 use crate::tui::theme::Theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
@@ -20,6 +19,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(border_style)
         .title(" Channel Detail ")
         .title_style(Theme::title());
@@ -35,10 +35,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let [info_area, thumbnail_area, keybind_area] = Layout::vertical([
+    let [info_area, thumbnail_area] = Layout::vertical([
         Constraint::Length(7),
         Constraint::Fill(1),
-        Constraint::Length(2),
     ])
     .areas(inner);
 
@@ -73,10 +72,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
     };
 
     // Check if currently recording
-    let is_recording = app.recordings.values().any(|r| {
-        r.channel_id == channel.id
-            && matches!(r.state, RecordingState::Recording | RecordingState::ResolvingUrl)
-    });
+    let is_recording = app.is_channel_recording(&channel.id);
 
     let rec_indicator = if is_recording {
         Span::styled(
@@ -138,24 +134,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
     ];
 
     frame.render_widget(Paragraph::new(info_lines), info_area);
-
-    // Keybind hints
-    let transcode_label = if app.transcode_mode {
-        "Transcode: ON"
-    } else {
-        "Transcode: OFF"
-    };
-    let keybinds = Line::from(vec![
-        Span::styled("[r]", Theme::key_hint()),
-        Span::raw(" Record  "),
-        Span::styled("[w]", Theme::key_hint()),
-        Span::raw(" Watch  "),
-        Span::styled("[a]", Theme::key_hint()),
-        Span::raw(" Auto-record  "),
-        Span::styled("[t]", Theme::key_hint()),
-        Span::raw(format!(" {transcode_label}")),
-    ]);
-    frame.render_widget(Paragraph::new(keybinds), keybind_area);
 
     // Render thumbnail if available
     let channel_id = channel.id.clone();

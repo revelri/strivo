@@ -3,7 +3,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
 
 use crate::tui::theme::Theme;
@@ -27,6 +27,7 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Theme::border_focused())
         .title(" Help ")
         .title_style(Theme::title());
@@ -84,6 +85,7 @@ pub fn render_confirm(frame: &mut Frame, area: Rect, message: &str) {
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(Theme::YELLOW))
         .title(" Confirm ")
         .title_style(Style::new().fg(Theme::YELLOW).add_modifier(Modifier::BOLD));

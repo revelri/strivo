@@ -20,6 +20,7 @@ struct DeviceCodeResponse {
     interval: u64,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
     access_token: String,
@@ -58,20 +59,11 @@ struct ResourceId {
 }
 
 #[derive(Debug, Deserialize)]
-struct RssFeed {
-    entries: Vec<RssEntry>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RssEntry {
-    video_id: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct VideoListResponse {
     items: Option<Vec<VideoItem>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct VideoItem {
     id: Option<String>,
@@ -80,6 +72,7 @@ struct VideoItem {
     live_streaming_details: Option<LiveStreamingDetails>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct VideoSnippet {
     title: Option<String>,
@@ -113,6 +106,7 @@ struct LiveStreamingDetails {
     active_live_chat_id: Option<String>,
 }
 
+#[allow(dead_code)]
 pub struct YouTubePlatform {
     client: Client,
     client_id: String,
@@ -123,6 +117,7 @@ pub struct YouTubePlatform {
     pub pending_device_code: Arc<RwLock<Option<DeviceCodeInfo>>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DeviceCodeInfo {
     pub user_code: String,
@@ -296,7 +291,8 @@ impl YouTubePlatform {
         if resp.status().as_u16() == 401 {
             drop(resp);
             self.do_refresh_token().await?;
-            let token = self.access_token.read().await.clone().unwrap();
+            let token = self.access_token.read().await.clone()
+                .ok_or_else(|| anyhow::anyhow!("No access token after refresh"))?;
             let resp = self
                 .client
                 .get(url)
@@ -401,10 +397,12 @@ impl YouTubePlatform {
         Ok(live_channels)
     }
 
+    #[allow(dead_code)]
     pub fn cookies_path(&self) -> Option<&std::path::Path> {
         self.cookies_path.as_deref()
     }
 
+    #[allow(dead_code)]
     pub async fn is_authenticated(&self) -> bool {
         self.access_token.read().await.is_some()
     }
