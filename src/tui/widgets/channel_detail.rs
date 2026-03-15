@@ -7,9 +7,10 @@ use ratatui::{
 };
 
 use crate::app::{ActivePane, AppState};
+use crate::recording::job::RecordingState;
 use crate::tui::theme::Theme;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
+pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
     let focused = app.active_pane == ActivePane::Detail;
     let border_style = if focused {
         Theme::border_focused()
@@ -34,8 +35,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    let [info_area, _thumbnail_area, keybind_area] = Layout::vertical([
-        Constraint::Length(5),
+    let [info_area, thumbnail_area, keybind_area] = Layout::vertical([
+        Constraint::Length(7),
         Constraint::Fill(1),
         Constraint::Length(2),
     ])
@@ -60,9 +61,39 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
         .unwrap_or_default();
 
     let status_indicator = if channel.is_live {
-        Span::styled(" LIVE ", Style::new().fg(Theme::BG).bg(Theme::GREEN).add_modifier(Modifier::BOLD))
+        Span::styled(
+            " LIVE ",
+            Style::new()
+                .fg(Theme::BG)
+                .bg(Theme::GREEN)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
         Span::styled(" OFFLINE ", Style::new().fg(Theme::FG).bg(Theme::DIM))
+    };
+
+    // Check if currently recording
+    let is_recording = app.recordings.values().any(|r| {
+        r.channel_id == channel.id
+            && matches!(r.state, RecordingState::Recording | RecordingState::ResolvingUrl)
+    });
+
+    let rec_indicator = if is_recording {
+        Span::styled(
+            " REC ",
+            Style::new()
+                .fg(Theme::BG)
+                .bg(Theme::RED)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::raw("")
+    };
+
+    let auto_indicator = if channel.auto_record {
+        Span::styled(" AUTO ", Style::new().fg(Theme::BG).bg(Theme::YELLOW))
+    } else {
+        Span::raw("")
     };
 
     let info_lines = vec![
@@ -73,24 +104,47 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
             ),
             Span::raw("  "),
             status_indicator,
+            Span::raw(" "),
+            rec_indicator,
+            Span::raw(" "),
+            auto_indicator,
         ]),
+        Line::raw(""),
         Line::styled(title, Style::new().fg(Theme::FG)),
         Line::from(vec![
             Span::styled(category, Style::new().fg(Theme::BLUE)),
             Span::styled(
-                if !viewers.is_empty() { format!(" · {viewers}") } else { String::new() },
+                if !viewers.is_empty() {
+                    format!(" · {viewers}")
+                } else {
+                    String::new()
+                },
                 Style::new().fg(Theme::GRAY),
             ),
             Span::styled(
-                if !uptime.is_empty() { format!(" · {uptime}") } else { String::new() },
+                if !uptime.is_empty() {
+                    format!(" · {uptime}")
+                } else {
+                    String::new()
+                },
                 Style::new().fg(Theme::GRAY),
             ),
         ]),
+        Line::raw(""),
+        Line::styled(
+            format!("Platform: {}", channel.platform),
+            Style::new().fg(Theme::GRAY),
+        ),
     ];
 
     frame.render_widget(Paragraph::new(info_lines), info_area);
 
     // Keybind hints
+    let transcode_label = if app.transcode_mode {
+        "Transcode: ON"
+    } else {
+        "Transcode: OFF"
+    };
     let keybinds = Line::from(vec![
         Span::styled("[r]", Theme::key_hint()),
         Span::raw(" Record  "),
@@ -99,9 +153,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
         Span::styled("[a]", Theme::key_hint()),
         Span::raw(" Auto-record  "),
         Span::styled("[t]", Theme::key_hint()),
-        Span::raw(" Transcode"),
+        Span::raw(format!(" {transcode_label}")),
     ]);
     frame.render_widget(Paragraph::new(keybinds), keybind_area);
+
+    // Render thumbnail if available
+    let channel_id = channel.id.clone();
+    if let Some(proto) = app.thumbnail_protocols.get_mut(&channel_id) {
+        let image_widget = ratatui_image::StatefulImage::default();
+        frame.render_stateful_widget(image_widget, thumbnail_area, proto);
+    }
 }
 
 fn format_count(n: u64) -> String {

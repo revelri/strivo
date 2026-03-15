@@ -8,6 +8,7 @@ use ratatui::{
 
 use crate::app::{ActivePane, AppState};
 use crate::platform::PlatformKind;
+use crate::recording::job::RecordingState;
 use crate::tui::theme::Theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
@@ -36,7 +37,6 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
     let mut current_platform: Option<PlatformKind> = None;
 
     for channel in &app.channels {
-        // Add platform header when platform changes
         if current_platform != Some(channel.platform) {
             if current_platform.is_some() {
                 items.push(ListItem::new(Line::raw("")));
@@ -45,25 +45,43 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
                 PlatformKind::Twitch => ("[T] Twitch", Theme::TWITCH),
                 PlatformKind::YouTube => ("[Y] YouTube", Theme::YOUTUBE),
             };
-            items.push(ListItem::new(Line::from(vec![
-                Span::styled(label, Style::new().fg(color).add_modifier(Modifier::BOLD)),
-            ])));
-            items.push(ListItem::new(Line::styled("──────────────────", Style::new().fg(Theme::DIM))));
+            items.push(ListItem::new(Line::from(vec![Span::styled(
+                label,
+                Style::new().fg(color).add_modifier(Modifier::BOLD),
+            )])));
+            items.push(ListItem::new(Line::styled(
+                "──────────────────",
+                Style::new().fg(Theme::DIM),
+            )));
             current_platform = Some(channel.platform);
         }
 
-        let status_dot = if channel.is_live {
+        // Check if recording this channel
+        let is_recording = app.recordings.values().any(|r| {
+            r.channel_id == channel.id
+                && matches!(
+                    r.state,
+                    RecordingState::Recording | RecordingState::ResolvingUrl
+                )
+        });
+
+        let status_dot = if is_recording {
+            Span::styled("● ", Theme::status_recording())
+        } else if channel.is_live {
             Span::styled("● ", Theme::status_live())
         } else {
             Span::styled("○ ", Theme::status_offline())
         };
 
-        let name = Span::styled(
-            &channel.display_name,
-            Style::new().fg(Theme::FG),
-        );
+        let name = Span::styled(&channel.display_name, Style::new().fg(Theme::FG));
 
-        items.push(ListItem::new(Line::from(vec![status_dot, name])));
+        let auto_mark = if channel.auto_record {
+            Span::styled(" ⏺", Style::new().fg(Theme::YELLOW))
+        } else {
+            Span::raw("")
+        };
+
+        items.push(ListItem::new(Line::from(vec![status_dot, name, auto_mark])));
     }
 
     let list = List::new(items)
@@ -71,16 +89,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
         .highlight_style(Theme::selected());
 
     let mut state = ListState::default();
-    // Map app's selected_channel index to the actual list index (accounting for headers)
     if !app.channels.is_empty() {
         let mut list_idx = 0;
         let mut current_plat: Option<PlatformKind> = None;
         for (i, ch) in app.channels.iter().enumerate() {
             if current_plat != Some(ch.platform) {
                 if current_plat.is_some() {
-                    list_idx += 1; // empty line
+                    list_idx += 1;
                 }
-                list_idx += 2; // header + separator
+                list_idx += 2;
                 current_plat = Some(ch.platform);
             }
             if i == app.selected_channel {

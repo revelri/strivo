@@ -4,3 +4,4 @@ pub mod recording_list;
 pub mod status_bar;
 pub mod wizard;
 pub mod dialog;
+pub mod settings;

@@ -9,19 +9,32 @@ use crate::app::AppState;
 use crate::tui::theme::Theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
-    let twitch_status = if app.config.twitch.is_some() {
+    let twitch_status = if app.twitch_connected {
         Span::styled("● Twitch", Theme::status_live())
+    } else if app.config.twitch.is_some() {
+        Span::styled("○ Twitch", Style::new().fg(Theme::YELLOW))
     } else {
         Span::styled("○ Twitch", Theme::status_offline())
     };
 
-    let youtube_status = if app.config.youtube.is_some() {
+    let youtube_status = if app.youtube_connected {
         Span::styled("● YouTube", Theme::status_live())
+    } else if app.config.youtube.is_some() {
+        Span::styled("○ YouTube", Style::new().fg(Theme::YELLOW))
     } else {
         Span::styled("○ YouTube", Theme::status_offline())
     };
 
-    let recording_count = Span::styled("0 Recording", Theme::status_bar());
+    let active = app.active_recording_count();
+    let rec_style = if active > 0 {
+        Theme::status_recording()
+    } else {
+        Theme::status_bar()
+    };
+    let recording_count = Span::styled(
+        format!("{active} Rec"),
+        rec_style,
+    );
 
     let help_hint = Span::styled("?", Theme::key_hint());
 
@@ -47,3 +60,5 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
     let bar = Paragraph::new(line).style(Theme::status_bar());
     frame.render_widget(bar, area);
 }
+
+use ratatui::style::Style;
