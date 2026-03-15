@@ -5,3 +5,4 @@ pub mod status_bar;
 pub mod wizard;
 pub mod dialog;
 pub mod settings;
+pub mod log_viewer;

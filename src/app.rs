@@ -49,6 +49,7 @@ pub enum ActivePane {
     Detail,
     RecordingList,
     Settings,
+    Log,
     Wizard,
 }
 
@@ -85,6 +86,12 @@ pub struct AppState {
 
     // Settings edit state
     pub settings_selected: usize,
+
+    // Log viewer state
+    pub log_lines: Vec<String>,
+    pub log_scroll: usize,
+    pub log_auto_scroll: bool,
+    pub log_path: PathBuf,
 }
 
 impl AppState {
@@ -115,6 +122,10 @@ impl AppState {
             picker: Picker::from_query_stdio().ok(),
             recording_tx: None,
             settings_selected: 0,
+            log_lines: Vec::new(),
+            log_scroll: 0,
+            log_auto_scroll: true,
+            log_path: AppConfig::state_dir().join("streavo.log"),
         }
     }
 
@@ -263,6 +274,11 @@ impl AppState {
                 self.active_pane = ActivePane::Sidebar;
                 return None;
             }
+            KeyCode::Char('F') if self.active_pane != ActivePane::Wizard && self.active_pane != ActivePane::Log => {
+                self.refresh_log();
+                self.active_pane = ActivePane::Log;
+                return None;
+            }
             _ => {}
         }
 
@@ -271,6 +287,7 @@ impl AppState {
             ActivePane::Detail => self.handle_detail_key(key),
             ActivePane::RecordingList => self.handle_recording_list_key(key),
             ActivePane::Settings => self.handle_settings_key(key),
+            ActivePane::Log => self.handle_log_key(key),
             ActivePane::Wizard => None,
         }
     }
@@ -492,6 +509,67 @@ impl AppState {
             _ => {}
         }
         None
+    }
+
+    fn handle_log_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> Option<AppAction> {
+        use crossterm::event::KeyCode;
+
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
+                self.active_pane = ActivePane::Sidebar;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if self.log_scroll + 1 < self.log_lines.len() {
+                    self.log_scroll += 1;
+                    self.log_auto_scroll = false;
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.log_scroll = self.log_scroll.saturating_sub(1);
+                self.log_auto_scroll = false;
+            }
+            KeyCode::Char('G') => {
+                // Jump to bottom, re-enable auto-scroll
+                self.log_scroll = self.log_lines.len().saturating_sub(1);
+                self.log_auto_scroll = true;
+            }
+            KeyCode::Char('g') => {
+                // Jump to top
+                self.log_scroll = 0;
+                self.log_auto_scroll = false;
+            }
+            KeyCode::PageDown => {
+                self.log_scroll = (self.log_scroll + 30).min(
+                    self.log_lines.len().saturating_sub(1),
+                );
+                self.log_auto_scroll = false;
+            }
+            KeyCode::PageUp => {
+                self.log_scroll = self.log_scroll.saturating_sub(30);
+                self.log_auto_scroll = false;
+            }
+            KeyCode::Char('c') => {
+                // Clear log
+                std::fs::write(&self.log_path, "").ok();
+                self.log_lines.clear();
+                self.log_scroll = 0;
+                self.status_message = "Log cleared".to_string();
+            }
+            _ => {}
+        }
+        None
+    }
+
+    pub fn refresh_log(&mut self) {
+        if let Ok(content) = std::fs::read_to_string(&self.log_path) {
+            self.log_lines = content.lines().map(|l| l.to_string()).collect();
+            if self.log_auto_scroll {
+                self.log_scroll = self.log_lines.len().saturating_sub(1);
+            }
+        }
     }
 
     pub fn selected_channel(&self) -> Option<&ChannelEntry> {

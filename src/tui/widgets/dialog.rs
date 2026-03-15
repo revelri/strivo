@@ -44,6 +44,7 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
         ("t", "Toggle transcode mode"),
         ("s", "Settings"),
         ("L", "Recording list"),
+        ("F", "Log viewer"),
         ("q", "Quit"),
         ("?", "Toggle this help"),
     ];

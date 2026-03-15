@@ -4,7 +4,7 @@ use ratatui::{
 };
 
 use crate::app::{ActivePane, AppState};
-use crate::tui::widgets::{channel_detail, dialog, recording_list, settings, sidebar, status_bar, wizard};
+use crate::tui::widgets::{channel_detail, dialog, log_viewer, recording_list, settings, sidebar, status_bar, wizard};
 
 pub fn render(frame: &mut Frame, app: &mut AppState) {
     let [main_area, status_area] = Layout::vertical([
@@ -26,6 +26,11 @@ pub fn render(frame: &mut Frame, app: &mut AppState) {
     match app.active_pane {
         ActivePane::RecordingList => recording_list::render(frame, detail_area, app),
         ActivePane::Settings => settings::render(frame, detail_area, app),
+        ActivePane::Log => {
+            // Live-refresh log on every frame when in log view
+            app.refresh_log();
+            log_viewer::render(frame, detail_area, app);
+        }
         _ => channel_detail::render(frame, detail_area, app),
     }
 

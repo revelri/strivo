@@ -34,13 +34,22 @@ pub struct YouTubeConfig {
     pub cookies_path: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingConfig {
     #[serde(default)]
     pub transcode: bool,
 
     #[serde(default = "default_filename_template")]
     pub filename_template: String,
+}
+
+impl Default for RecordingConfig {
+    fn default() -> Self {
+        Self {
+            transcode: false,
+            filename_template: default_filename_template(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
