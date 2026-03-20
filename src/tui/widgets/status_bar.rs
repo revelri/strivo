@@ -13,6 +13,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
     let bar_style = Theme::hotkey_bar();
     let key_style = Theme::hotkey_key();
 
+    // If search input is active, render a search prompt instead of normal buttons
+    if app.search_active {
+        let search_bar = Line::from(vec![
+            Span::styled(" /", Style::new().fg(Theme::secondary()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg()))),
+            Span::styled(&app.search_query, Style::new().fg(Theme::fg()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg()))),
+            Span::styled("▌", Style::new().fg(Theme::primary()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg()))),
+            Span::styled(
+                format!("{:width$}", "", width = area.width.saturating_sub(3 + app.search_query.len() as u16) as usize),
+                bar_style,
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(search_bar).style(bar_style), area);
+        return;
+    }
+
     let mut spans: Vec<Span> = Vec::new();
     spans.push(Span::styled(" ", bar_style));
 
@@ -30,6 +45,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
     }
 
     // Always-visible buttons
+    push_button(&mut spans, "Search", "/", bar_style, key_style);
     push_button(&mut spans, "Config", "C", bar_style, key_style);
     push_button(&mut spans, "Help", "?", bar_style, key_style);
     push_button(&mut spans, "Recordings", "L", bar_style, key_style);
@@ -43,29 +59,43 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
 
     // Connection status on far right: "● TW ● YT"
     let tw_indicator = if app.twitch_connected {
-        Span::styled("● ", Style::new().fg(Theme::GREEN).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
+        Span::styled("● ", Style::new().fg(Theme::green()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg())))
     } else if app.config.twitch.is_some() {
-        Span::styled("○ ", Style::new().fg(Theme::YELLOW).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
+        Span::styled("○ ", Style::new().fg(Theme::secondary()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg())))
     } else {
-        Span::styled("○ ", Style::new().fg(Theme::GRAY).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
+        Span::styled("○ ", Style::new().fg(Theme::muted()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg())))
     };
     let tw_label = Span::styled("TW ", bar_style);
     let yt_indicator = if app.youtube_connected {
-        Span::styled("● ", Style::new().fg(Theme::GREEN).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
+        Span::styled("● ", Style::new().fg(Theme::green()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg())))
     } else if app.config.youtube.is_some() {
-        Span::styled("○ ", Style::new().fg(Theme::YELLOW).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
+        Span::styled("○ ", Style::new().fg(Theme::secondary()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg())))
     } else {
-        Span::styled("○ ", Style::new().fg(Theme::GRAY).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::BG)))
+        Span::styled("○ ", Style::new().fg(Theme::muted()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg())))
     };
-    let yt_label = Span::styled("YT", bar_style);
+    let yt_label = Span::styled("YT ", bar_style);
+    let pa_indicator = if app.patreon_connected {
+        Span::styled("● ", Style::new().fg(Theme::green()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg())))
+    } else if app.config.patreon.is_some() {
+        Span::styled("○ ", Style::new().fg(Theme::secondary()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg())))
+    } else {
+        Span::styled("", bar_style)
+    };
+    let pa_label = if app.config.patreon.is_some() {
+        Span::styled("PA", bar_style)
+    } else {
+        Span::styled("", bar_style)
+    };
 
-    let right_width = 10; // "● TW ● YT" roughly
+    let right_width = if app.config.patreon.is_some() { 15 } else { 10 };
     let pad = total_width.saturating_sub(used + right_width);
     spans.push(Span::styled(" ".repeat(pad), bar_style));
     spans.push(tw_indicator);
     spans.push(tw_label);
     spans.push(yt_indicator);
     spans.push(yt_label);
+    spans.push(pa_indicator);
+    spans.push(pa_label);
 
     let line = Line::from(spans);
     let bar = Paragraph::new(line).style(bar_style);
