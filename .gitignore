@@ -1,3 +1,6 @@
 /target
 .env
 .gstack/
+CLAUDE.md
+DESIGN.md
+TODOS.md
