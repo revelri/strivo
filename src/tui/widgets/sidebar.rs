@@ -28,48 +28,52 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
         Theme::border()
     };
 
+    let title = if !app.search_query.is_empty() {
+        format!(" Channels [/{query}] ", query = app.search_query)
+    } else if app.search_active {
+        " Channels [/] ".to_string()
+    } else {
+        " Channels ".to_string()
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
-        .title(" Channels ")
-        .title_style(Theme::title());
+        .title(title)
+        .title_style(if app.search_active || !app.search_query.is_empty() {
+            Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD)
+        } else {
+            Theme::title()
+        });
 
     if app.channels.is_empty() {
         let placeholder = List::new(vec![ListItem::new("  No channels")])
             .block(block)
-            .style(Style::new().fg(Theme::GRAY));
+            .style(Style::new().fg(Theme::muted()));
         frame.render_widget(placeholder, area);
         return;
     }
 
-    // Sort channels: group by platform, then within each group: recording > live > offline
+    // Use pre-computed sidebar_order from AppState (rebuilt when channels/recordings change)
     let mut twitch_indices: Vec<usize> = Vec::new();
     let mut youtube_indices: Vec<usize> = Vec::new();
+    let mut patreon_indices: Vec<usize> = Vec::new();
 
-    for (i, ch) in app.channels.iter().enumerate() {
-        match ch.platform {
+    for &i in &app.sidebar_order {
+        if i >= app.channels.len() {
+            continue;
+        }
+        // Apply search filter
+        if !app.channel_matches_filter(i) {
+            continue;
+        }
+        match app.channels[i].platform {
             PlatformKind::Twitch => twitch_indices.push(i),
             PlatformKind::YouTube => youtube_indices.push(i),
+            PlatformKind::Patreon => patreon_indices.push(i),
         }
     }
-
-    let sort_key = |idx: &usize| -> u8 {
-        let ch = &app.channels[*idx];
-        if app.is_channel_recording(&ch.id) {
-            0
-        } else if ch.is_live {
-            1
-        } else {
-            2
-        }
-    };
-
-    twitch_indices.sort_by_key(sort_key);
-    youtube_indices.sort_by_key(sort_key);
-
-    // Update sidebar_order so navigation follows visual sort
-    app.sidebar_order = twitch_indices.iter().chain(youtube_indices.iter()).copied().collect();
 
     let inner_width = area.width.saturating_sub(2) as usize; // inside borders
 
@@ -93,8 +97,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
 
         // Platform header with Nerd Font icon
         let (label, icon, color) = match platform {
-            PlatformKind::Twitch => ("Twitch", " \u{F1E8}", Theme::TWITCH),   //
-            PlatformKind::YouTube => ("YouTube", " 󰗃", Theme::YOUTUBE), // 󰗃
+            PlatformKind::Twitch => ("Twitch", " \u{F1E8}", Theme::twitch()),   //
+            PlatformKind::YouTube => ("YouTube", " 󰗃", Theme::youtube()), // 󰗃
+            PlatformKind::Patreon => ("Patreon", " ", Theme::patreon()),
         };
         // Pad to fill width: name left, icon right
         let header_text = format!("{label}");
@@ -114,7 +119,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
         let sep = "─".repeat(inner_width.saturating_sub(1));
         items.push(ListItem::new(Line::styled(
             format!(" {sep}"),
-            Style::new().fg(Theme::DIM),
+            Style::new().fg(Theme::dim()),
         )));
         entries.push(SidebarEntry::Separator);
 
@@ -140,15 +145,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
                 }
                 right_parts.push(Span::styled(
                     format!("[{unwatched}]"),
-                    Style::new().fg(Theme::YELLOW),
+                    Style::new().fg(Theme::secondary()),
                 ));
             }
 
             // Channel name style: bold if auto_record (tracked)
             let name_style = if ch.auto_record {
-                Style::new().fg(Theme::FG).add_modifier(Modifier::BOLD)
+                Style::new().fg(Theme::fg()).add_modifier(Modifier::BOLD)
             } else {
-                Style::new().fg(Theme::FG)
+                Style::new().fg(Theme::fg())
             };
 
             // Build the line: " ChannelName              indicators"
@@ -204,6 +209,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
 
     add_group(PlatformKind::Twitch, &twitch_indices, &mut items, &mut entries);
     add_group(PlatformKind::YouTube, &youtube_indices, &mut items, &mut entries);
+    add_group(PlatformKind::Patreon, &patreon_indices, &mut items, &mut entries);
 
     // Find the list index for the selected channel
     let mut state = ListState::default();

@@ -20,7 +20,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
     };
 
     let active_count = app.active_recording_count();
-    let title = format!(" Recordings ({active_count} active) ");
+    let title = if !app.search_query.is_empty() {
+        format!(" Recordings [/{query}] ({active_count} active) ", query = app.search_query)
+    } else {
+        format!(" Recordings ({active_count} active) ")
+    };
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -36,7 +40,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
             ListItem::new(Line::raw("")),
             ListItem::new(Line::styled(
                 "  No recordings yet",
-                Style::new().fg(Theme::GRAY),
+                Style::new().fg(Theme::muted()),
             )),
             ListItem::new(Line::raw("")),
             ListItem::new(Line::from(vec![
@@ -65,6 +69,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
         ])));
 
         for rec in recs {
+            // Apply search filter
+            if !app.recording_matches_filter(&rec.id) {
+                continue;
+            }
+
             let list_idx = items.len();
 
             let state_prefix = match rec.state {
@@ -72,10 +81,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
                     Span::styled("● ", Theme::status_recording())
                 }
                 RecordingState::ResolvingUrl => {
-                    Span::styled("⟳ ", Style::new().fg(Theme::YELLOW))
+                    Span::styled("⟳ ", Style::new().fg(Theme::secondary()))
                 }
                 RecordingState::Stopping => {
-                    Span::styled("◼ ", Style::new().fg(Theme::YELLOW))
+                    Span::styled("◼ ", Style::new().fg(Theme::secondary()))
                 }
                 RecordingState::Failed => {
                     Span::styled("✗ ", Theme::error())
@@ -87,7 +96,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
 
             let channel_name = Span::styled(
                 &rec.channel_name,
-                Style::new().fg(Theme::FG).add_modifier(Modifier::BOLD),
+                Style::new().fg(Theme::fg()).add_modifier(Modifier::BOLD),
             );
 
             let title_text = rec
@@ -98,28 +107,32 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
             let platform_icon = match rec.platform {
                 PlatformKind::Twitch => Span::styled(
                     " \u{F1E8}",
-                    Style::new().fg(Theme::TWITCH),
+                    Style::new().fg(Theme::twitch()),
                 ),
                 PlatformKind::YouTube => Span::styled(
                     " 󰗃",
-                    Style::new().fg(Theme::YOUTUBE),
+                    Style::new().fg(Theme::youtube()),
+                ),
+                PlatformKind::Patreon => Span::styled(
+                    " ",
+                    Style::new().fg(Theme::patreon()),
                 ),
             };
 
             let duration = Span::styled(
                 rec.format_duration(),
-                Style::new().fg(Theme::GRAY),
+                Style::new().fg(Theme::muted()),
             );
 
             items.push(ListItem::new(Line::from(vec![
                 Span::raw("   "),
                 state_prefix,
                 channel_name,
-                Span::styled(" — ", Style::new().fg(Theme::DIM)),
-                Span::styled(title_text, Style::new().fg(Theme::FG)),
-                Span::styled(" — ", Style::new().fg(Theme::DIM)),
+                Span::styled(" — ", Style::new().fg(Theme::dim())),
+                Span::styled(title_text, Style::new().fg(Theme::fg())),
+                Span::styled(" — ", Style::new().fg(Theme::dim())),
                 duration,
-                Span::styled(" —", Style::new().fg(Theme::DIM)),
+                Span::styled(" —", Style::new().fg(Theme::dim())),
                 platform_icon,
             ])));
 
