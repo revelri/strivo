@@ -3,14 +3,14 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
 };
 
 use crate::app::AppState;
 use crate::tui::theme::Theme;
 
 use super::CrunchrPlugin;
-use super::types::{PipelineState, SearchMode};
+use super::types::{ConfigModalState, PipelineState, RecordingFilter, SearchMode};
 
 pub fn render(plugin: &CrunchrPlugin, frame: &mut Frame, area: Rect, _app: &AppState) {
     let block = Block::default()
@@ -132,7 +132,7 @@ fn render_content(plugin: &CrunchrPlugin, frame: &mut Frame, area: Rect) {
         .collect();
 
     if !active_jobs.is_empty() || !recent_complete.is_empty() {
-        render_queue(plugin, frame, area, &active_jobs, &recent_complete);
+        render_queue_inline(plugin, frame, area, &active_jobs, &recent_complete);
         return;
     }
 
@@ -146,12 +146,12 @@ fn render_content(plugin: &CrunchrPlugin, frame: &mut Frame, area: Rect) {
         ),
         Line::raw(""),
         Line::styled(
-            "  Record a stream and transcripts will appear here automatically.",
+            "  Press Tab to switch to Recording Picker and queue recordings.",
             Style::new().fg(Theme::fg()),
         ),
         Line::raw(""),
         Line::styled(
-            "  Press / to search when transcripts are available.",
+            "  Press / to search when transcripts are available.  [c] Settings",
             Style::new().fg(Theme::muted()),
         ),
     ];
@@ -364,7 +364,7 @@ fn render_analytics_pane(
 }
 
 /// Render the processing queue inline in the content area
-fn render_queue(
+fn render_queue_inline(
     _plugin: &CrunchrPlugin,
     frame: &mut Frame,
     area: Rect,
@@ -502,4 +502,250 @@ fn format_timestamp(secs: f64) -> String {
     } else {
         format!("{m}:{s:02}")
     }
+}
+
+// ──────────────────────────────────────────────
+// New: Queue view (full pane), Recording Picker, Config Modal
+// ──────────────────────────────────────────────
+
+/// Full-pane queue view (Tab-accessible).
+pub fn render_queue(plugin: &CrunchrPlugin, frame: &mut Frame, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Theme::border_focused())
+        .title(" CrunchR Queue ")
+        .title_style(Theme::title());
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let active: Vec<_> = plugin.queue.iter()
+        .filter(|j| j.state != PipelineState::Complete && j.state != PipelineState::Failed)
+        .collect();
+    let complete: Vec<_> = plugin.queue.iter()
+        .filter(|j| j.state == PipelineState::Complete || j.state == PipelineState::Failed)
+        .collect();
+
+    render_queue_inline(plugin, frame, inner, &active, &complete);
+}
+
+/// Recording picker view for manual triggering / batch processing.
+pub fn render_recording_picker(plugin: &CrunchrPlugin, frame: &mut Frame, area: Rect, app: &AppState) {
+    let filter_label = match &plugin.picker.filter {
+        RecordingFilter::All => "All".to_string(),
+        RecordingFilter::ByChannel(ch) => format!("Channel: {ch}"),
+        RecordingFilter::ByPlaylist(pl) => format!("Playlist: {pl}"),
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Theme::border_focused())
+        .title(format!(" CrunchR Picker [{filter_label}] "))
+        .title_style(Theme::title());
+
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let [content_area, footer_area] = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Length(1),
+    ]).areas(inner);
+
+    // Render recording list
+    let finished: Vec<_> = plugin.picker.visible_ids.iter()
+        .filter_map(|id| app.recordings.get(id))
+        .collect();
+
+    if finished.is_empty() {
+        let lines = vec![
+            Line::raw(""),
+            Line::styled("  No finished recordings to process", Style::new().fg(Theme::muted())),
+            Line::raw(""),
+            Line::styled("  Record a stream first, then come back here.", Style::new().fg(Theme::dim())),
+        ];
+        frame.render_widget(Paragraph::new(lines), content_area);
+    } else {
+        let mut lines = Vec::new();
+        for (i, rec) in finished.iter().enumerate() {
+            let is_selected = i == plugin.picker.selected;
+            let is_checked = plugin.picker.selections.contains(&rec.id);
+            let check = if is_checked { "[x]" } else { "[ ]" };
+            let prefix = if is_selected { ">" } else { " " };
+
+            let title = rec.stream_title.as_deref().unwrap_or("Untitled");
+            let title_style = if is_selected {
+                Style::new().fg(Theme::primary()).add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(Theme::fg())
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled(format!("{prefix} {check} "), Style::new().fg(if is_checked { Theme::green() } else { Theme::dim() })),
+                Span::styled(&rec.channel_name, Style::new().fg(Theme::secondary())),
+                Span::raw(" "),
+                Span::styled(title, title_style),
+            ]));
+        }
+        frame.render_widget(Paragraph::new(lines), content_area);
+    }
+
+    // Footer hints
+    let sel_count = plugin.picker.selections.len();
+    let hint = if sel_count > 0 {
+        format!(" {sel_count} selected  [Enter] Process  [Space] Toggle  [f] Filter  [a] Select all  [Esc] Back")
+    } else {
+        " [Enter] Process  [Space] Select  [f] Filter  [a] Select all  [Tab] Views  [Esc] Back".to_string()
+    };
+    frame.render_widget(
+        Paragraph::new(Line::styled(hint, Style::new().fg(Theme::muted()))),
+        footer_area,
+    );
+}
+
+/// Config modal overlay for the Crunchr plugin.
+pub fn render_config_modal(plugin: &CrunchrPlugin, frame: &mut Frame, area: Rect) {
+    let ConfigModalState::Active { selected_field, editing, .. } = plugin.config_modal else {
+        return;
+    };
+
+    let [_, center_v, _] = Layout::vertical([
+        Constraint::Percentage(10),
+        Constraint::Min(20),
+        Constraint::Percentage(10),
+    ]).areas(area);
+
+    let [_, center, _] = Layout::horizontal([
+        Constraint::Percentage(15),
+        Constraint::Min(50),
+        Constraint::Percentage(15),
+    ]).areas(center_v);
+
+    frame.render_widget(Clear, center);
+
+    let title = if plugin.configured {
+        " CrunchR Settings "
+    } else {
+        " Configure CrunchR "
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Theme::border_focused())
+        .title(title)
+        .title_style(Theme::title());
+
+    let inner = block.inner(center);
+    frame.render_widget(block, center);
+
+    let Some(ref draft) = plugin.config_draft else { return };
+
+    let mut lines = Vec::new();
+    let mut field_idx = 0usize;
+
+    // Helper to render a field row
+    let add_field = |label: &str, value: &str, is_toggle: bool, idx: usize| -> Line<'static> {
+        let is_sel = idx == selected_field;
+        let prefix = if is_sel { " > " } else { "   " };
+        let label_style = if is_sel {
+            Style::new().fg(Theme::primary()).add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(Theme::fg())
+        };
+        let val_style = if is_sel && editing && !is_toggle {
+            Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(Theme::dim())
+        };
+
+        Line::from(vec![
+            Span::styled(prefix.to_string(), label_style),
+            Span::styled(format!("{label}: "), label_style),
+            Span::styled(value.to_string(), val_style),
+            if is_sel && editing && !is_toggle { Span::styled("▌", Style::new().fg(Theme::primary())) } else { Span::raw("") },
+        ])
+    };
+
+    // Field 0: Enabled
+    lines.push(add_field("Enabled", if draft.enabled { "Yes" } else { "No" }, true, field_idx));
+    field_idx += 1;
+
+    // Field 1: Backend
+    lines.push(add_field("Backend", &draft.backend, true, field_idx));
+    field_idx += 1;
+
+    // Field 2: API Key Env
+    lines.push(add_field("API Key Env", draft.api_key_env.as_deref().unwrap_or(""), false, field_idx));
+    field_idx += 1;
+
+    // Field 3: Endpoint
+    lines.push(add_field("Endpoint", draft.endpoint.as_deref().unwrap_or(""), false, field_idx));
+    field_idx += 1;
+
+    // Field 4: Whisper Model
+    lines.push(add_field("Whisper Model", draft.whisper_model.as_deref().unwrap_or("base"), false, field_idx));
+    field_idx += 1;
+
+    // Field 5: Analysis Enabled
+    lines.push(add_field("Analysis", if draft.analysis.enabled { "Yes" } else { "No" }, true, field_idx));
+    field_idx += 1;
+
+    // Tandem channels header
+    if !plugin.cached_channels.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::styled(
+            "   Tandem Channels (auto-process on recording finish):",
+            Style::new().fg(Theme::secondary()),
+        ));
+    }
+
+    // Channel checkboxes (starting at field_idx = CRUNCHR_STATIC_FIELDS - 1 = 6)
+    for (key, display) in &plugin.cached_channels {
+        let is_sel = field_idx == selected_field;
+        let is_checked = draft.tandem_channels.contains(key);
+        let check = if is_checked { "[x]" } else { "[ ]" };
+        let prefix = if is_sel { " > " } else { "   " };
+        let style = if is_sel {
+            Style::new().fg(Theme::primary()).add_modifier(Modifier::BOLD)
+        } else if is_checked {
+            Style::new().fg(Theme::green())
+        } else {
+            Style::new().fg(Theme::fg())
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(prefix.to_string(), style),
+            Span::styled(format!("{check} "), Style::new().fg(if is_checked { Theme::green() } else { Theme::dim() })),
+            Span::styled(display.clone(), style),
+        ]));
+        field_idx += 1;
+    }
+
+    // Save button
+    lines.push(Line::raw(""));
+    let save_sel = field_idx == selected_field;
+    let save_style = if save_sel {
+        Style::new().fg(Theme::primary()).add_modifier(Modifier::BOLD)
+    } else {
+        Style::new().fg(Theme::secondary())
+    };
+    lines.push(Line::styled(
+        if save_sel { "   [ Save ]" } else { "     Save" }.to_string(),
+        save_style,
+    ));
+
+    let scroll_offset = if selected_field > inner.height as usize {
+        selected_field.saturating_sub(inner.height as usize / 2)
+    } else {
+        0
+    };
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .scroll((scroll_offset as u16, 0))
+            .wrap(Wrap { trim: false }),
+        inner,
+    );
 }

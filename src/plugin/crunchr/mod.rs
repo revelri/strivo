@@ -16,15 +16,23 @@ use ratatui::Frame;
 use uuid::Uuid;
 
 use crate::app::{AppState, DaemonEvent};
-use crate::config::CrunchrAnalysisConfig;
+use crate::config::{CrunchrAnalysisConfig, CrunchrConfig};
 use crate::recording::job::RecordingState;
 
 use super::{
     DaemonEventKind, PaneId, Plugin, PluginAction, PluginCommand, PluginContext,
 };
-use types::{AnalysisData, PipelineEvent, PipelineState, ProcessingJob, SearchResult};
+use types::{
+    AnalysisData, ConfigModalState, CrunchrView, PipelineEvent, PipelineState,
+    PickerState, ProcessingJob, RecordingFilter, SearchResult,
+};
 
 pub const PANE_ID: PaneId = "crunchr";
+
+/// Number of static config fields in the Crunchr config modal (before channel checklist).
+/// Fields: enabled, backend, api_key, endpoint, whisper_model, analysis_enabled = 6 fields.
+/// Channel checkboxes start at index CRUNCHR_STATIC_FIELDS (i.e., after index 5).
+const CRUNCHR_STATIC_FIELDS: usize = 6;
 
 pub struct CrunchrPlugin {
     db: Option<rusqlite::Connection>,
@@ -51,6 +59,26 @@ pub struct CrunchrPlugin {
     pub selected_speaker: Option<String>,
     /// Previous selected_result index (for detecting selection changes).
     prev_selected: usize,
+
+    // --- New: config modal, views, tandem ---
+    /// Whether the plugin is enabled for tandem auto-processing.
+    pub enabled: bool,
+    /// Whether the first-run config has been completed.
+    pub configured: bool,
+    /// Tandem channels (auto-trigger on RecordingFinished).
+    pub tandem_channels: Vec<String>,
+    /// Tandem playlists.
+    pub tandem_playlists: Vec<String>,
+    /// Config modal state.
+    pub config_modal: ConfigModalState,
+    /// Draft config being edited in the modal.
+    pub config_draft: Option<CrunchrConfig>,
+    /// Current view mode.
+    pub view: CrunchrView,
+    /// Recording picker state.
+    pub picker: PickerState,
+    /// Cached channel list for the config modal tandem checkboxes.
+    pub cached_channels: Vec<(String, String)>, // (channel_key "Platform:id", display_name)
 }
 
 impl CrunchrPlugin {
@@ -73,6 +101,15 @@ impl CrunchrPlugin {
             selected_analysis: None,
             selected_speaker: None,
             prev_selected: usize::MAX,
+            enabled: false,
+            configured: false,
+            tandem_channels: Vec::new(),
+            tandem_playlists: Vec::new(),
+            config_modal: ConfigModalState::Hidden,
+            config_draft: None,
+            view: CrunchrView::Search,
+            picker: PickerState::default(),
+            cached_channels: Vec::new(),
         }
     }
 
@@ -120,6 +157,71 @@ impl CrunchrPlugin {
             Ok(words) => self.word_frequencies = words,
             Err(e) => tracing::warn!("Word frequency error: {e}"),
         }
+    }
+
+    /// Query transcript/analysis info for a recording (used by properties modal).
+    pub fn recording_info(&self, recording_id: &str) -> Option<types::CrunchrRecordingInfo> {
+        let conn = self.db.as_ref()?;
+
+        // Get video status
+        let status: Option<String> = conn.query_row(
+            "SELECT status FROM videos WHERE recording_id = ?1",
+            [recording_id],
+            |row| row.get(0),
+        ).ok();
+
+        let status = status?;
+
+        // Get video ID for further queries
+        let video_id: Option<i64> = conn.query_row(
+            "SELECT id FROM videos WHERE recording_id = ?1",
+            [recording_id],
+            |row| row.get(0),
+        ).ok();
+
+        let video_id = video_id?;
+
+        // Count segments
+        let segment_count: usize = conn.query_row(
+            "SELECT COUNT(*) FROM segments WHERE video_id = ?1",
+            [video_id],
+            |row| row.get::<_, i64>(0),
+        ).ok().unwrap_or(0) as usize;
+
+        // Count words (sum of word frequencies)
+        let word_count: usize = conn.query_row(
+            "SELECT COALESCE(SUM(count), 0) FROM word_frequency WHERE video_id = ?1",
+            [video_id],
+            |row| row.get::<_, i64>(0),
+        ).ok().unwrap_or(0) as usize;
+
+        // Get analysis data
+        let analysis: Option<(String, String, String)> = conn.query_row(
+            "SELECT summary, topics, sentiment FROM video_analysis WHERE video_id = ?1",
+            [video_id],
+            |row| Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            )),
+        ).ok();
+
+        let (has_analysis, summary, topics, sentiment) = if let Some((s, t, sent)) = analysis {
+            let topic_list: Vec<String> = serde_json::from_str(&t).unwrap_or_default();
+            (true, Some(s), topic_list, Some(sent))
+        } else {
+            (false, None, Vec::new(), None)
+        };
+
+        Some(types::CrunchrRecordingInfo {
+            status,
+            segment_count,
+            word_count,
+            has_analysis,
+            summary,
+            topics,
+            sentiment,
+        })
     }
 
     fn queue_recording(&mut self, recording_id: Uuid, channel_name: String, title: String, video_path: PathBuf) -> Vec<PluginAction> {
@@ -285,6 +387,360 @@ impl CrunchrPlugin {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// Open the config modal, cloning current config into draft.
+    fn open_config_modal(&mut self, app: &AppState) {
+        // Cache channels for the tandem checklist
+        self.cached_channels = app.channels.iter().map(|ch| {
+            let key = format!("{}:{}", ch.platform, ch.id);
+            let display = format!("[{}] {}", ch.platform, ch.display_name);
+            (key, display)
+        }).collect();
+
+        // Clone current config into draft
+        let mut draft = CrunchrConfig {
+            enabled: self.enabled,
+            configured: self.configured,
+            backend: self.backend.as_ref().map_or_else(
+                || "whisper-cli".to_string(),
+                |b| b.backend_name().to_string(),
+            ),
+            api_key_env: None,
+            endpoint: None,
+            whisper_model: None,
+            whisper_timeout_secs: 7200,
+            analysis: CrunchrAnalysisConfig::default(),
+            tandem_channels: self.tandem_channels.clone(),
+            tandem_playlists: self.tandem_playlists.clone(),
+        };
+        // Try to read current config values from analysis_config
+        if let Some(ref ac) = self.analysis_config {
+            draft.analysis = ac.clone();
+        }
+        self.config_draft = Some(draft);
+
+        self.config_modal = ConfigModalState::Active {
+            selected_field: 0,
+            editing: false,
+            static_field_count: CRUNCHR_STATIC_FIELDS,
+        };
+    }
+
+    /// Handle keys while config modal is active.
+    fn handle_config_modal_key(&mut self, key: KeyEvent, _app: &AppState) -> Vec<PluginAction> {
+        let ConfigModalState::Active { ref mut selected_field, ref mut editing, static_field_count } = self.config_modal else {
+            return Vec::new();
+        };
+        let total_fields = static_field_count + self.cached_channels.len();
+
+        // Indices: 0=enabled, 1=backend, 2=api_key, 3=endpoint, 4=whisper_model,
+        //          5=analysis_enabled, 6..6+N=tandem channels, last=[Save]
+        // We'll use: 0..static_field_count-1 for static fields, then channels, then Save
+        let save_idx = total_fields; // Save button is after all fields
+
+        if *editing {
+            match key.code {
+                KeyCode::Esc => { *editing = false; }
+                KeyCode::Enter => { *editing = false; }
+                KeyCode::Backspace => {
+                    if let Some(ref mut draft) = self.config_draft {
+                        match *selected_field {
+                            2 => { if let Some(s) = draft.api_key_env.as_mut() { s.pop(); } }
+                            3 => { if let Some(s) = draft.endpoint.as_mut() { s.pop(); } }
+                            4 => { if let Some(s) = draft.whisper_model.as_mut() { s.pop(); } }
+                            _ => {}
+                        }
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Some(ref mut draft) = self.config_draft {
+                        match *selected_field {
+                            2 => draft.api_key_env.get_or_insert_with(String::new).push(c),
+                            3 => draft.endpoint.get_or_insert_with(String::new).push(c),
+                            4 => draft.whisper_model.get_or_insert_with(String::new).push(c),
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return Vec::new();
+        }
+
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                *selected_field = (*selected_field + 1).min(save_idx);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                *selected_field = selected_field.saturating_sub(1);
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                if *selected_field == save_idx {
+                    // Save: emit UpdateConfig action
+                    if let Some(mut draft) = self.config_draft.take() {
+                        draft.configured = true;
+                        self.enabled = draft.enabled;
+                        self.configured = true;
+                        self.tandem_channels = draft.tandem_channels.clone();
+                        self.tandem_playlists = draft.tandem_playlists.clone();
+                        if draft.analysis.enabled {
+                            self.analysis_config = Some(draft.analysis.clone());
+                        } else {
+                            self.analysis_config = None;
+                        }
+                        self.config_modal = ConfigModalState::Hidden;
+                        return vec![PluginAction::UpdateConfig {
+                            plugin_name: "crunchr",
+                            config_update: Box::new(draft),
+                        }];
+                    }
+                    self.config_modal = ConfigModalState::Hidden;
+                } else if *selected_field == 0 {
+                    // Toggle enabled
+                    if let Some(ref mut draft) = self.config_draft {
+                        draft.enabled = !draft.enabled;
+                    }
+                } else if *selected_field == 1 {
+                    // Cycle backend
+                    if let Some(ref mut draft) = self.config_draft {
+                        draft.backend = match draft.backend.as_str() {
+                            "whisper-cli" => "voxtral-api".to_string(),
+                            "voxtral-api" => "voxtral-local".to_string(),
+                            _ => "whisper-cli".to_string(),
+                        };
+                    }
+                } else if *selected_field == 5 {
+                    // Toggle analysis enabled
+                    if let Some(ref mut draft) = self.config_draft {
+                        draft.analysis.enabled = !draft.analysis.enabled;
+                    }
+                } else if *selected_field >= CRUNCHR_STATIC_FIELDS && *selected_field < save_idx {
+                    // Tandem channel toggle
+                    let ch_idx = *selected_field - CRUNCHR_STATIC_FIELDS;
+                    if let Some(ref mut draft) = self.config_draft {
+                        if let Some((key, _)) = self.cached_channels.get(ch_idx) {
+                            if draft.tandem_channels.contains(key) {
+                                draft.tandem_channels.retain(|k| k != key);
+                            } else {
+                                draft.tandem_channels.push(key.clone());
+                                // Auto-enable when tandem channels are added
+                                draft.enabled = true;
+                            }
+                        }
+                    }
+                } else if matches!(*selected_field, 2 | 3 | 4) {
+                    // Text input fields - enter edit mode
+                    *editing = true;
+                }
+            }
+            KeyCode::Esc => {
+                self.config_modal = ConfigModalState::Hidden;
+                self.config_draft = None;
+            }
+            _ => {}
+        }
+        Vec::new()
+    }
+
+    /// Handle keys in the Search view (original behavior).
+    fn handle_search_key(&mut self, key: KeyEvent, app: &AppState) -> Vec<PluginAction> {
+        if self.input_active {
+            match key.code {
+                KeyCode::Esc => { self.input_active = false; }
+                KeyCode::Enter => {
+                    self.input_active = false;
+                    self.execute_search();
+                }
+                KeyCode::Backspace => { self.search_query.pop(); }
+                KeyCode::Char(c) => { self.search_query.push(c); }
+                _ => {}
+            }
+            return Vec::new();
+        }
+
+        match key.code {
+            KeyCode::Char('/') => { self.input_active = true; }
+            KeyCode::Char('c') => { self.open_config_modal(app); }
+            KeyCode::Tab => {
+                self.view = CrunchrView::Queue;
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !self.search_results.is_empty() {
+                    self.selected_result = (self.selected_result + 1) % self.search_results.len();
+                    self.refresh_selected_analysis();
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if !self.search_results.is_empty() {
+                    self.selected_result = if self.selected_result == 0 {
+                        self.search_results.len() - 1
+                    } else {
+                        self.selected_result - 1
+                    };
+                    self.refresh_selected_analysis();
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(result) = self.search_results.get(self.selected_result) {
+                    if let Some(ref path) = result.video_path {
+                        return vec![PluginAction::PlayFile(PathBuf::from(path))];
+                    }
+                }
+            }
+            KeyCode::Esc => {
+                return vec![PluginAction::NavigateBack];
+            }
+            _ => {}
+        }
+        Vec::new()
+    }
+
+    /// Handle keys in the Queue view.
+    fn handle_queue_key(&mut self, key: KeyEvent) -> Vec<PluginAction> {
+        match key.code {
+            KeyCode::Tab => { self.view = CrunchrView::RecordingPicker; }
+            KeyCode::Esc => { self.view = CrunchrView::Search; }
+            _ => {}
+        }
+        Vec::new()
+    }
+
+    /// Handle keys in the RecordingPicker view.
+    fn handle_picker_key(&mut self, key: KeyEvent, app: &AppState) -> Vec<PluginAction> {
+        // Refresh visible recordings list
+        self.refresh_picker_list(app);
+
+        match key.code {
+            KeyCode::Tab => { self.view = CrunchrView::Search; }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !self.picker.visible_ids.is_empty() {
+                    self.picker.selected = (self.picker.selected + 1) % self.picker.visible_ids.len();
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if !self.picker.visible_ids.is_empty() {
+                    self.picker.selected = if self.picker.selected == 0 {
+                        self.picker.visible_ids.len() - 1
+                    } else {
+                        self.picker.selected - 1
+                    };
+                }
+            }
+            KeyCode::Char(' ') => {
+                // Toggle multi-select
+                if let Some(&id) = self.picker.visible_ids.get(self.picker.selected) {
+                    if !self.picker.selections.remove(&id) {
+                        self.picker.selections.insert(id);
+                    }
+                }
+            }
+            KeyCode::Char('a') => {
+                // Select all visible
+                for &id in &self.picker.visible_ids {
+                    self.picker.selections.insert(id);
+                }
+            }
+            KeyCode::Char('f') => {
+                // Cycle filter
+                self.cycle_picker_filter(app);
+                self.refresh_picker_list(app);
+            }
+            KeyCode::Enter => {
+                return self.process_selected_recordings(app);
+            }
+            KeyCode::Esc => {
+                self.picker.selections.clear();
+                self.view = CrunchrView::Search;
+            }
+            _ => {}
+        }
+        Vec::new()
+    }
+
+    /// Refresh the recording picker's visible list based on the current filter.
+    fn refresh_picker_list(&mut self, app: &AppState) {
+        let finished: Vec<_> = app.recordings.values()
+            .filter(|r| r.state == RecordingState::Finished)
+            .filter(|r| !self.in_flight.contains(&r.id))
+            .filter(|r| match &self.picker.filter {
+                RecordingFilter::All => true,
+                RecordingFilter::ByChannel(ch) => {
+                    let key = format!("{}:{}", r.platform, r.channel_id);
+                    key == *ch
+                }
+                RecordingFilter::ByPlaylist(pl) => {
+                    r.playlist.as_deref() == Some(pl.as_str())
+                }
+            })
+            .collect();
+
+        self.picker.visible_ids = finished.iter().map(|r| r.id).collect();
+        if self.picker.selected >= self.picker.visible_ids.len() {
+            self.picker.selected = self.picker.visible_ids.len().saturating_sub(1);
+        }
+    }
+
+    /// Cycle through recording picker filters.
+    fn cycle_picker_filter(&mut self, app: &AppState) {
+        // Collect unique channels from finished recordings
+        let channels: Vec<String> = {
+            let mut seen = HashSet::new();
+            app.recordings.values()
+                .filter(|r| r.state == RecordingState::Finished)
+                .filter_map(|r| {
+                    let key = format!("{}:{}", r.platform, r.channel_id);
+                    if seen.insert(key.clone()) { Some(key) } else { None }
+                })
+                .collect()
+        };
+
+        self.picker.filter = match &self.picker.filter {
+            RecordingFilter::All => {
+                if let Some(ch) = channels.first() {
+                    RecordingFilter::ByChannel(ch.clone())
+                } else {
+                    RecordingFilter::All
+                }
+            }
+            RecordingFilter::ByChannel(current) => {
+                let idx = channels.iter().position(|c| c == current).unwrap_or(0);
+                if idx + 1 < channels.len() {
+                    RecordingFilter::ByChannel(channels[idx + 1].clone())
+                } else {
+                    RecordingFilter::All
+                }
+            }
+            RecordingFilter::ByPlaylist(_) => RecordingFilter::All,
+        };
+        self.picker.selections.clear();
+    }
+
+    /// Process selected (or focused) recordings from the picker.
+    fn process_selected_recordings(&mut self, app: &AppState) -> Vec<PluginAction> {
+        let ids: Vec<Uuid> = if self.picker.selections.is_empty() {
+            // Process just the focused recording
+            self.picker.visible_ids.get(self.picker.selected).copied().into_iter().collect()
+        } else {
+            self.picker.selections.drain().collect()
+        };
+
+        let mut actions = Vec::new();
+        for id in ids {
+            if let Some(rec) = app.recordings.get(&id) {
+                let mut batch = self.queue_recording(
+                    id,
+                    rec.channel_name.clone(),
+                    rec.stream_title.clone().unwrap_or_else(|| "Untitled".to_string()),
+                    rec.output_path.clone(),
+                );
+                actions.append(&mut batch);
+            }
+        }
+        if !actions.is_empty() {
+            self.view = CrunchrView::Queue;
+        }
+        actions
     }
 
     fn handle_pipeline_event(&mut self, event: PipelineEvent) -> Vec<PluginAction> {
@@ -507,10 +963,17 @@ impl Plugin for CrunchrPlugin {
             tracing::info!("CrunchR: analysis enabled (model: {})", analysis.model);
         }
 
+        // Load tandem / enabled state from config
+        self.enabled = crunchr_config.enabled;
+        self.configured = crunchr_config.configured;
+        self.tandem_channels = crunchr_config.tandem_channels.clone();
+        self.tandem_playlists = crunchr_config.tandem_playlists.clone();
+
         // Load initial word frequencies
         self.refresh_word_frequencies();
 
-        tracing::info!("CrunchR plugin initialized (backend: {backend_name}, db: {})", db_path.display());
+        tracing::info!("CrunchR plugin initialized (backend: {backend_name}, enabled: {}, configured: {}, tandem_channels: {}, db: {})",
+            self.enabled, self.configured, self.tandem_channels.len(), db_path.display());
         Ok(())
     }
 
@@ -530,77 +993,44 @@ impl Plugin for CrunchrPlugin {
                 return Vec::new();
             }
 
-            if let Some(rec) = app.recordings.get(job_id) {
-                let video_path = rec.output_path.clone();
-                let channel_name = rec.channel_name.clone();
-                let title = rec.stream_title.clone().unwrap_or_else(|| "Untitled".to_string());
+            // Only auto-trigger if enabled AND channel/playlist matches tandem config
+            if !self.enabled {
+                return Vec::new();
+            }
 
-                return self.queue_recording(*job_id, channel_name, title, video_path);
+            if let Some(rec) = app.recordings.get(job_id) {
+                let channel_key = format!("{}:{}", rec.platform, rec.channel_id);
+                let is_tandem = self.tandem_channels.contains(&channel_key)
+                    || rec.playlist.as_ref().is_some_and(|p| self.tandem_playlists.contains(p));
+
+                if is_tandem {
+                    let video_path = rec.output_path.clone();
+                    let channel_name = rec.channel_name.clone();
+                    let title = rec.stream_title.clone().unwrap_or_else(|| "Untitled".to_string());
+                    return self.queue_recording(*job_id, channel_name, title, video_path);
+                }
             }
         }
         Vec::new()
     }
 
-    fn on_key(&mut self, key: KeyEvent, _app: &AppState) -> Vec<PluginAction> {
-        if self.input_active {
-            match key.code {
-                KeyCode::Esc => {
-                    self.input_active = false;
-                }
-                KeyCode::Enter => {
-                    self.input_active = false;
-                    self.execute_search();
-                }
-                KeyCode::Backspace => {
-                    self.search_query.pop();
-                }
-                KeyCode::Char(c) => {
-                    self.search_query.push(c);
-                }
-                _ => {}
-            }
-            return Vec::new();
+    fn on_key(&mut self, key: KeyEvent, app: &AppState) -> Vec<PluginAction> {
+        // --- First-run: auto-open config modal if not configured ---
+        if !self.configured && self.config_modal == ConfigModalState::Hidden {
+            self.open_config_modal(app);
         }
 
-        match key.code {
-            KeyCode::Char('/') => {
-                self.input_active = true;
-            }
-            KeyCode::Tab => {
-                self.search_mode = self.search_mode.toggle();
-                if !self.search_query.is_empty() {
-                    self.execute_search();
-                }
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if !self.search_results.is_empty() {
-                    self.selected_result = (self.selected_result + 1) % self.search_results.len();
-                    self.refresh_selected_analysis();
-                }
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if !self.search_results.is_empty() {
-                    self.selected_result = if self.selected_result == 0 {
-                        self.search_results.len() - 1
-                    } else {
-                        self.selected_result - 1
-                    };
-                    self.refresh_selected_analysis();
-                }
-            }
-            KeyCode::Enter => {
-                if let Some(result) = self.search_results.get(self.selected_result) {
-                    if let Some(ref path) = result.video_path {
-                        return vec![PluginAction::PlayFile(PathBuf::from(path))];
-                    }
-                }
-            }
-            KeyCode::Esc => {
-                return vec![PluginAction::NavigateBack];
-            }
-            _ => {}
+        // --- Config modal intercepts all keys when active ---
+        if self.config_modal != ConfigModalState::Hidden {
+            return self.handle_config_modal_key(key, app);
         }
-        Vec::new()
+
+        // --- View-specific key handling ---
+        match self.view {
+            CrunchrView::Search => self.handle_search_key(key, app),
+            CrunchrView::Queue => self.handle_queue_key(key),
+            CrunchrView::RecordingPicker => self.handle_picker_key(key, app),
+        }
     }
 
     fn on_plugin_event(&mut self, event: Box<dyn Any + Send>) -> Vec<PluginAction> {
@@ -630,7 +1060,17 @@ impl Plugin for CrunchrPlugin {
         area: Rect,
         app: &AppState,
     ) {
-        render::render(self, frame, area, app);
+        // Render the active view
+        match self.view {
+            CrunchrView::Search => render::render(self, frame, area, app),
+            CrunchrView::Queue => render::render_queue(self, frame, area),
+            CrunchrView::RecordingPicker => render::render_recording_picker(self, frame, area, app),
+        }
+
+        // Overlay config modal if active
+        if self.config_modal != ConfigModalState::Hidden {
+            render::render_config_modal(self, frame, area);
+        }
     }
 
     fn status_line(&self, _app: &AppState) -> Option<String> {

@@ -1,5 +1,62 @@
+use std::collections::HashSet;
 use std::path::PathBuf;
 use uuid::Uuid;
+
+/// Config modal state for the Crunchr plugin.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigModalState {
+    /// Modal is not showing.
+    Hidden,
+    /// Modal is active (first-run or re-opened via 'c').
+    Active {
+        /// Which form field is currently selected.
+        selected_field: usize,
+        /// Whether the selected field is in text-edit mode.
+        editing: bool,
+        /// Total number of static fields (before channel checklist).
+        static_field_count: usize,
+    },
+}
+
+/// View modes within the Crunchr pane.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrunchrView {
+    /// Transcript search view (default).
+    Search,
+    /// Processing pipeline queue.
+    Queue,
+    /// Recording picker for manual triggering / batch.
+    RecordingPicker,
+}
+
+/// Filter for the recording picker list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RecordingFilter {
+    All,
+    ByChannel(String),
+    ByPlaylist(String),
+}
+
+/// State for the recording picker view.
+#[derive(Debug, Clone)]
+pub struct PickerState {
+    pub selected: usize,
+    pub selections: HashSet<Uuid>,
+    pub filter: RecordingFilter,
+    /// Cached sorted list of recording IDs matching current filter.
+    pub visible_ids: Vec<Uuid>,
+}
+
+impl Default for PickerState {
+    fn default() -> Self {
+        Self {
+            selected: 0,
+            selections: HashSet::new(),
+            filter: RecordingFilter::All,
+            visible_ids: Vec::new(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineState {
@@ -125,4 +182,16 @@ pub struct Segment {
     pub text: String,
     pub speaker: Option<String>,
     pub confidence: Option<f64>,
+}
+
+/// Summary of Crunchr processing for a single recording, used by the properties modal.
+#[derive(Debug, Clone, Default)]
+pub struct CrunchrRecordingInfo {
+    pub status: String,
+    pub segment_count: usize,
+    pub word_count: usize,
+    pub has_analysis: bool,
+    pub summary: Option<String>,
+    pub topics: Vec<String>,
+    pub sentiment: Option<String>,
 }
