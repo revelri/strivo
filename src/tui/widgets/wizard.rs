@@ -88,6 +88,19 @@ pub fn render(frame: &mut Frame, area: Rect) {
             Style::new().fg(Theme::muted()),
         ),
         Line::raw(""),
+        Line::styled(
+            "  [patreon]",
+            Style::new().fg(Theme::patreon()),
+        ),
+        Line::styled(
+            "  client_id = \"your_client_id\"",
+            Style::new().fg(Theme::muted()),
+        ),
+        Line::styled(
+            "  client_secret = \"your_secret\"",
+            Style::new().fg(Theme::muted()),
+        ),
+        Line::raw(""),
         Line::from(vec![
             Span::raw("  Press "),
             Span::styled("Esc", Theme::key_hint()),
