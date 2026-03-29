@@ -1,3 +1,4 @@
+pub mod crunchr;
 pub mod registry;
 
 use std::any::Any;
