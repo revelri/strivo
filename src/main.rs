@@ -642,6 +642,7 @@ async fn run_client(args: cli::Args) -> Result<()> {
     let snapshot: ipc::ServerMessage = serde_json::from_str(line.trim())?;
 
     // Create app state from snapshot
+    let config_ref = config.clone();
     let mut app_state = app::AppState::new(config);
     if let ipc::ServerMessage::StateSnapshot {
         channels,
@@ -711,8 +712,14 @@ async fn run_client(args: cli::Args) -> Result<()> {
         }
     });
 
+    // Register plugins
+    let mut registry = plugin::registry::PluginRegistry::new();
+    registry.register(Box::new(plugin::crunchr::CrunchrPlugin::new()));
+    registry.register(Box::new(plugin::archiver::ArchiverPlugin::new()));
+    registry.init_all(&config_ref)?;
+
     // Run TUI with the event channel
-    tui::run(app_state, event_rx, recording_tx).await?;
+    tui::run(app_state, registry, event_rx, recording_tx).await?;
 
     Ok(())
 }
@@ -891,7 +898,13 @@ async fn run_tui(args: cli::Args) -> Result<()> {
         app_state.recordings.insert(job.id, job);
     }
 
-    tui::run(app_state, event_rx, recording_tx).await?;
+    // Register plugins
+    let mut registry = plugin::registry::PluginRegistry::new();
+    registry.register(Box::new(plugin::crunchr::CrunchrPlugin::new()));
+    registry.register(Box::new(plugin::archiver::ArchiverPlugin::new()));
+    registry.init_all(&config)?;
+
+    tui::run(app_state, registry, event_rx, recording_tx).await?;
 
     cancel.cancel();
 

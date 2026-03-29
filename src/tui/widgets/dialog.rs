@@ -6,9 +6,10 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
 
+use crate::plugin::registry::PluginRegistry;
 use crate::tui::theme::Theme;
 
-pub fn render_help(frame: &mut Frame, area: Rect) {
+pub fn render_help(frame: &mut Frame, area: Rect, registry: &PluginRegistry) {
     let [_, center_v, _] = Layout::vertical([
         Constraint::Percentage(15),
         Constraint::Min(18),
@@ -62,6 +63,28 @@ pub fn render_help(frame: &mut Frame, area: Rect) {
             Span::raw("  "),
             Span::styled(desc, Style::new().fg(Theme::fg())),
         ]));
+    }
+
+    // Plugin commands
+    let plugin_cmds = registry.all_commands();
+    if !plugin_cmds.is_empty() {
+        lines.push(Line::raw(""));
+        lines.push(Line::styled(
+            "  Plugins",
+            Style::new().fg(Theme::primary()).add_modifier(Modifier::BOLD),
+        ));
+        for (_plugin_name, cmd) in &plugin_cmds {
+            let key_label = format!("{:?}", cmd.key).replace("Char('", "").replace("')", "");
+            lines.push(Line::from(vec![
+                Span::raw("  "),
+                Span::styled(
+                    format!("{key_label:>10}"),
+                    Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  "),
+                Span::styled(cmd.description, Style::new().fg(Theme::fg())),
+            ]));
+        }
     }
 
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);

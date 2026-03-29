@@ -3,9 +3,10 @@ pub mod layout;
 pub mod theme;
 pub mod widgets;
 
-use crate::app::{AppAction, AppEvent, AppState};
+use crate::app::{AppAction, AppEvent, AppState, ActivePane, process_plugin_actions};
 use crate::config::AppConfig;
 use crate::playback::MpvController;
+use crate::plugin::registry::PluginRegistry;
 use crate::recording::RecordingCommand;
 use crate::stream::resolver;
 use anyhow::Result;
@@ -18,6 +19,7 @@ const FRAME_DURATION: Duration = Duration::from_millis(33); // ~30fps
 
 pub async fn run(
     mut app: AppState,
+    mut registry: PluginRegistry,
     mut event_rx: mpsc::UnboundedReceiver<AppEvent>,
     recording_tx: mpsc::UnboundedSender<RecordingCommand>,
 ) -> Result<()> {
@@ -26,9 +28,10 @@ pub async fn run(
     let mut mpv = MpvController::new();
 
     let result =
-        run_loop(&mut terminal, &mut app, &mut event_rx, &recording_tx, &mut mpv).await;
+        run_loop(&mut terminal, &mut app, &mut registry, &mut event_rx, &recording_tx, &mut mpv).await;
 
     // Cleanup
+    registry.shutdown_all();
     mpv.quit().await.ok();
     ratatui::restore();
     result
@@ -37,19 +40,41 @@ pub async fn run(
 async fn run_loop(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut AppState,
+    registry: &mut PluginRegistry,
     rx: &mut mpsc::UnboundedReceiver<AppEvent>,
     recording_tx: &mpsc::UnboundedSender<RecordingCommand>,
     mpv: &mut MpvController,
 ) -> Result<()> {
-    // Internal sender for async results (thumbnails, watch resolution, etc.)
     let (internal_tx, mut internal_rx) = mpsc::unbounded_channel::<AppEvent>();
 
     loop {
-        terminal.draw(|frame| layout::render(frame, app))?;
+        terminal.draw(|frame| layout::render(frame, app, registry))?;
 
         // Poll crossterm events
-        if let Some(event) = event::poll_event(FRAME_DURATION)? {
-            if let Some(action) = app.handle_event(event) {
+        if let Some(evt) = event::poll_event(FRAME_DURATION)? {
+            // Handle plugin key routing before app gets the event
+            if let AppEvent::Key(ref key) = evt {
+                if key.kind == crossterm::event::KeyEventKind::Press {
+                    // Plugin activation commands (global)
+                    if !matches!(app.active_pane, ActivePane::Wizard | ActivePane::Plugin(_)) {
+                        if let Some(pane_id) = registry.pane_for_command(key) {
+                            app.active_pane = ActivePane::Plugin(pane_id);
+                            registry.set_active_pane(Some(pane_id));
+                            continue;
+                        }
+                    }
+                    // Plugin pane key dispatch
+                    if matches!(app.active_pane, ActivePane::Plugin(_)) {
+                        let actions = registry.dispatch_key(*key, app);
+                        if let Some(action) = process_plugin_actions(actions, app, registry) {
+                            handle_action(action, app, recording_tx, mpv, &internal_tx).await;
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            if let Some(action) = app.handle_event(evt) {
                 handle_action(action, app, recording_tx, mpv, &internal_tx).await;
             }
         }
@@ -60,13 +85,46 @@ async fn run_loop(
             if let AppEvent::Daemon(crate::app::DaemonEvent::ChannelsUpdated(ref channels)) = event {
                 spawn_thumbnail_downloads(channels, app, &internal_tx);
             }
+
+            // Clone daemon event for plugin dispatch after app processes it
+            let daemon_event_clone = if let AppEvent::Daemon(ref de) = event {
+                Some(de.clone())
+            } else {
+                None
+            };
+
+            // Handle PluginEvent directly (no longer goes through app.handle_event)
+            if let AppEvent::PluginEvent { plugin_name, event: pe } = event {
+                let actions = registry.dispatch_plugin_event(plugin_name, pe);
+                if let Some(action) = process_plugin_actions(actions, app, registry) {
+                    handle_action(action, app, recording_tx, mpv, &internal_tx).await;
+                }
+                continue;
+            }
+
             if let Some(action) = app.handle_event(event) {
                 handle_action(action, app, recording_tx, mpv, &internal_tx).await;
             }
+
+            // Dispatch daemon events to plugins AFTER app has processed them
+            if let Some(de) = daemon_event_clone {
+                let plugin_actions = registry.dispatch_event(&de, app);
+                for action in plugin_actions {
+                    handle_plugin_action(action, app, registry, &internal_tx);
+                }
+            }
         }
 
-        // Drain internal async results (thumbnails, watch resolution, etc.)
+        // Drain internal async results
         while let Ok(event) = internal_rx.try_recv() {
+            // Handle PluginEvent from internal channel too
+            if let AppEvent::PluginEvent { plugin_name, event: pe } = event {
+                let actions = registry.dispatch_plugin_event(plugin_name, pe);
+                if let Some(action) = process_plugin_actions(actions, app, registry) {
+                    handle_action(action, app, recording_tx, mpv, &internal_tx).await;
+                }
+                continue;
+            }
             if let Some(action) = app.handle_event(event) {
                 handle_action(action, app, recording_tx, mpv, &internal_tx).await;
             }
@@ -97,7 +155,6 @@ fn spawn_thumbnail_downloads(
             continue;
         };
 
-        // Skip if already downloaded (even if protocol loading failed)
         if app.thumbnail_cache.contains_key(&channel.id) {
             continue;
         }
@@ -127,11 +184,9 @@ async fn download_thumbnail(
 
     let cache_path = cache_dir.join(format!("{channel_id}.jpg"));
 
-    // Download
     let resp = reqwest::get(url).await?;
     let bytes = resp.bytes().await?;
 
-    // Decode, resize, and create protocol off the event loop
     let channel_id_owned = channel_id.to_string();
     let cache_path_clone = cache_path.clone();
     let decode_result = tokio::task::spawn_blocking(move || -> Result<Option<ratatui_image::protocol::StatefulProtocol>> {
@@ -139,7 +194,6 @@ async fn download_thumbnail(
         let resized = img.resize(440, 248, image::imageops::FilterType::Triangle);
         resized.save(&cache_path_clone)?;
 
-        // Create protocol if picker is available
         if let Some(picker) = picker {
             let proto = picker.new_resize_protocol(resized.into());
             Ok(Some(proto))
@@ -161,6 +215,50 @@ async fn download_thumbnail(
     }
 
     Ok(())
+}
+
+fn handle_plugin_action(
+    action: crate::plugin::PluginAction,
+    app: &mut AppState,
+    registry: &mut PluginRegistry,
+    tx: &mpsc::UnboundedSender<AppEvent>,
+) {
+    match action {
+        crate::plugin::PluginAction::SetStatus(msg) => {
+            app.status_message = msg;
+        }
+        crate::plugin::PluginAction::Notify { title, body } => {
+            tokio::task::spawn_blocking(move || {
+                let _ = notify_rust::Notification::new()
+                    .summary(&title)
+                    .body(&body)
+                    .appname("StriVo")
+                    .timeout(notify_rust::Timeout::Milliseconds(5000))
+                    .show();
+            });
+        }
+        crate::plugin::PluginAction::ActivatePane(pane_id) => {
+            app.active_pane = ActivePane::Plugin(pane_id);
+            registry.set_active_pane(Some(pane_id));
+        }
+        crate::plugin::PluginAction::NavigateBack => {
+            app.active_pane = ActivePane::Sidebar;
+            registry.set_active_pane(None);
+        }
+        crate::plugin::PluginAction::SpawnTask { plugin_name, future } => {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let result = future.await;
+                let _ = tx.send(AppEvent::PluginEvent {
+                    plugin_name,
+                    event: result,
+                });
+            });
+        }
+        crate::plugin::PluginAction::PlayFile(_path) => {
+            // PlayFile from plugin actions is handled via process_plugin_actions -> AppAction
+        }
+    }
 }
 
 async fn handle_action(
@@ -187,15 +285,12 @@ async fn handle_action(
                 _ => None,
             };
 
-            // Look up stream_title from the channel
             let stream_title = app
                 .channels
                 .iter()
                 .find(|ch| ch.id == channel_id)
                 .and_then(|ch| ch.stream_title.clone());
 
-            // Recording manager is the single source of truth for RecordingJob.
-            // The TUI registers the job when RecordingStarted arrives.
             let _ = recording_tx.send(RecordingCommand::Start {
                 channel_id,
                 channel_name,
@@ -227,7 +322,6 @@ async fn handle_action(
                 _ => None,
             };
 
-            // Spawn resolution to avoid blocking the UI
             let watch_tx = watch_tx.clone();
             let ch_name = channel_name.clone();
             tokio::spawn(async move {
@@ -275,6 +369,16 @@ async fn handle_action(
                     .appname("StriVo")
                     .timeout(notify_rust::Timeout::Milliseconds(5000))
                     .show();
+            });
+        }
+        AppAction::SpawnPluginTask { plugin_name, future } => {
+            let tx = watch_tx.clone();
+            tokio::spawn(async move {
+                let result = future.await;
+                let _ = tx.send(AppEvent::PluginEvent {
+                    plugin_name,
+                    event: result,
+                });
             });
         }
     }

@@ -4,9 +4,10 @@ use ratatui::{
 };
 
 use crate::app::{ActivePane, AppState};
+use crate::plugin::registry::PluginRegistry;
 use crate::tui::widgets::{channel_detail, dialog, log_viewer, recording_list, settings, sidebar, status_bar, wizard};
 
-pub fn render(frame: &mut Frame, app: &mut AppState) {
+pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) {
     let [main_area, status_area] = Layout::vertical([
         Constraint::Fill(1),
         Constraint::Length(1),
@@ -33,12 +34,15 @@ pub fn render(frame: &mut Frame, app: &mut AppState) {
             }
             log_viewer::render(frame, detail_area, app);
         }
+        ActivePane::Plugin(_) => {
+            registry.render_active_pane(frame, detail_area, app);
+        }
         // Default: show recording list (Sidebar, RecordingList, or anything else)
         _ => recording_list::render(frame, detail_area, app),
     }
 
     // Status bar
-    status_bar::render(frame, status_area, app);
+    status_bar::render(frame, status_area, app, registry);
 
     // Overlays
     if app.active_pane == ActivePane::Wizard {
@@ -46,7 +50,7 @@ pub fn render(frame: &mut Frame, app: &mut AppState) {
     }
 
     if app.show_help {
-        dialog::render_help(frame, frame.area());
+        dialog::render_help(frame, frame.area(), registry);
     }
 
     if app.quit_confirm {

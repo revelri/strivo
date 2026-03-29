@@ -7,9 +7,10 @@ use ratatui::{
 };
 
 use crate::app::{ActivePane, AppState};
+use crate::plugin::registry::PluginRegistry;
 use crate::tui::theme::Theme;
 
-pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
+pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRegistry) {
     let bar_style = Theme::hotkey_bar();
     let key_style = Theme::hotkey_key();
 
@@ -46,6 +47,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
 
     // Always-visible buttons
     push_button(&mut spans, "Search", "/", bar_style, key_style);
+    push_button(&mut spans, "Intel", "I", bar_style, key_style);
     push_button(&mut spans, "Config", "C", bar_style, key_style);
     push_button(&mut spans, "Help", "?", bar_style, key_style);
     push_button(&mut spans, "Recordings", "L", bar_style, key_style);
@@ -87,9 +89,20 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
         Span::styled("", bar_style)
     };
 
+    // Plugin status indicators
+    let plugin_statuses = registry.status_lines(app);
+    let plugin_width: usize = plugin_statuses.iter().map(|s| s.len() + 2).sum();
+
     let right_width = if app.config.patreon.is_some() { 15 } else { 10 };
-    let pad = total_width.saturating_sub(used + right_width);
+    let pad = total_width.saturating_sub(used + right_width + plugin_width);
     spans.push(Span::styled(" ".repeat(pad), bar_style));
+
+    for status in &plugin_statuses {
+        spans.push(Span::styled(
+            format!("[{status}] "),
+            Style::new().fg(Theme::secondary()).bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg())),
+        ));
+    }
     spans.push(tw_indicator);
     spans.push(tw_label);
     spans.push(yt_indicator);

@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::config::AppConfig;
 use crate::platform::{ChannelEntry, PlatformKind};
+use crate::plugin::PaneId;
 use crate::recording::job::{RecordingJob, RecordingState};
 use crate::recording::RecordingCommand;
 
@@ -83,6 +84,11 @@ pub enum AppEvent {
     WatchFailed {
         error: String,
     },
+    /// Event from a plugin's async task
+    PluginEvent {
+        plugin_name: &'static str,
+        event: Box<dyn std::any::Any + Send>,
+    },
 }
 
 // Convenience constructors so existing code that sends DaemonEvent variants
@@ -126,7 +132,7 @@ impl AppEvent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActivePane {
     Sidebar,
     Detail,
@@ -134,6 +140,7 @@ pub enum ActivePane {
     Settings,
     Log,
     Wizard,
+    Plugin(PaneId),
 }
 
 pub struct AppState {
@@ -196,6 +203,7 @@ pub struct AppState {
     pub search_filtered_channels: Vec<usize>,
     /// Filtered recording job IDs. Empty = no filter active.
     pub search_filtered_recordings: Vec<uuid::Uuid>,
+
 }
 
 impl AppState {
@@ -365,6 +373,8 @@ impl AppState {
                 self.status_message = format!("Watch failed: {error}");
             }
             AppEvent::Daemon(de) => return self.handle_daemon_event(de),
+            // PluginEvent is handled by the caller (tui::run_loop) which owns the registry
+            AppEvent::PluginEvent { .. } => {}
         }
         None
     }
@@ -564,6 +574,8 @@ impl AppState {
                 self.search_filtered_recordings.clear();
                 return None;
             }
+            // Plugin activation commands are handled by the caller which owns the registry.
+            // Return None here; the TUI event loop checks pane_for_command separately.
             _ => {}
         }
 
@@ -574,6 +586,8 @@ impl AppState {
             ActivePane::Settings => self.handle_settings_key(key),
             ActivePane::Log => self.handle_log_key(key),
             ActivePane::Wizard => None,
+            // Plugin key events handled by caller which owns the registry
+            ActivePane::Plugin(_) => None,
         }
     }
 
@@ -1101,4 +1115,43 @@ pub enum AppAction {
         title: String,
         body: String,
     },
+    SpawnPluginTask {
+        plugin_name: &'static str,
+        future: std::pin::Pin<Box<dyn std::future::Future<Output = Box<dyn std::any::Any + Send>> + Send>>,
+    },
+}
+
+/// Process plugin actions, applying state mutations to app and registry.
+/// Returns the last AppAction-producing action (if any).
+pub fn process_plugin_actions(
+    actions: Vec<crate::plugin::PluginAction>,
+    app: &mut AppState,
+    registry: &mut crate::plugin::registry::PluginRegistry,
+) -> Option<AppAction> {
+    let mut result: Option<AppAction> = None;
+    for action in actions {
+        match action {
+            crate::plugin::PluginAction::SetStatus(msg) => {
+                app.status_message = msg;
+            }
+            crate::plugin::PluginAction::Notify { title, body } => {
+                result = Some(AppAction::Notify { title, body });
+            }
+            crate::plugin::PluginAction::ActivatePane(pane_id) => {
+                app.active_pane = ActivePane::Plugin(pane_id);
+                registry.set_active_pane(Some(pane_id));
+            }
+            crate::plugin::PluginAction::NavigateBack => {
+                app.active_pane = ActivePane::Sidebar;
+                registry.set_active_pane(None);
+            }
+            crate::plugin::PluginAction::SpawnTask { plugin_name, future } => {
+                result = Some(AppAction::SpawnPluginTask { plugin_name, future });
+            }
+            crate::plugin::PluginAction::PlayFile(path) => {
+                result = Some(AppAction::PlayFile { path });
+            }
+        }
+    }
+    result
 }
