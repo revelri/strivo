@@ -1,3 +1,4 @@
+pub mod archiver;
 pub mod crunchr;
 pub mod registry;
 
