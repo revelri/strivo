@@ -6,6 +6,7 @@ mod ipc;
 mod monitor;
 mod platform;
 mod playback;
+mod plugin;
 mod recording;
 mod search;
 mod stream;
