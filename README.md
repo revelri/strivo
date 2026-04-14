@@ -1,4 +1,4 @@
-# StriVo
+# strivo
 
 TUI-native live stream PVR. Monitor channels across Twitch, YouTube, and Patreon — automatically record when they go live, play back via mpv, and optionally transcribe recordings with Whisper.
 
@@ -10,7 +10,7 @@ TUI-native live stream PVR. Monitor channels across Twitch, YouTube, and Patreon
 
 ## What it does
 
-StriVo runs in your terminal (or as a background daemon) and watches your followed channels. When a stream goes live, it records via FFmpeg and notifies you. You can browse recordings, play them back through mpv, and search across your archive — all without leaving the terminal.
+strivo runs in your terminal (or as a background daemon) and watches your followed channels. When a stream goes live, it records via FFmpeg and notifies you. You can browse recordings, play them back through mpv, and search across your archive — all without leaving the terminal.
 
 **Platform support:**
 
@@ -52,7 +52,20 @@ StriVo runs in your terminal (or as a background daemon) and watches your follow
   - Transcripts + analysis stored in SQLite
 - **Archiver** — organize recordings by channel, render gallery views
 
-## Requirements
+## Tech Stack
+
+- **Language:** Rust 1.75+
+- **TUI:** ratatui — immediate-mode terminal rendering
+- **Recording:** FFmpeg, streamlink, yt-dlp
+- **Playback:** mpv — zero-copy pipe streaming
+- **Transcription:** Whisper CLI, Voxtral, Mistral API, OpenRouter
+- **Storage:** SQLite for transcripts and metadata
+- **IPC:** Unix domain sockets (daemon/client)
+- **Config:** TOML, OS keyring for credentials
+
+## Installation
+
+### Prerequisites
 
 - **Rust** 1.75+ to build
 - **FFmpeg** — recording
@@ -60,11 +73,11 @@ StriVo runs in your terminal (or as a background daemon) and watches your follow
 - **streamlink** — Twitch stream resolution
 - **yt-dlp** — YouTube/Patreon stream resolution
 
-## Installation
+### Install & Build
 
 ```bash
-git clone https://github.com/revelri/StriVo.git
-cd StriVo
+git clone https://github.com/revelri/strivo.git
+cd strivo
 cargo build --release
 ```
 
@@ -129,7 +142,7 @@ strivo log clear                # wipe the log
 Config lives at `~/.config/strivo/config.toml` (XDG-compliant).
 
 ```toml
-recording_dir = "/home/you/Videos/StriVo"
+recording_dir = "/home/you/Videos/strivo"
 poll_interval_secs = 60
 
 [twitch]
@@ -159,6 +172,27 @@ cron = "0 20 * * 1-5"   # weekdays at 8pm
 ## Architecture
 
 ```
+Twitch/YouTube/Patreon APIs
+         │
+         ▼
+┌─────────────────────────┐
+│       Monitor           │
+│  polling, go-live detect│
+└────────┬────────────────┘
+         │
+    ┌────▼────┐    ┌──────────┐
+    │Recorder │───▶│  Plugin  │
+    │ FFmpeg  │    │ Crunchr  │
+    │ yt-dlp  │    │ Archiver │
+    └────┬────┘    └──────────┘
+         │
+    ┌────▼────┐    ┌──────────┐
+    │Playback │    │   TUI    │
+    │  mpv    │◀──▶│ ratatui  │
+    └─────────┘    └──────────┘
+```
+
+```
 src/
   platform/          Trait-based abstraction (Twitch, YouTube, Patreon)
   monitor/           Channel polling, go-live detection
@@ -175,12 +209,15 @@ src/
   config/            TOML config, OS keyring integration
 ```
 
-**Design:**
-- `Platform` trait abstracts service-specific APIs — adding a new platform means implementing one trait
-- `RecordingManager` handles job lifecycle with retry and concurrent recording limits
-- Plugin system runs async tasks triggered by recording events
-- TUI renders via ratatui with a theme system for color customization
-- Daemon/client split uses Unix socket IPC for zero-overhead communication
+## Design Rationale
+
+| Decision | Reasoning |
+|----------|-----------|
+| Platform trait | Adding a new service means implementing one trait — auth, polling, and recording are decoupled from platform specifics |
+| Unix socket IPC | Zero-overhead daemon/client split — the TUI is just another client, headless recording works standalone |
+| TUI-first | Terminal-native workflow keeps the tool fast, composable, and SSH-friendly — no web UI overhead |
+| Plugin event bus | Transcription and archival trigger on recording events without coupling to the recording pipeline |
+| OS keyring | Credentials never touch disk as plaintext — uses platform-native secret storage |
 
 ## License
 
