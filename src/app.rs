@@ -94,6 +94,11 @@ pub enum AppEvent {
         job_id: Uuid,
         info: crate::media::MediaInfo,
     },
+    /// Daemon socket dropped (client mode). Reconnect supervisor takes over.
+    DaemonDisconnected,
+    /// Daemon socket re-established (supervisor transparently replaces the
+    /// underlying stream; the app's `daemon_tx` is still valid).
+    DaemonReconnected,
 }
 
 // Convenience constructors so existing code that sends DaemonEvent variants
@@ -156,7 +161,15 @@ pub struct AppState {
     pub active_pane: ActivePane,
     pub should_quit: bool,
     pub quit_confirm: bool,
+    /// Set when `StopAll` has been sent and we will force-quit if
+    /// `AllRecordingsStopped` has not arrived by this deadline. Also
+    /// drives the "Stopping Recordings" modal with the live countdown
+    /// and per-job checklist.
+    pub stop_all_deadline: Option<std::time::Instant>,
     pub status_message: String,
+    /// When `status_message` was last set. Auto-dismissed from the hotkey
+    /// bar roughly 5 s later so one-shot feedback doesn't become stale.
+    pub status_message_at: Option<std::time::Instant>,
     pub show_help: bool,
     // Recording state
     pub recordings: HashMap<Uuid, RecordingJob>,
@@ -180,6 +193,15 @@ pub struct AppState {
     // Sender for recording commands (direct mode) or daemon messages (client mode)
     pub recording_tx: Option<tokio::sync::mpsc::UnboundedSender<RecordingCommand>>,
     pub daemon_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::ipc::ClientMessage>>,
+    /// Standalone-mode poll-now handle. `Some` in standalone with a monitor;
+    /// `None` in client mode (PollNow travels over IPC instead).
+    pub poll_notify_standalone: Option<std::sync::Arc<tokio::sync::Notify>>,
+    /// True while the TUI has a live daemon connection. Only meaningful in
+    /// client mode; standalone mode leaves it `true` forever.
+    pub daemon_connected: bool,
+    /// Number of reconnect attempts since the last successful connection.
+    /// Used to render the reconnect banner's "(attempt N)" counter.
+    pub daemon_reconnect_attempts: u32,
 
     // Settings edit state
     pub settings_selected: usize,
@@ -201,10 +223,15 @@ pub struct AppState {
     pub tick_counter: u64,
     // Track previously selected channel for resetting scroll offset
     prev_selected_channel: usize,
+    /// Shadow copy of `status_message` from the previous tick, used to
+    /// detect changes and reset the auto-dismiss timer.
+    prev_status_message: String,
 
     // Search / filter state
     pub search_active: bool,
     pub search_query: String,
+    /// Char-index cursor position inside `search_query` when input is active.
+    pub search_cursor: usize,
     /// Filtered sidebar indices (into app.channels). Empty = no filter active.
     pub search_filtered_channels: Vec<usize>,
     /// Filtered recording job IDs. Empty = no filter active.
@@ -230,6 +257,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(config: AppConfig) -> Self {
         let first_run = config.twitch.is_none() && config.youtube.is_none();
+        let initial_transcode = config.recording.transcode;
         Self {
             config,
             channels: Vec::new(),
@@ -241,12 +269,14 @@ impl AppState {
             },
             should_quit: false,
             quit_confirm: false,
+            stop_all_deadline: None,
             status_message: String::new(),
+            status_message_at: None,
             show_help: false,
             recordings: HashMap::new(),
             active_recording_channels: HashSet::new(),
             selected_recording: 0,
-            transcode_mode: false,
+            transcode_mode: initial_transcode,
             watching_channel: None,
             twitch_connected: false,
             youtube_connected: false,
@@ -264,6 +294,9 @@ impl AppState {
             },
             recording_tx: None,
             daemon_tx: None,
+            poll_notify_standalone: None,
+            daemon_connected: true,
+            daemon_reconnect_attempts: 0,
             settings_selected: 0,
             log_lines: Vec::new(),
             log_scroll: 0,
@@ -274,8 +307,10 @@ impl AppState {
             scroll_offsets: HashMap::new(),
             tick_counter: 0,
             prev_selected_channel: 0,
+            prev_status_message: String::new(),
             search_active: false,
             search_query: String::new(),
+            search_cursor: 0,
             search_filtered_channels: Vec::new(),
             search_filtered_recordings: Vec::new(),
             platform_errors: HashMap::new(),
@@ -293,6 +328,27 @@ impl AppState {
             let _ = tx.send(crate::ipc::ClientMessage::Recording(cmd));
         } else if let Some(ref tx) = self.recording_tx {
             let _ = tx.send(cmd);
+        }
+    }
+
+    /// Request an immediate channel re-poll. Wired to F5. In daemon mode
+    /// this travels over IPC; in standalone mode we notify the monitor's
+    /// poll_notify handle directly.
+    pub fn request_poll_now(&mut self) {
+        if let Some(ref tx) = self.daemon_tx {
+            match tx.send(crate::ipc::ClientMessage::PollNow) {
+                Ok(()) => {
+                    self.status_message = "Refreshing channels…".to_string();
+                }
+                Err(_) => {
+                    self.status_message = "Refresh failed — daemon connection closed".to_string();
+                }
+            }
+        } else if let Some(ref notify) = self.poll_notify_standalone {
+            notify.notify_one();
+            self.status_message = "Refreshing channels…".to_string();
+        } else {
+            self.status_message = "Refresh unavailable — no platforms authenticated".to_string();
         }
     }
 
@@ -371,6 +427,21 @@ impl AppState {
                     self.scroll_offsets.remove(&self.prev_selected_channel);
                     self.prev_selected_channel = self.selected_channel;
                 }
+                // Status message auto-dismiss (≈5 s after the last change)
+                if self.status_message != self.prev_status_message {
+                    self.prev_status_message = self.status_message.clone();
+                    self.status_message_at = if self.status_message.is_empty() {
+                        None
+                    } else {
+                        Some(std::time::Instant::now())
+                    };
+                } else if let Some(at) = self.status_message_at {
+                    if at.elapsed().as_secs() >= 5 {
+                        self.status_message.clear();
+                        self.status_message_at = None;
+                        self.prev_status_message.clear();
+                    }
+                }
                 // Autoscroll stream title for selected live channel in sidebar
                 if self.active_pane == ActivePane::Sidebar {
                     if let Some(ch) = self.channels.get(self.selected_channel) {
@@ -404,6 +475,16 @@ impl AppState {
             AppEvent::PluginEvent { .. } => {}
             AppEvent::MediaProbed { job_id, info } => {
                 self.media_info_cache.insert(job_id, info);
+            }
+            AppEvent::DaemonDisconnected => {
+                self.daemon_connected = false;
+                self.daemon_reconnect_attempts = self.daemon_reconnect_attempts.saturating_add(1);
+                self.status_message = "⚠ Daemon disconnected — reconnecting…".to_string();
+            }
+            AppEvent::DaemonReconnected => {
+                self.daemon_connected = true;
+                self.daemon_reconnect_attempts = 0;
+                self.status_message = "✓ Daemon reconnected".to_string();
             }
         }
         None
@@ -555,16 +636,69 @@ impl AppState {
                     }
                 }
                 KeyCode::Backspace => {
-                    self.search_query.pop();
-                    self.update_search_filter();
+                    if self.search_cursor > 0 {
+                        let chars: Vec<char> = self.search_query.chars().collect();
+                        let new_cursor = self.search_cursor - 1;
+                        self.search_query = chars
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| *i != new_cursor)
+                            .map(|(_, c)| *c)
+                            .collect();
+                        self.search_cursor = new_cursor;
+                        self.update_search_filter();
+                    }
+                }
+                KeyCode::Delete => {
+                    let chars: Vec<char> = self.search_query.chars().collect();
+                    if self.search_cursor < chars.len() {
+                        self.search_query = chars
+                            .iter()
+                            .enumerate()
+                            .filter(|(i, _)| *i != self.search_cursor)
+                            .map(|(_, c)| *c)
+                            .collect();
+                        self.update_search_filter();
+                    }
+                }
+                KeyCode::Left => {
+                    self.search_cursor = self.search_cursor.saturating_sub(1);
+                }
+                KeyCode::Right => {
+                    let len = self.search_query.chars().count();
+                    if self.search_cursor < len {
+                        self.search_cursor += 1;
+                    }
+                }
+                KeyCode::Home => {
+                    self.search_cursor = 0;
+                }
+                KeyCode::End => {
+                    self.search_cursor = self.search_query.chars().count();
                 }
                 KeyCode::Char(c) => {
-                    self.search_query.push(c);
+                    let mut chars: Vec<char> = self.search_query.chars().collect();
+                    chars.insert(self.search_cursor, c);
+                    self.search_query = chars.iter().collect();
+                    self.search_cursor += 1;
                     self.update_search_filter();
                 }
                 _ => {}
             }
             return None;
+        }
+
+        // Wizard overlay owns `o` while a device-code flow is live, even if
+        // the user is on another pane. Everything else falls through so the
+        // underlying pane keeps behaving normally.
+        if self.pending_auth.is_some() && self.active_pane != ActivePane::Wizard {
+            if let KeyCode::Char('o') | KeyCode::Char('O') = key.code {
+                if let Some((_, ref uri, _)) = self.pending_auth {
+                    let url = uri.clone();
+                    self.status_message = format!("Opening {url}…");
+                    return Some(AppAction::OpenUrl { url });
+                }
+            }
         }
 
         // Quit confirmation handling
@@ -630,11 +764,11 @@ impl AppState {
                 self.show_help = false;
                 return None;
             }
-            KeyCode::Esc if self.active_pane == ActivePane::Wizard => {
-                self.active_pane = ActivePane::Sidebar;
-                return None;
-            }
-            KeyCode::Char('F') if self.active_pane != ActivePane::Wizard && self.active_pane != ActivePane::Log => {
+            KeyCode::Char('F')
+                if self.active_pane != ActivePane::Wizard
+                    && self.active_pane != ActivePane::Log =>
+            {
+                self.clear_search();
                 self.refresh_log();
                 self.active_pane = ActivePane::Log;
                 return None;
@@ -642,6 +776,7 @@ impl AppState {
             KeyCode::Char('/') if matches!(self.active_pane, ActivePane::Sidebar | ActivePane::RecordingList | ActivePane::Detail) => {
                 self.search_active = true;
                 self.search_query.clear();
+                self.search_cursor = 0;
                 self.search_filtered_channels.clear();
                 self.search_filtered_recordings.clear();
                 return None;
@@ -657,17 +792,42 @@ impl AppState {
             ActivePane::RecordingList => self.handle_recording_list_key(key),
             ActivePane::Settings => self.handle_settings_key(key),
             ActivePane::Log => self.handle_log_key(key),
-            ActivePane::Wizard => None,
+            ActivePane::Wizard => self.handle_wizard_key(key),
             // Plugin key events handled by caller which owns the registry
             ActivePane::Plugin(_) => None,
             ActivePane::StatusBar => self.handle_status_bar_key(key),
         }
     }
 
-    fn handle_sidebar_key(
-        &mut self,
-        key: crossterm::event::KeyEvent,
-    ) -> Option<AppAction> {
+    fn handle_wizard_key(&mut self, key: crossterm::event::KeyEvent) -> Option<AppAction> {
+        use crossterm::event::KeyCode;
+        match key.code {
+            KeyCode::Char('o') | KeyCode::Char('O') => {
+                // Open the current device-code verification URL in the
+                // default browser. When nothing is pending we fall through.
+                if let Some((_, ref uri, _)) = self.pending_auth {
+                    let url = uri.clone();
+                    self.status_message = format!("Opening {url}…");
+                    return Some(AppAction::OpenUrl { url });
+                }
+            }
+            KeyCode::Char('q') => {
+                self.should_quit = true;
+            }
+            KeyCode::Esc => {
+                // Users who want to inspect the TUI without credentials.
+                self.active_pane = ActivePane::Sidebar;
+                if self.channels.is_empty() {
+                    self.status_message =
+                        "No channels configured \u{2014} press S for Settings".to_string();
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    fn handle_sidebar_key(&mut self, key: crossterm::event::KeyEvent) -> Option<AppAction> {
         use crossterm::event::KeyCode;
 
         match key.code {
@@ -679,6 +839,12 @@ impl AppState {
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.navigate_channel(false);
+            }
+            KeyCode::Char('g') | KeyCode::Home => {
+                self.jump_channel_to(true);
+            }
+            KeyCode::Char('G') | KeyCode::End => {
+                self.jump_channel_to(false);
             }
             KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
                 if !self.channels.is_empty() {
@@ -714,6 +880,12 @@ impl AppState {
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.navigate_channel(false);
+            }
+            KeyCode::Char('g') | KeyCode::Home => {
+                self.jump_channel_to(true);
+            }
+            KeyCode::Char('G') | KeyCode::End => {
+                self.jump_channel_to(false);
             }
             KeyCode::Char('r') => {
                 // Start recording
@@ -811,11 +983,16 @@ impl AppState {
             }
             KeyCode::Char('t') => {
                 self.transcode_mode = !self.transcode_mode;
-                self.status_message = if self.transcode_mode {
-                    "Transcode mode: ON (NVENC)".to_string()
+                self.config.recording.transcode = self.transcode_mode;
+                if let Err(e) = self.config.save(None) {
+                    self.status_message = format!("Failed to save transcode toggle: {e}");
                 } else {
-                    "Transcode mode: OFF (passthrough)".to_string()
-                };
+                    self.status_message = if self.transcode_mode {
+                        "Transcode mode: ON (NVENC) · saved".to_string()
+                    } else {
+                        "Transcode mode: OFF (passthrough) · saved".to_string()
+                    };
+                }
             }
             _ => {}
         }
@@ -855,6 +1032,16 @@ impl AppState {
                     } else {
                         self.selected_recording - 1
                     };
+                }
+            }
+            KeyCode::Char('g') | KeyCode::Home => {
+                if count > 0 {
+                    self.selected_recording = 0;
+                }
+            }
+            KeyCode::Char('G') | KeyCode::End => {
+                if count > 0 {
+                    self.selected_recording = count - 1;
                 }
             }
             KeyCode::Char('s') => {
@@ -964,18 +1151,46 @@ impl AppState {
                     self.settings_selected - 1
                 };
             }
+            KeyCode::Home => {
+                self.settings_selected = 0;
+            }
+            KeyCode::End => {
+                self.settings_selected = SETTINGS_COUNT - 1;
+            }
             KeyCode::Enter | KeyCode::Char(' ') => {
-                // Theme row (index 3) — cycle through available themes
-                if self.settings_selected == 3 {
-                    let themes = crate::tui::theme::available_themes();
-                    if !themes.is_empty() {
-                        let current = crate::tui::theme::Theme::current_name();
-                        let idx = themes.iter().position(|t| *t == current).unwrap_or(0);
-                        let next = (idx + 1) % themes.len();
-                        crate::tui::theme::Theme::set(&themes[next]);
-                        self.config.theme = themes[next].clone();
-                        self.status_message = format!("Theme: {}", themes[next]);
-                        // Config save deferred to pane exit (debounce)
+                match self.settings_selected {
+                    2 => {
+                        // Transcode Mode — toggle, persist immediately.
+                        self.transcode_mode = !self.transcode_mode;
+                        self.config.recording.transcode = self.transcode_mode;
+                        if let Err(e) = self.config.save(None) {
+                            self.status_message = format!("Failed to save transcode toggle: {e}");
+                        } else {
+                            self.status_message = if self.transcode_mode {
+                                "Transcode mode: ON (NVENC) · saved".to_string()
+                            } else {
+                                "Transcode mode: OFF (passthrough) · saved".to_string()
+                            };
+                        }
+                    }
+                    3 => {
+                        // Theme — cycle through available themes
+                        let themes = crate::tui::theme::available_themes();
+                        if !themes.is_empty() {
+                            let current = crate::tui::theme::Theme::current_name();
+                            let idx = themes.iter().position(|t| *t == current).unwrap_or(0);
+                            let next = (idx + 1) % themes.len();
+                            crate::tui::theme::Theme::set(&themes[next]);
+                            self.config.theme = themes[next].clone();
+                            self.status_message = format!("Theme: {}", themes[next]);
+                            // Config save deferred to pane exit (debounce).
+                        }
+                    }
+                    _ => {
+                        // Read-only rows — hint to edit config file
+                        let path = crate::config::AppConfig::config_path();
+                        self.status_message =
+                            format!("Edit {} to change this setting", path.display());
                     }
                 }
             }
@@ -1004,12 +1219,12 @@ impl AppState {
                 self.log_scroll = self.log_scroll.saturating_sub(1);
                 self.log_auto_scroll = false;
             }
-            KeyCode::Char('G') => {
+            KeyCode::Char('G') | KeyCode::End => {
                 // Jump to bottom, re-enable auto-scroll
                 self.log_scroll = self.log_lines.len().saturating_sub(1);
                 self.log_auto_scroll = true;
             }
-            KeyCode::Char('g') => {
+            KeyCode::Char('g') | KeyCode::Home => {
                 // Jump to top
                 self.log_scroll = 0;
                 self.log_auto_scroll = false;
@@ -1079,6 +1294,23 @@ impl AppState {
             if cur == 0 { len - 1 } else { cur - 1 }
         };
         self.selected_channel = nav_list[next];
+    }
+
+    fn jump_channel_to(&mut self, first: bool) {
+        let nav_list = if !self.search_query.is_empty() && !self.search_filtered_channels.is_empty()
+        {
+            &self.search_filtered_channels
+        } else {
+            &self.sidebar_order
+        };
+        if nav_list.is_empty() {
+            return;
+        }
+        self.selected_channel = if first {
+            nav_list[0]
+        } else {
+            nav_list[nav_list.len() - 1]
+        };
     }
 
     /// Rebuild the sidebar display order (call when channels or recording state changes)
@@ -1190,6 +1422,7 @@ impl AppState {
     pub fn clear_search(&mut self) {
         self.search_active = false;
         self.search_query.clear();
+        self.search_cursor = 0;
         self.search_filtered_channels.clear();
         self.search_filtered_recordings.clear();
     }
@@ -1244,6 +1477,11 @@ pub enum AppAction {
     ProbeMedia {
         job_id: Uuid,
         path: PathBuf,
+    },
+    /// Open a URL in the user's default browser. Used by the setup wizard
+    /// to jump straight to device-code verification pages.
+    OpenUrl {
+        url: String,
     },
 }
 

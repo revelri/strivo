@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
 };
@@ -11,21 +11,74 @@ use crate::platform::PlatformKind;
 use crate::plugin::registry::PluginRegistry;
 use crate::tui::theme::Theme;
 
+/// REC-dot pulse style keyed off the frame tick. Oscillates opacity with a
+/// ~2 s ease-in-out cycle (DESIGN.md signature motion) so a live recording
+/// is never mistaken for a static indicator. Never goes fully transparent.
+fn rec_pulse_style(tick: u64) -> Style {
+    const CYCLE: u64 = 60;
+    let phase = (tick % CYCLE) as f32 / CYCLE as f32;
+    let o = 0.7 + 0.3 * (std::f32::consts::TAU * phase).cos();
+    let base = 0.2;
+    let o = (o * (1.0 - base) + base).clamp(0.0, 1.0);
+    let r = (0xFF as f32 * o) as u8;
+    let g = (0x44 as f32 * o) as u8;
+    let b = (0x44 as f32 * o) as u8;
+    Style::new()
+        .fg(Color::Rgb(r, g, b))
+        .bg(Theme::hotkey_bar().bg.unwrap_or(Theme::bg()))
+        .add_modifier(Modifier::BOLD)
+}
+
 pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRegistry) {
     let bar_style = Theme::hotkey_bar();
     let key_style = Theme::hotkey_key();
     let bar_bg = Theme::hotkey_bar().bg.unwrap_or(Theme::bg());
 
-    // If search input is active, render a search prompt instead of normal buttons
+    // Persistent banner while the daemon socket is down — overrides
+    // everything else so the user can never mistake stale data for live.
+    if !app.daemon_connected {
+        let msg = format!(
+            " ⚠  Daemon disconnected — reconnecting (attempt {}) ",
+            app.daemon_reconnect_attempts
+        );
+        let pad = area.width.saturating_sub(msg.chars().count() as u16) as usize;
+        let line = Line::from(vec![
+            Span::styled(
+                msg,
+                Style::new()
+                    .fg(Theme::red())
+                    .bg(bar_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ".repeat(pad), bar_style),
+        ]);
+        frame.render_widget(Paragraph::new(line).style(bar_style), area);
+        return;
+    }
+
+    // If search input is active, render an editable prompt with the cursor
+    // visible at `search_cursor` (split the query at that char boundary).
     if app.search_active {
+        let chars: Vec<char> = app.search_query.chars().collect();
+        let cur = app.search_cursor.min(chars.len());
+        let left: String = chars[..cur].iter().collect();
+        let right: String = chars[cur..].iter().collect();
+
+        let used = 2 + left.chars().count() + 1 + right.chars().count(); // " /" + left + cursor + right
+        let pad = area.width.saturating_sub(used as u16) as usize;
+
         let search_bar = Line::from(vec![
             Span::styled(" /", Style::new().fg(Theme::secondary()).bg(bar_bg)),
-            Span::styled(&app.search_query, Style::new().fg(Theme::fg()).bg(bar_bg)),
-            Span::styled("▌", Style::new().fg(Theme::primary()).bg(bar_bg)),
+            Span::styled(left, Style::new().fg(Theme::fg()).bg(bar_bg)),
             Span::styled(
-                format!("{:width$}", "", width = area.width.saturating_sub(3 + app.search_query.len() as u16) as usize),
-                bar_style,
+                "▌",
+                Style::new()
+                    .fg(Theme::primary())
+                    .bg(bar_bg)
+                    .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(right, Style::new().fg(Theme::fg()).bg(bar_bg)),
+            Span::styled(" ".repeat(pad), bar_style),
         ]);
         frame.render_widget(Paragraph::new(search_bar).style(bar_style), area);
         return;
@@ -62,8 +115,56 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
         return;
     }
 
+    // If a transient status message is live (set within the last ~5 s, per the
+    // app-level auto-dismiss tick), render it in place of the hotkey bar so
+    // one-shot feedback actually reaches the user.
+    if !app.status_message.is_empty() {
+        let msg = app.status_message.clone();
+        let pad = area.width.saturating_sub(msg.chars().count() as u16 + 1) as usize;
+        let line = Line::from(vec![
+            Span::styled(" ", bar_style),
+            Span::styled(
+                msg,
+                Style::new()
+                    .fg(Theme::fg())
+                    .bg(bar_bg)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ".repeat(pad), bar_style),
+        ]);
+        frame.render_widget(Paragraph::new(line).style(bar_style), area);
+        return;
+    }
+
     let mut spans: Vec<Span> = Vec::new();
     spans.push(Span::styled(" ", bar_style));
+
+    // Filter-active indicator — visible whenever a search filter is in force
+    // but the input is not focused. Spells out what Esc will do.
+    if !app.search_query.is_empty() {
+        let (matched, total) = filter_counts(app);
+        let label = format!("[/{}] {}/{} · Esc clears ", app.search_query, matched, total);
+        spans.push(Span::styled(
+            label,
+            Style::new()
+                .fg(Theme::secondary())
+                .bg(bar_bg)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    // Pulsing REC dot when a recording is active (DESIGN.md signature motion).
+    let active_recordings = app.active_recording_count();
+    if active_recordings > 0 {
+        spans.push(Span::styled("● ", rec_pulse_style(app.tick_counter)));
+        spans.push(Span::styled(
+            format!("REC({active_recordings}) "),
+            Style::new()
+                .fg(Theme::red())
+                .bg(bar_bg)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
 
     // Context-sensitive buttons
     match app.active_pane {
@@ -198,4 +299,31 @@ fn push_button<'a>(
     spans.push(Span::styled(key, key_style));
     spans.push(Span::styled("]", bar_style));
     spans.push(Span::styled(" ", bar_style)); // 1-char gap
+}
+
+/// Returns `(matched, total)` for the pane the filter currently applies to.
+/// Used by the filter-active indicator so the user can see how many items
+/// survived the query.
+fn filter_counts(app: &AppState) -> (usize, usize) {
+    match app.active_pane {
+        ActivePane::RecordingList => {
+            let total = app.recordings.len();
+            let matched = if app.search_filtered_recordings.is_empty() {
+                total
+            } else {
+                app.search_filtered_recordings.len()
+            };
+            (matched, total)
+        }
+        // Sidebar / Detail both filter the channel list
+        _ => {
+            let total = app.channels.len();
+            let matched = if app.search_filtered_channels.is_empty() {
+                total
+            } else {
+                app.search_filtered_channels.len()
+            };
+            (matched, total)
+        }
+    }
 }

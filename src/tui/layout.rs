@@ -45,12 +45,18 @@ pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) 
     status_bar::render(frame, status_area, app, registry);
 
     // Overlays
-    if app.active_pane == ActivePane::Wizard {
-        wizard::render(frame, frame.area());
+    //
+    // Wizard surfaces in two cases: the user is on ActivePane::Wizard (first
+    // run with no credentials), or an active device-code flow is waiting for
+    // the user to enter a code — in which case it's promoted to an overlay
+    // regardless of the active pane, so the prompt never gets buried.
+    let show_wizard = app.active_pane == ActivePane::Wizard || app.pending_auth.is_some();
+    if show_wizard {
+        wizard::render(frame, frame.area(), app);
     }
 
     if app.show_help {
-        dialog::render_help(frame, frame.area(), registry);
+        dialog::render_help(frame, frame.area(), registry, &app.active_pane);
     }
 
     if app.quit_confirm {
@@ -63,5 +69,9 @@ pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) 
 
     if app.show_properties.is_some() {
         properties::render(frame, frame.area(), app, registry);
+    }
+
+    if app.stop_all_deadline.is_some() {
+        dialog::render_stopping(frame, frame.area(), app);
     }
 }

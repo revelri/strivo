@@ -587,16 +587,45 @@ fn truncate_str(s: &str, max: usize) -> String {
 
 use strivo::check_external_tools;
 
-/// TUI client mode: connect to running daemon via Unix socket.
-async fn run_client(args: cli::Args) -> Result<()> {
+/// Do one connect+hello+snapshot handshake. Returns `(reader, writer, snapshot)`.
+async fn daemon_connect_once(
+    socket_path: &std::path::Path,
+) -> Result<(
+    tokio::io::BufReader<tokio::io::ReadHalf<tokio::net::UnixStream>>,
+    tokio::io::WriteHalf<tokio::net::UnixStream>,
+    ipc::ServerMessage,
+)> {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
+
+    let stream = UnixStream::connect(socket_path).await?;
+    let (reader, mut writer) = tokio::io::split(stream);
+    let mut buf_reader = BufReader::new(reader);
+
+    let hello = ipc::encode_message(&ipc::ClientMessage::Hello)?;
+    writer.write_all(hello.as_bytes()).await?;
+
+    let mut line = String::new();
+    buf_reader.read_line(&mut line).await?;
+    let snapshot: ipc::ServerMessage = serde_json::from_str(line.trim())?;
+
+    Ok((buf_reader, writer, snapshot))
+}
+
+/// TUI client mode: connect to running daemon via Unix socket, with a
+/// supervised auto-reconnect loop so a daemon restart or crash surfaces as a
+/// banner + retry rather than a frozen TUI.
+async fn run_client(args: cli::Args) -> Result<()> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
     let config = config::AppConfig::load(args.config.as_deref())?;
 
     let socket_path = ipc::socket_path();
-    let stream = match UnixStream::connect(&socket_path).await {
-        Ok(s) => s,
+
+    // Initial connect — if this fails, fall back to the pre-existing friendly
+    // error message because the daemon probably isn't running yet.
+    let (mut buf_reader, mut writer, snapshot) = match daemon_connect_once(&socket_path).await {
+        Ok(x) => x,
         Err(e) => {
             eprintln!(
                 "Failed to connect to daemon at {}: {e}\n\n\
@@ -605,21 +634,9 @@ async fn run_client(args: cli::Args) -> Result<()> {
                  strivo enable    (systemd service)",
                 socket_path.display()
             );
-            return Err(e.into());
+            return Err(e);
         }
     };
-
-    let (reader, mut writer) = tokio::io::split(stream);
-    let mut buf_reader = BufReader::new(reader);
-
-    // Send Hello
-    let hello = ipc::encode_message(&ipc::ClientMessage::Hello)?;
-    writer.write_all(hello.as_bytes()).await?;
-
-    // Read StateSnapshot
-    let mut line = String::new();
-    buf_reader.read_line(&mut line).await?;
-    let snapshot: ipc::ServerMessage = serde_json::from_str(line.trim())?;
 
     // Create app state from snapshot
     let config_ref = config.clone();
@@ -642,51 +659,132 @@ async fn run_client(args: cli::Args) -> Result<()> {
         app_state.rebuild_sidebar_order();
     }
 
-    // Create channels for daemon communication
+    // Channels for daemon communication. `daemon_tx` lives forever in
+    // AppState — the supervisor transparently rebinds the underlying
+    // socket on reconnect.
     let (event_tx, event_rx) = mpsc::unbounded_channel::<AppEvent>();
     let (daemon_tx, mut daemon_rx) = mpsc::unbounded_channel::<ipc::ClientMessage>();
 
-    // Create a dummy recording_tx (not used in client mode)
     let (recording_tx, _recording_rx) = mpsc::unbounded_channel();
     app_state.daemon_tx = Some(daemon_tx);
 
-    // Spawn socket reader: reads ServerMessage from daemon → event_tx
-    let event_tx_clone = event_tx.clone();
+    // Supervisor: pumps reader → event_tx and daemon_rx → writer, reconnects
+    // with exponential backoff (1 s, 2 s, 5 s, 10 s, 30 s, 30 s…) on error.
+    let event_tx_sup = event_tx.clone();
+    let socket_path_sup = socket_path.clone();
     tokio::spawn(async move {
-        let mut line = String::new();
+        let mut attempt: u32 = 0;
         loop {
-            line.clear();
-            match buf_reader.read_line(&mut line).await {
-                Ok(0) => {
-                    tracing::info!("Daemon disconnected");
-                    break;
-                }
-                Ok(_) => {
-                    if let Ok(msg) = serde_json::from_str::<ipc::ServerMessage>(line.trim()) {
-                        match msg {
-                            ipc::ServerMessage::Event(de) => {
-                                let _ = event_tx_clone.send(AppEvent::Daemon(de));
+            // Pump until reader or writer breaks.
+            let mut line = String::new();
+            loop {
+                tokio::select! {
+                    read = buf_reader.read_line(&mut line) => {
+                        match read {
+                            Ok(0) => {
+                                tracing::info!("Daemon disconnected");
+                                break;
                             }
-                            ipc::ServerMessage::StateSnapshot { .. } => {
-                                // Unexpected re-snapshot, ignore
+                            Ok(_) => {
+                                if let Ok(msg) = serde_json::from_str::<ipc::ServerMessage>(line.trim()) {
+                                    match msg {
+                                        ipc::ServerMessage::Event(de) => {
+                                            let _ = event_tx_sup.send(AppEvent::Daemon(de));
+                                        }
+                                        ipc::ServerMessage::StateSnapshot {
+                                            channels,
+                                            twitch_connected,
+                                            youtube_connected,
+                                            patreon_connected,
+                                            ..
+                                        } => {
+                                            // Re-snapshot after reconnect: push
+                                            // state back into the TUI.
+                                            let _ = event_tx_sup.send(
+                                                AppEvent::channels_updated(channels),
+                                            );
+                                            if twitch_connected {
+                                                let _ = event_tx_sup.send(
+                                                    AppEvent::platform_authenticated(
+                                                        platform::PlatformKind::Twitch,
+                                                    ),
+                                                );
+                                            }
+                                            if youtube_connected {
+                                                let _ = event_tx_sup.send(
+                                                    AppEvent::platform_authenticated(
+                                                        platform::PlatformKind::YouTube,
+                                                    ),
+                                                );
+                                            }
+                                            if patreon_connected {
+                                                let _ = event_tx_sup.send(
+                                                    AppEvent::platform_authenticated(
+                                                        platform::PlatformKind::Patreon,
+                                                    ),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                                line.clear();
+                            }
+                            Err(e) => {
+                                tracing::warn!("Socket read error: {e}");
+                                break;
+                            }
+                        }
+                    }
+                    msg = daemon_rx.recv() => {
+                        match msg {
+                            Some(m) => {
+                                if let Ok(encoded) = ipc::encode_message(&m) {
+                                    if let Err(e) = writer.write_all(encoded.as_bytes()).await {
+                                        tracing::warn!("Socket write error: {e}");
+                                        break;
+                                    }
+                                }
+                            }
+                            None => {
+                                // AppState dropped — TUI is exiting.
+                                return;
                             }
                         }
                     }
                 }
-                Err(e) => {
-                    tracing::error!("Socket read error: {e}");
-                    break;
-                }
             }
-        }
-    });
 
-    // Spawn socket writer: reads ClientMessage from daemon_rx → writer
-    tokio::spawn(async move {
-        while let Some(msg) = daemon_rx.recv().await {
-            if let Ok(encoded) = ipc::encode_message(&msg) {
-                if writer.write_all(encoded.as_bytes()).await.is_err() {
-                    break;
+            // Disconnected. Signal the TUI.
+            let _ = event_tx_sup.send(AppEvent::DaemonDisconnected);
+
+            // Reconnect loop with exponential backoff.
+            loop {
+                attempt = attempt.saturating_add(1);
+                let delay_secs: u64 = match attempt {
+                    1 => 1,
+                    2 => 2,
+                    3 => 5,
+                    4 => 10,
+                    _ => 30,
+                };
+                tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
+
+                match daemon_connect_once(&socket_path_sup).await {
+                    Ok((new_reader, new_writer, _snapshot)) => {
+                        buf_reader = new_reader;
+                        writer = new_writer;
+                        attempt = 0;
+                        let _ = event_tx_sup.send(AppEvent::DaemonReconnected);
+                        // Next iteration of outer loop resumes pumping on the
+                        // new stream. The daemon's initial StateSnapshot was
+                        // consumed inside `daemon_connect_once`; subsequent
+                        // server-pushed snapshots will flow through normally.
+                        break;
+                    }
+                    Err(e) => {
+                        tracing::debug!("Reconnect attempt {attempt} failed: {e}");
+                        continue;
+                    }
                 }
             }
         }
@@ -837,7 +935,7 @@ async fn run_tui(args: cli::Args) -> Result<()> {
         recording::run_manager(rec_config, recording_rx, rec_tx, rec_cancel).await;
     });
 
-    if !platforms.is_empty() {
+    let standalone_poll_notify: Option<Arc<tokio::sync::Notify>> = if !platforms.is_empty() {
         let mut monitor = ChannelMonitor::new(
             platforms.clone(),
             config.clone(),
@@ -846,10 +944,14 @@ async fn run_tui(args: cli::Args) -> Result<()> {
             cancel.clone(),
         );
         monitor.set_auth_notify(auth_notify.clone());
+        let poll_notify = monitor.poll_notify();
         tokio::spawn(async move {
             monitor.run().await;
         });
-    }
+        Some(poll_notify)
+    } else {
+        None
+    };
 
     // Spawn schedule manager
     if !config.schedule.is_empty() {
@@ -873,6 +975,7 @@ async fn run_tui(args: cli::Args) -> Result<()> {
     let mut app_state = app::AppState::new(config.clone());
     app_state.twitch_connected = false;
     app_state.youtube_connected = false;
+    app_state.poll_notify_standalone = standalone_poll_notify;
 
     for job in scanned {
         app_state.recordings.insert(job.id, job);

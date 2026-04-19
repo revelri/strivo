@@ -415,5 +415,26 @@ async fn handle_action(
                 }
             });
         }
+        AppAction::OpenUrl { url } => {
+            // Cross-platform: xdg-open (Linux), open (macOS), start (Windows).
+            // Spawned detached so the TUI stays responsive regardless.
+            let opener = if cfg!(target_os = "macos") {
+                "open"
+            } else if cfg!(target_os = "windows") {
+                "start"
+            } else {
+                "xdg-open"
+            };
+            let url_for_status = url.clone();
+            tokio::task::spawn_blocking(move || {
+                let _ = std::process::Command::new(opener)
+                    .arg(&url)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn();
+            });
+            app.status_message = format!("Opening {url_for_status}…");
+        }
     }
 }
