@@ -81,6 +81,12 @@ pub struct CrunchrPlugin {
     pub cached_channels: Vec<(String, String)>, // (channel_key "Platform:id", display_name)
 }
 
+impl Default for CrunchrPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CrunchrPlugin {
     pub fn new() -> Self {
         Self {

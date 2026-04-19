@@ -1,17 +1,10 @@
-mod app;
-mod cli;
-mod config;
-mod daemon;
-mod ipc;
-mod media;
-mod monitor;
-mod platform;
-mod playback;
-mod plugin;
-mod recording;
-mod search;
-mod stream;
-mod tui;
+// Crate-wide clippy allows — these flag style preferences, not bugs, and
+// touching them now would be pure churn. Re-enable per-module when rewriting
+// the relevant code.
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::type_complexity)]
+
+use strivo::{app, cli, config, daemon, ipc, monitor, platform, plugin, recording, search, tui};
 
 use std::sync::Arc;
 
@@ -592,21 +585,7 @@ fn truncate_str(s: &str, max: usize) -> String {
     }
 }
 
-pub fn check_external_tools() {
-    for tool in &["ffmpeg", "streamlink", "yt-dlp"] {
-        match std::process::Command::new("which")
-            .arg(tool)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-        {
-            Ok(status) if status.success() => {}
-            _ => {
-                eprintln!("Warning: '{tool}' not found in PATH. Some features may not work.");
-            }
-        }
-    }
-}
+use strivo::check_external_tools;
 
 /// TUI client mode: connect to running daemon via Unix socket.
 async fn run_client(args: cli::Args) -> Result<()> {

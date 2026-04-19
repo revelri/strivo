@@ -9,6 +9,12 @@ pub struct MpvController {
     socket_path: String,
 }
 
+impl Default for MpvController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MpvController {
     pub fn new() -> Self {
         let pid = std::process::id();

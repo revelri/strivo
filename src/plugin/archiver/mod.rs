@@ -64,6 +64,12 @@ pub struct ArchiverPlugin {
     pub cached_channels: Vec<(String, String)>,
 }
 
+impl Default for ArchiverPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArchiverPlugin {
     pub fn new() -> Self {
         Self {
