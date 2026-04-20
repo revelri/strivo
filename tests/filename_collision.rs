@@ -4,9 +4,9 @@
 #![allow(clippy::field_reassign_with_default)]
 
 use std::fs;
-use strivo::config::AppConfig;
-use strivo::platform::PlatformKind;
-use strivo::recording::build_output_path;
+use strivo_core::config::AppConfig;
+use strivo_core::platform::PlatformKind;
+use strivo_core::recording::build_output_path;
 use tempfile::TempDir;
 
 fn config_with_fixed_template(dir: &std::path::Path) -> AppConfig {

@@ -20,7 +20,6 @@ pub fn check_external_tools() {
 }
 
 pub mod app;
-pub mod cli;
 pub mod config;
 pub mod daemon;
 pub mod ipc;

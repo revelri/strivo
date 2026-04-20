@@ -156,6 +156,23 @@ impl PluginRegistry {
         self.command_map.get(&(key.code, key.modifiers)).copied()
     }
 
+    /// Collect properties-panel contributions from all plugins for the given
+    /// recording job. Each plugin decides whether to emit anything.
+    pub fn properties_sections(
+        &self,
+        job_id: uuid::Uuid,
+        app: &AppState,
+    ) -> Vec<ratatui::text::Line<'static>> {
+        let mut out = Vec::new();
+        for plugin in &self.plugins {
+            let lines = plugin.properties_section(job_id, app);
+            if !lines.is_empty() {
+                out.extend(lines);
+            }
+        }
+        out
+    }
+
     /// Look up a plugin by name for downcasting via `as_any()`.
     pub fn plugin_ref(&self, name: &str) -> Option<&dyn Plugin> {
         self.plugins.iter().find(|p| p.name() == name).map(|p| p.as_ref())

@@ -40,6 +40,16 @@ pub enum Command {
         /// Search query (fuzzy match against filenames and metadata)
         query: String,
     },
+    /// Check that required external tools are installed
+    Doctor,
+    /// Print shell completion script to stdout
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+    /// Print man page (roff) to stdout
+    Man,
 }
 
 #[derive(Subcommand, Debug)]

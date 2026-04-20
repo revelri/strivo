@@ -9,8 +9,8 @@
 //! event loop. We stand up a minimal in-test server that speaks the
 //! same framing contract so the IPC format is locked down.
 
-use strivo::app::DaemonEvent;
-use strivo::ipc::{self, ClientMessage, ServerMessage};
+use strivo_core::app::DaemonEvent;
+use strivo_core::ipc::{self, ClientMessage, ServerMessage};
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};

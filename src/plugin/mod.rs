@@ -1,5 +1,3 @@
-pub mod archiver;
-pub mod crunchr;
 pub mod registry;
 
 use std::any::Any;
@@ -155,6 +153,16 @@ pub trait Plugin: Send {
     /// Optional: contribute a segment to the status bar.
     fn status_line(&self, _app: &AppState) -> Option<String> {
         None
+    }
+
+    /// Optional: contribute lines to the recording properties panel
+    /// (rendered under a plugin-owned heading).
+    fn properties_section(
+        &self,
+        _job_id: uuid::Uuid,
+        _app: &AppState,
+    ) -> Vec<ratatui::text::Line<'static>> {
+        Vec::new()
     }
 
     /// Downcast support.

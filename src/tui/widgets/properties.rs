@@ -120,71 +120,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
         ));
     }
 
-    // --- Transcript Info (from Crunchr plugin) ---
-    lines.push(Line::raw(""));
-    lines.push(Line::styled(
-        "  Transcript",
-        Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD),
-    ));
-
-    let crunchr_info = registry.plugin_ref("crunchr")
-        .and_then(|p| p.as_any().downcast_ref::<crate::plugin::crunchr::CrunchrPlugin>())
-        .and_then(|c| c.recording_info(&job_id.to_string()));
-
-    if let Some(info) = crunchr_info {
-        let status_color = if info.status == "complete" { Theme::green() } else { Theme::fg() };
-        lines.push(Line::from(vec![
-            Span::styled("  Status:   ", Style::new().fg(Theme::dim())),
-            Span::styled(info.status.clone(), Style::new().fg(status_color)),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("  Segments: ", Style::new().fg(Theme::dim())),
-            Span::styled(info.segment_count.to_string(), Style::new().fg(Theme::fg())),
-        ]));
-        lines.push(Line::from(vec![
-            Span::styled("  Words:    ", Style::new().fg(Theme::dim())),
-            Span::styled(info.word_count.to_string(), Style::new().fg(Theme::fg())),
-        ]));
-
-        if info.has_analysis {
-            lines.push(Line::raw(""));
-            lines.push(Line::styled(
-                "  Analysis",
-                Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD),
-            ));
-            if let Some(ref summary) = info.summary {
-                let max_summary = inner.width.saturating_sub(4) as usize;
-                let summary_display: String = summary.chars().take(max_summary).collect();
-                lines.push(Line::styled(
-                    format!("  {summary_display}"),
-                    Style::new().fg(Theme::fg()),
-                ));
-            }
-            if !info.topics.is_empty() {
-                let topics_str = info.topics.join(", ");
-                lines.push(Line::from(vec![
-                    Span::styled("  Topics:   ", Style::new().fg(Theme::dim())),
-                    Span::styled(topics_str, Style::new().fg(Theme::primary())),
-                ]));
-            }
-            if let Some(ref sentiment) = info.sentiment {
-                let color = match sentiment.as_str() {
-                    "positive" => Theme::green(),
-                    "negative" => Theme::red(),
-                    _ => Theme::muted(),
-                };
-                lines.push(Line::from(vec![
-                    Span::styled("  Sentiment:", Style::new().fg(Theme::dim())),
-                    Span::styled(format!(" {sentiment}"), Style::new().fg(color)),
-                ]));
-            }
-        }
-    } else {
-        lines.push(Line::styled(
-            "  Not processed",
-            Style::new().fg(Theme::muted()),
-        ));
-    }
+    // Plugin-contributed sections (e.g., Crunchr transcript info).
+    lines.extend(registry.properties_sections(job_id, app));
 
     // Footer
     lines.push(Line::raw(""));

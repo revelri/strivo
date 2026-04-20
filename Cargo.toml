@@ -1,8 +1,23 @@
+[workspace]
+members = [".", "crates/strivo-bin"]
+resolver = "2"
+
 [package]
-name = "strivo"
+name = "strivo-core"
 version = "0.3.0"
 edition = "2021"
-description = "TUI Live Stream PVR for Twitch and YouTube"
+description = "Core library for StriVo — TUI Live Stream PVR"
+authors = ["revelri <slrevoy@mailbox.org>"]
+license = "MIT"
+repository = "https://github.com/revelri/strivo"
+homepage = "https://github.com/revelri/strivo"
+readme = "README.md"
+keywords = ["tui", "twitch", "youtube", "streaming", "recording"]
+categories = ["command-line-utilities", "multimedia"]
+rust-version = "1.75"
+
+[lib]
+path = "src/lib.rs"
 
 [dependencies]
 # TUI
@@ -23,9 +38,6 @@ directories = "6"
 
 # Credentials
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
-
-# CLI
-clap = { version = "4", features = ["derive"] }
 
 # Notifications
 notify-rust = "4"
@@ -48,11 +60,11 @@ libc = "0.2"
 tokio-util = "0.7"
 cron = "0.15"
 
-# Plugins
-rusqlite = { version = "0.33", features = ["bundled"] }
-rust-stemmers = "1.2"
-unicode-segmentation = "1.12"
-base64 = "0.22"
-
 [dev-dependencies]
 tempfile = "3"
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+opt-level = 3

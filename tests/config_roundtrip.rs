@@ -4,7 +4,7 @@
 #![allow(clippy::field_reassign_with_default)]
 
 use std::fs;
-use strivo::config::AppConfig;
+use strivo_core::config::AppConfig;
 use tempfile::TempDir;
 
 fn seeded_config(recording_dir: std::path::PathBuf) -> AppConfig {

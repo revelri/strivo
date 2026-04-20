@@ -4,21 +4,24 @@
 #![allow(clippy::field_reassign_with_default)]
 #![allow(clippy::type_complexity)]
 
-use strivo::{app, cli, config, daemon, ipc, monitor, platform, plugin, recording, search, tui};
+mod cli;
+
+use strivo_core::{app, config, daemon, ipc, platform, plugin, recording, tui};
+use strivo_core::check_external_tools;
 
 use std::sync::Arc;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
-use crate::app::AppEvent;
+use strivo_core::app::AppEvent;
 use crate::cli::{Command, ConfigAction, LogAction};
-use crate::tui::theme::Theme;
-use crate::monitor::ChannelMonitor;
-use crate::platform::Platform;
+use strivo_core::tui::theme::Theme;
+use strivo_core::monitor::ChannelMonitor;
+use strivo_core::platform::Platform;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -53,7 +56,59 @@ async fn handle_command(cmd: &Command, config_path: Option<&std::path::Path>) ->
         Command::Config { action } => handle_config_command(action, config_path),
         Command::Log { action } => handle_log_command(action).await,
         Command::Search { query } => handle_search(query, config_path),
+        Command::Doctor => handle_doctor(),
+        Command::Completions { shell } => handle_completions(*shell),
+        Command::Man => handle_man(),
     }
+}
+
+fn handle_completions(shell: clap_complete::Shell) -> Result<()> {
+    let mut cmd = cli::Args::command();
+    let name = cmd.get_name().to_string();
+    clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
+    Ok(())
+}
+
+fn handle_man() -> Result<()> {
+    let cmd = cli::Args::command();
+    let man = clap_mangen::Man::new(cmd);
+    man.render(&mut std::io::stdout())?;
+    Ok(())
+}
+
+fn handle_doctor() -> Result<()> {
+    let tools: &[(&str, &str)] = &[
+        ("ffmpeg", "recording (required)"),
+        ("mpv", "playback (required)"),
+        ("streamlink", "Twitch stream resolution (required)"),
+        ("yt-dlp", "YouTube/Patreon resolution (required)"),
+        ("whisper", "transcription (optional, Crunchr plugin)"),
+    ];
+    let mut missing_required = 0;
+    println!("StriVo external tool check");
+    println!("{}", "-".repeat(60));
+    for (bin, purpose) in tools {
+        match which::which(bin) {
+            Ok(path) => println!("  ok      {:<12} {}  [{}]", bin, purpose, path.display()),
+            Err(_) => {
+                println!("  MISSING {:<12} {}", bin, purpose);
+                if purpose.contains("required") {
+                    missing_required += 1;
+                }
+            }
+        }
+    }
+    println!();
+    if missing_required > 0 {
+        println!(
+            "{} required tool(s) missing. Install via: pacman -S ffmpeg mpv streamlink yt-dlp",
+            missing_required
+        );
+        std::process::exit(1);
+    } else {
+        println!("All required tools present.");
+    }
+    Ok(())
 }
 
 fn handle_status() -> Result<()> {
@@ -575,7 +630,7 @@ fn handle_search(query: &str, config_path: Option<&std::path::Path>) -> Result<(
     Ok(())
 }
 
-use crate::search::{fuzzy_subsequence, levenshtein};
+use strivo_core::search::{fuzzy_subsequence, levenshtein};
 
 fn truncate_str(s: &str, max: usize) -> String {
     if s.chars().count() > max {
@@ -585,7 +640,6 @@ fn truncate_str(s: &str, max: usize) -> String {
     }
 }
 
-use strivo::check_external_tools;
 
 /// Do one connect+hello+snapshot handshake. Returns `(reader, writer, snapshot)`.
 async fn daemon_connect_once(
@@ -792,8 +846,8 @@ async fn run_client(args: cli::Args) -> Result<()> {
 
     // Register plugins
     let mut registry = plugin::registry::PluginRegistry::new();
-    registry.register(Box::new(plugin::crunchr::CrunchrPlugin::new()));
-    registry.register(Box::new(plugin::archiver::ArchiverPlugin::new()));
+    registry.register(Box::new(strivo_plugins::crunchr::CrunchrPlugin::new()));
+    registry.register(Box::new(strivo_plugins::archiver::ArchiverPlugin::new()));
     registry.init_all(&config_ref)?;
 
     // Run TUI with the event channel
@@ -854,7 +908,7 @@ async fn run_tui(args: cli::Args) -> Result<()> {
             match platform.authenticate().await {
                 Ok(()) => {
                     tracing::info!("Twitch authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(crate::platform::PlatformKind::Twitch));
+                    let _ = tx.send(AppEvent::platform_authenticated(strivo_core::platform::PlatformKind::Twitch));
                     notify.notify_one();
                 }
                 Err(e) => {
@@ -882,7 +936,7 @@ async fn run_tui(args: cli::Args) -> Result<()> {
             match platform.authenticate().await {
                 Ok(()) => {
                     tracing::info!("YouTube authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(crate::platform::PlatformKind::YouTube));
+                    let _ = tx.send(AppEvent::platform_authenticated(strivo_core::platform::PlatformKind::YouTube));
                     notify.notify_one();
                 }
                 Err(e) => {
@@ -895,7 +949,7 @@ async fn run_tui(args: cli::Args) -> Result<()> {
 
     // Spawn Patreon in standalone mode too
     if let Some(ref patreon_config) = config.patreon {
-        let mut patreon_client = crate::platform::patreon::PatreonClient::new(
+        let mut patreon_client = strivo_core::platform::patreon::PatreonClient::new(
             patreon_config.client_id.clone(),
             patreon_config.client_secret.clone(),
         );
@@ -909,9 +963,9 @@ async fn run_tui(args: cli::Args) -> Result<()> {
             match patreon_client.authorize().await {
                 Ok(()) => {
                     tracing::info!("Patreon authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(crate::platform::PlatformKind::Patreon));
+                    let _ = tx.send(AppEvent::platform_authenticated(strivo_core::platform::PlatformKind::Patreon));
 
-                    let monitor = crate::monitor::patreon::PatreonMonitor::new(
+                    let monitor = strivo_core::monitor::patreon::PatreonMonitor::new(
                         patreon_client,
                         cfg,
                         tx,
@@ -983,8 +1037,8 @@ async fn run_tui(args: cli::Args) -> Result<()> {
 
     // Register plugins
     let mut registry = plugin::registry::PluginRegistry::new();
-    registry.register(Box::new(plugin::crunchr::CrunchrPlugin::new()));
-    registry.register(Box::new(plugin::archiver::ArchiverPlugin::new()));
+    registry.register(Box::new(strivo_plugins::crunchr::CrunchrPlugin::new()));
+    registry.register(Box::new(strivo_plugins::archiver::ArchiverPlugin::new()));
     registry.init_all(&config)?;
 
     tui::run(app_state, registry, event_rx, recording_tx).await?;
