@@ -1,0 +1,3 @@
+[submodule "strivo-plugins"]
+	path = strivo-plugins
+	url = https://github.com/revelri/strivo-plugins.git
