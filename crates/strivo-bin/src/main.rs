@@ -11,14 +11,14 @@ use strivo_core::check_external_tools;
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser};
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 use strivo_core::app::AppEvent;
-use crate::cli::{Command, ConfigAction, LogAction};
+use crate::cli::{Command, ConfigAction, LogAction, ThemeAction};
 use strivo_core::tui::theme::Theme;
 use strivo_core::monitor::ChannelMonitor;
 use strivo_core::platform::Platform;
@@ -31,13 +31,18 @@ async fn main() -> Result<()> {
         return handle_command(cmd, args.config.as_deref()).await;
     }
 
-    // Initialize theme from config (needed before TUI rendering)
+    // Initialize theme + motion prefs from config (needed before TUI rendering).
     let theme_config = config::AppConfig::load(args.config.as_deref()).ok();
-    let theme_name = theme_config
-        .as_ref()
-        .map(|c| c.theme.as_str())
-        .unwrap_or("neon");
-    Theme::init(theme_name);
+    if let Some(cfg) = theme_config.as_ref() {
+        Theme::init_with_overrides(cfg.theme.name(), cfg.theme.colors(), cfg.theme.ansi());
+        // Config flag is an opt-in that layers on top of the env var — either
+        // signal enables reduce-motion; neither needs to explicitly disable.
+        if cfg.ui.reduce_motion {
+            strivo_core::tui::anim::set_reduce_motion(true);
+        }
+    } else {
+        Theme::init("neon");
+    }
 
     // Default: try connecting to daemon, fall back to standalone TUI
     if ipc::is_daemon_running() {
@@ -56,6 +61,7 @@ async fn handle_command(cmd: &Command, config_path: Option<&std::path::Path>) ->
         Command::Config { action } => handle_config_command(action, config_path),
         Command::Log { action } => handle_log_command(action).await,
         Command::Search { query } => handle_search(query, config_path),
+        Command::Theme { action } => handle_theme_command(action),
         Command::Doctor => handle_doctor(),
         Command::Completions { shell } => handle_completions(*shell),
         Command::Man => handle_man(),
@@ -74,6 +80,47 @@ fn handle_man() -> Result<()> {
     let man = clap_mangen::Man::new(cmd);
     man.render(&mut std::io::stdout())?;
     Ok(())
+}
+
+fn handle_theme_command(action: &ThemeAction) -> Result<()> {
+    use strivo_core::tui::theme;
+    match action {
+        ThemeAction::List => {
+            let current = config::AppConfig::load(None)
+                .map(|c| c.theme.name().to_string())
+                .unwrap_or_else(|_| "neon".to_string());
+            let names = theme::available_themes();
+            let builtins: std::collections::HashSet<String> =
+                theme::builtin_themes().into_iter().map(|t| t.name).collect();
+            println!("Themes ({} total)", names.len());
+            for n in &names {
+                let marker = if *n == current { "*" } else { " " };
+                let source = if builtins.contains(n) { "built-in" } else { "user" };
+                println!("  {marker} {n}  [{source}]");
+            }
+            Ok(())
+        }
+        ThemeAction::Import { path, name } => {
+            let contents = std::fs::read_to_string(path)
+                .with_context(|| format!("read {}", path.display()))?;
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("imported");
+            let theme_name = name.clone().unwrap_or_else(|| stem.to_string());
+            let theme = theme::kitty_import::parse(&theme_name, &contents)
+                .map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))?;
+
+            let dest_dir = config::AppConfig::config_dir().join("themes");
+            std::fs::create_dir_all(&dest_dir)
+                .with_context(|| format!("create {}", dest_dir.display()))?;
+            let dest = dest_dir.join(format!("{theme_name}.toml"));
+            let serialized = toml::to_string_pretty(&theme)
+                .context("serialize imported theme")?;
+            std::fs::write(&dest, serialized)
+                .with_context(|| format!("write {}", dest.display()))?;
+            println!("Imported '{theme_name}' → {}", dest.display());
+            println!("Activate with: strivo config set theme {theme_name}");
+            Ok(())
+        }
+    }
 }
 
 fn handle_doctor() -> Result<()> {
@@ -211,7 +258,7 @@ fn handle_config_command(action: &ConfigAction, config_path: Option<&std::path::
             println!("poll_interval_secs = {}", cfg.poll_interval_secs);
             println!("recording.transcode = {}", cfg.recording.transcode);
             println!("recording.filename_template = {:?}", cfg.recording.filename_template);
-            println!("theme = {:?}", cfg.theme);
+            println!("theme = {:?}", cfg.theme.name());
             if let Some(ref tw) = cfg.twitch {
                 println!("twitch.client_id = {:?}", tw.client_id);
                 println!("twitch.client_secret = \"****\"");
@@ -324,7 +371,7 @@ fn config_get(cfg: &config::AppConfig, key: &str) -> Result<String> {
             .as_ref()
             .map(|p| p.poll_interval_secs.to_string())
             .ok_or_else(|| anyhow::anyhow!("Patreon not configured")),
-        "theme" => Ok(cfg.theme.clone()),
+        "theme" => Ok(cfg.theme.name().to_string()),
         _ => Err(anyhow::anyhow!(
             "Unknown key: {key}\n\nValid keys:\n  \
              recording_dir, poll_interval, transcode, filename_template, theme,\n  \
@@ -448,7 +495,7 @@ fn config_set(cfg: &mut config::AppConfig, key: &str, value: &str) -> Result<()>
             }
         }
         "theme" => {
-            cfg.theme = value.to_string();
+            cfg.theme.set_name(value.to_string());
         }
         _ => {
             anyhow::bail!(
