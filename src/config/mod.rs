@@ -2,6 +2,7 @@ pub mod credentials;
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,8 +20,12 @@ pub struct AppConfig {
     #[serde(default)]
     pub recording: RecordingConfig,
 
-    #[serde(default = "default_theme")]
-    pub theme: String,
+    #[serde(default)]
+    pub theme: ThemeRef,
+
+    /// UI preferences — animation, a11y, verbosity. Everything optional.
+    #[serde(default)]
+    pub ui: UiConfig,
 
     #[serde(default)]
     pub auto_record_channels: Vec<AutoRecordEntry>,
@@ -255,6 +260,88 @@ fn default_theme() -> String {
     "neon".to_string()
 }
 
+/// How `theme` is expressed in `config.toml`. Accepts either the legacy bare
+/// string (`theme = "neon"`) or a rich table with per-slot overrides:
+///
+/// ```toml
+/// [theme]
+/// name = "tokyo-night"
+/// [theme.colors]
+/// primary = "#00E5FF"
+/// [theme.ansi]
+/// red = "#FF5555"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ThemeRef {
+    Named(String),
+    Rich(ThemeSpec),
+}
+
+impl Default for ThemeRef {
+    fn default() -> Self {
+        ThemeRef::Named(default_theme())
+    }
+}
+
+impl ThemeRef {
+    pub fn name(&self) -> &str {
+        match self {
+            ThemeRef::Named(s) => s.as_str(),
+            ThemeRef::Rich(s) => s.name.as_str(),
+        }
+    }
+
+    /// Color slot overrides (keyed by semantic slot name: `bg`, `primary`, …).
+    pub fn colors(&self) -> &BTreeMap<String, String> {
+        static EMPTY: std::sync::OnceLock<BTreeMap<String, String>> = std::sync::OnceLock::new();
+        match self {
+            ThemeRef::Rich(s) => &s.colors,
+            ThemeRef::Named(_) => EMPTY.get_or_init(BTreeMap::new),
+        }
+    }
+
+    /// ANSI slot overrides (keyed by `red`, `blue`, …).
+    pub fn ansi(&self) -> &BTreeMap<String, String> {
+        static EMPTY: std::sync::OnceLock<BTreeMap<String, String>> = std::sync::OnceLock::new();
+        match self {
+            ThemeRef::Rich(s) => &s.ansi,
+            ThemeRef::Named(_) => EMPTY.get_or_init(BTreeMap::new),
+        }
+    }
+
+    /// Replace the theme name, preserving any overrides.
+    pub fn set_name(&mut self, new_name: String) {
+        match self {
+            ThemeRef::Named(s) => *s = new_name,
+            ThemeRef::Rich(s) => s.name = new_name,
+        }
+    }
+}
+
+/// Motion / accessibility / verbosity preferences.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UiConfig {
+    /// When true, animations snap to their end state instead of tweening.
+    /// Mirrors `STRIVO_REDUCE_MOTION`; whichever is set wins.
+    #[serde(default)]
+    pub reduce_motion: bool,
+
+    /// Verbose status-bar labels for screen readers / low-vision users.
+    #[serde(default)]
+    pub verbose_status: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ThemeSpec {
+    #[serde(default = "default_theme")]
+    pub name: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub colors: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub ansi: BTreeMap<String, String>,
+}
+
 fn default_recording_dir() -> PathBuf {
     directories::UserDirs::new()
         .map(|d| d.home_dir().join("Videos").join("StriVo"))
@@ -278,7 +365,8 @@ impl Default for AppConfig {
             youtube: None,
             patreon: None,
             recording: RecordingConfig::default(),
-            theme: default_theme(),
+            theme: ThemeRef::default(),
+            ui: UiConfig::default(),
             auto_record_channels: Vec::new(),
             schedule: Vec::new(),
             crunchr: CrunchrConfig::default(),

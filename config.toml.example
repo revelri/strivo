@@ -1,0 +1,62 @@
+# StriVo config reference — ~/.config/strivo/config.toml
+#
+# This file documents the theming + UI keys that the animation/UI/UX sprint
+# added. Everything below is optional; defaults match the built-in "neon"
+# theme with full motion enabled. Drop any of these snippets into your real
+# config.toml to customize.
+
+# ─── Theme ────────────────────────────────────────────────────────────────
+# Two forms are accepted. Pick one.
+
+# Form 1 — plain string (legacy, still supported).
+# Any built-in name: neon, neon-light, neon-hc, monochrome, tokyo-night,
+# gruvbox-dark, rose-pine-moon, nord, dracula, kanagawa, everforest-dark,
+# catppuccin-mocha, solarized-dark. Also accepts the basename of any user
+# theme in ~/.config/strivo/themes/*.{toml,conf}.
+#
+# theme = "tokyo-night"
+
+# Form 2 — rich table with per-slot overrides layered on top of a base.
+# `name` picks the base theme; `[theme.colors]` and `[theme.ansi]` swap
+# individual slots. Anything you omit inherits from the base.
+#
+# [theme]
+# name = "tokyo-night"
+#
+# [theme.colors]
+# # Base surfaces and semantic accents:
+# #   bg, fg, surface, overlay, primary, secondary, dim, muted
+# primary   = "#00E5FF"
+# secondary = "#FFB020"
+#
+# [theme.ansi]
+# # ANSI slots: black, red, green, yellow, blue, magenta, cyan, white
+# red   = "#FF5555"
+# green = "#50FA7B"
+
+# ─── User themes directory ────────────────────────────────────────────────
+# Drop theme files into ~/.config/strivo/themes/ — StriVo loads them on
+# startup (and on `R` inside the Ctrl+T theme picker). Two formats:
+#
+#   *.toml   — native StriVo theme (see any built-in for the shape)
+#   *.conf   — Kitty/Ghostty keyword format (foreground, background,
+#              color0..color15, cursor, selection_foreground,
+#              selection_background). Unknown keys are skipped with a
+#              warning; missing slots fall back to Neon.
+#
+# To convert a Kitty theme once (writes ~/.config/strivo/themes/<slug>.toml):
+#
+#   strivo theme import /path/to/kitty-theme.conf
+#   strivo theme import /path/to/kitty-theme.conf --name my-theme
+
+# ─── UI ───────────────────────────────────────────────────────────────────
+# Animation + accessibility toggles.
+
+# [ui]
+# # Snap every tween/pulse/shimmer to its end state. Equivalent to the
+# # STRIVO_REDUCE_MOTION=1 environment variable (env wins if both are set).
+# reduce_motion = false
+#
+# # Reserved for screen-reader-friendly status strings. Not all widgets
+# # consume this yet — safe to leave at default.
+# verbose_status = false

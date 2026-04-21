@@ -4,14 +4,14 @@
 #![allow(clippy::field_reassign_with_default)]
 
 use std::fs;
-use strivo_core::config::AppConfig;
+use strivo_core::config::{AppConfig, ThemeRef};
 use tempfile::TempDir;
 
 fn seeded_config(recording_dir: std::path::PathBuf) -> AppConfig {
     let mut cfg = AppConfig::default();
     cfg.recording_dir = recording_dir;
     cfg.poll_interval_secs = 42;
-    cfg.theme = "neon".into();
+    cfg.theme = ThemeRef::Named("neon".into());
     cfg
 }
 
@@ -82,6 +82,36 @@ fn load_recovers_from_malformed_toml_via_backup() {
         recovered.poll_interval_secs, 42,
         "recovery must restore backed-up values"
     );
+}
+
+#[test]
+fn theme_accepts_legacy_string_form() {
+    let src = r##"
+recording_dir = "/tmp/x"
+poll_interval_secs = 60
+theme = "tokyo-night"
+"##;
+    let cfg: AppConfig = toml::from_str(src).expect("parse legacy form");
+    assert_eq!(cfg.theme.name(), "tokyo-night");
+    assert!(cfg.theme.colors().is_empty());
+}
+
+#[test]
+fn theme_accepts_rich_table_with_overrides() {
+    let src = r##"
+recording_dir = "/tmp/x"
+poll_interval_secs = 60
+[theme]
+name = "neon"
+[theme.colors]
+primary = "#00FF00"
+[theme.ansi]
+red = "#FF5555"
+"##;
+    let cfg: AppConfig = toml::from_str(src).expect("parse rich form");
+    assert_eq!(cfg.theme.name(), "neon");
+    assert_eq!(cfg.theme.colors().get("primary"), Some(&"#00FF00".to_string()));
+    assert_eq!(cfg.theme.ansi().get("red"), Some(&"#FF5555".to_string()));
 }
 
 #[test]
