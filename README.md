@@ -253,9 +253,13 @@ awareness of concrete plugins; the binary pulls both together.
 |----------|-----------|
 | Platform trait | Adding a new service means implementing one trait — auth, polling, and recording are decoupled from platform specifics |
 | Unix socket IPC | Zero-overhead daemon/client split — the TUI is just another client, headless recording works standalone |
-| TUI-first | Terminal-native workflow keeps the tool fast, composable, and SSH-friendly — no web UI overhead |
+| TUI-first | Terminal-native workflow keeps the tool fast, composable, and SSH-friendly. A complementary *arr-style web UI (`strivo serve`) is in development on the `feat/webui` branch — it talks to the same daemon over the existing IPC socket. |
 | Plugin event bus | Transcription and archival trigger on recording events without coupling to the recording pipeline |
 | OS keyring | Credentials never touch disk as plaintext — uses platform-native secret storage |
+
+## Roadmap
+
+Planning lives in [ROADMAP.md](./ROADMAP.md) — milestones, phased gap lists, and explicit deferrals. Companion docs: [DESIGN.md](./DESIGN.md) (visual spec), [YAZI-AUDIT.md](./YAZI-AUDIT.md) (TUI best-practice audit), [REVIEW.md](./REVIEW.md) (adversarial framework review).
 
 ## License
 
