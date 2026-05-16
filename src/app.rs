@@ -171,6 +171,43 @@ pub enum ActivePane {
     StatusBar,
 }
 
+/// Cap for `AppState::event_ring`. Keeping the last 100 user-facing
+/// events covers a typical session of clicking through the TUI without
+/// blowing up memory.
+pub const EVENT_RING_CAP: usize = 100;
+
+/// Severity for a `UiEvent`. Mirrors `tracing::Level` so the live-tail
+/// layer can forward without translation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiEventLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl UiEventLevel {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Trace => "TRACE",
+            Self::Debug => "DEBUG",
+            Self::Info => "INFO",
+            Self::Warn => "WARN",
+            Self::Error => "ERROR",
+        }
+    }
+}
+
+/// A single entry in the in-memory event ring buffer.
+#[derive(Debug, Clone)]
+pub struct UiEvent {
+    pub at: chrono::DateTime<chrono::Utc>,
+    pub level: UiEventLevel,
+    pub source: &'static str,
+    pub message: String,
+}
+
 pub struct AppState {
     pub config: AppConfig,
     pub channels: Vec<ChannelEntry>,
@@ -274,6 +311,12 @@ pub struct AppState {
     /// Loaded from `{state_dir}/watched.json` on startup; written on
     /// transition to "watched" via `mark_watched()`.
     pub watched_history: HashSet<Uuid>,
+
+    /// In-memory ring of the last `EVENT_RING_CAP` user-facing events.
+    /// Feeds the Shift+E event-log pop-over (M1.3.e) and is the
+    /// landing spot for the live-tracing layer (M1.3.d). Distinct from
+    /// `log_lines` (raw trace tail) and `platform_errors` (per-platform).
+    pub event_ring: std::collections::VecDeque<UiEvent>,
     /// Which platform debug overlay to show, if any.
     pub show_platform_debug: Option<PlatformKind>,
     /// Selected indicator index in StatusBar focus mode (among configured platforms).
@@ -422,6 +465,7 @@ impl AppState {
             search_filtered_recordings: Vec::new(),
             platform_errors: HashMap::new(),
             watched_history: crate::recording::watch_history::load(),
+            event_ring: std::collections::VecDeque::with_capacity(EVENT_RING_CAP),
             show_platform_debug: None,
             selected_indicator: 0,
             prev_pane: None,
@@ -788,7 +832,72 @@ impl AppState {
         None
     }
 
+    /// Push a user-facing event onto the in-memory ring. Sized to
+    /// EVENT_RING_CAP; oldest entries fall off the front.
+    pub fn push_event(
+        &mut self,
+        level: UiEventLevel,
+        source: &'static str,
+        message: impl Into<String>,
+    ) {
+        if self.event_ring.len() >= EVENT_RING_CAP {
+            self.event_ring.pop_front();
+        }
+        self.event_ring.push_back(UiEvent {
+            at: chrono::Utc::now(),
+            level,
+            source,
+            message: message.into(),
+        });
+    }
+
     pub fn handle_daemon_event(&mut self, event: DaemonEvent) -> Option<AppAction> {
+        // Mirror the event into the user-facing ring before dispatch so
+        // every variant lands there even when the handler is a no-op.
+        let (level, message): (UiEventLevel, String) = match &event {
+            DaemonEvent::ChannelWentLive(ch) => (
+                UiEventLevel::Info,
+                format!("{} went live", ch.display_name),
+            ),
+            DaemonEvent::ChannelWentOffline(ch) => (
+                UiEventLevel::Info,
+                format!("{} went offline", ch.display_name),
+            ),
+            DaemonEvent::RecordingStarted { job } => (
+                UiEventLevel::Info,
+                format!("Recording started: {}", job.channel_name),
+            ),
+            DaemonEvent::RecordingFinished { job_id, final_state, error } => {
+                let level = match final_state {
+                    RecordingState::Finished => UiEventLevel::Info,
+                    RecordingState::Failed => UiEventLevel::Warn,
+                    _ => UiEventLevel::Info,
+                };
+                let msg = if let Some(e) = error {
+                    format!("Recording {job_id} → {final_state}: {e}")
+                } else {
+                    format!("Recording {job_id} → {final_state}")
+                };
+                (level, msg)
+            }
+            DaemonEvent::ScheduleFired { channel, duration_secs, .. } => (
+                UiEventLevel::Info,
+                format!("Schedule fired: {channel} ({} min)", duration_secs / 60),
+            ),
+            DaemonEvent::PlatformAuthenticated { kind } => {
+                (UiEventLevel::Info, format!("{kind} connected"))
+            }
+            DaemonEvent::Notification { title, body } => (
+                UiEventLevel::Info,
+                if body.is_empty() { title.clone() } else { format!("{title}: {body}") },
+            ),
+            DaemonEvent::Error(msg) => (UiEventLevel::Error, msg.clone()),
+            _ => (UiEventLevel::Trace, String::new()),
+        };
+        if !message.is_empty() {
+            self.push_event(level, "daemon", message);
+        }
+
         match event {
             DaemonEvent::ChannelsUpdated(channels) => {
                 // Remember currently selected channel by ID
