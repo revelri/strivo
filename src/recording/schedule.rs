@@ -264,6 +264,12 @@ pub async fn run_schedule_manager(
                                 job_id: Some(job_id),
                             });
 
+                            let _ = event_tx.send(AppEvent::schedule_fired(
+                                sched.channel_name.clone(),
+                                sched.platform,
+                                job_id,
+                                duration_secs,
+                            ));
                             let _ = event_tx.send(AppEvent::notification(
                                 "Scheduled Recording".to_string(),
                                 format!("Starting scheduled recording: {}", sched.channel_name),

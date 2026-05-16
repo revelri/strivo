@@ -72,6 +72,7 @@ pub enum DaemonEventKind {
     DeviceCodeRequired,
     PlatformAuthenticated,
     PatreonPostFound,
+    ScheduleFired,
     Error,
 }
 
@@ -90,6 +91,7 @@ impl DaemonEventKind {
             DaemonEvent::DeviceCodeRequired { .. } => Self::DeviceCodeRequired,
             DaemonEvent::PlatformAuthenticated { .. } => Self::PlatformAuthenticated,
             DaemonEvent::PatreonPostFound { .. } => Self::PatreonPostFound,
+            DaemonEvent::ScheduleFired { .. } => Self::ScheduleFired,
             DaemonEvent::Error(_) => Self::Error,
         }
     }

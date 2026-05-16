@@ -51,6 +51,15 @@ pub enum DaemonEvent {
         creator_name: String,
         post_title: String,
     },
+    /// A cron schedule fired and a recording was kicked off. Includes the
+    /// pre-generated `job_id` so the TUI can correlate with the
+    /// `RecordingStarted` that follows.
+    ScheduleFired {
+        channel: String,
+        platform: PlatformKind,
+        job_id: Uuid,
+        duration_secs: u64,
+    },
     Error(String),
 }
 
@@ -139,6 +148,14 @@ impl AppEvent {
     }
     pub fn error(msg: String) -> Self {
         Self::Daemon(DaemonEvent::Error(msg))
+    }
+    pub fn schedule_fired(
+        channel: String,
+        platform: PlatformKind,
+        job_id: Uuid,
+        duration_secs: u64,
+    ) -> Self {
+        Self::Daemon(DaemonEvent::ScheduleFired { channel, platform, job_id, duration_secs })
     }
 }
 
@@ -880,6 +897,11 @@ impl AppState {
             }
             DaemonEvent::PatreonPostFound { creator_name, post_title } => {
                 self.status_message = format!("Patreon: {creator_name} posted '{post_title}'");
+            }
+            DaemonEvent::ScheduleFired { channel, duration_secs, .. } => {
+                let mins = duration_secs / 60;
+                self.status_message =
+                    format!("Schedule fired: {channel} ({mins} min)");
             }
             DaemonEvent::Error(ref msg) => {
                 self.status_message = format!("Error: {msg}");
