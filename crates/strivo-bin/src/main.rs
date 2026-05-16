@@ -893,6 +893,12 @@ async fn run_client(args: cli::Args) -> Result<()> {
     let (event_tx, event_rx) = mpsc::unbounded_channel::<AppEvent>();
     let (daemon_tx, mut daemon_rx) = mpsc::unbounded_channel::<ipc::ClientMessage>();
 
+    // Tracing → event-ring bridge: the registered Layer forwards events
+    // from `tracing::{info,warn,error}!` macros (in strivo* targets) onto
+    // this channel as AppEvent::LogBridge. AppState.event_ring picks them
+    // up alongside daemon events.
+    strivo_core::tui::log_bridge::install_sender(event_tx.clone());
+
     let (recording_tx, _recording_rx) = mpsc::unbounded_channel();
     app_state.daemon_tx = Some(daemon_tx);
 
@@ -1041,13 +1047,17 @@ async fn run_tui(args: cli::Args) -> Result<()> {
         .append(true)
         .open(&log_path)?;
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(&args.log_level)),
-        )
+    // File-tail layer + in-memory bridge to AppState.event_ring.
+    use tracing_subscriber::prelude::*;
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(&args.log_level));
+    let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(log_file)
-        .with_ansi(false)
+        .with_ansi(false);
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(fmt_layer)
+        .with(strivo_core::tui::log_bridge::LogBridgeLayer)
         .init();
 
     tracing::info!("StriVo starting (standalone mode)");

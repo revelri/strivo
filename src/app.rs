@@ -108,6 +108,10 @@ pub enum AppEvent {
     /// Daemon socket re-established (supervisor transparently replaces the
     /// underlying stream; the app's `daemon_tx` is still valid).
     DaemonReconnected,
+    /// Forwarded from the tracing-subscriber bridge layer
+    /// (`tui::log_bridge`). Lands in `event_ring` so the Shift+E pop-over
+    /// can display recent tracing events alongside daemon events.
+    LogBridge(UiEvent),
 }
 
 // Convenience constructors so existing code that sends DaemonEvent variants
@@ -863,6 +867,12 @@ impl AppState {
                 self.daemon_reconnect_attempts = 0;
                 self.daemon_disconnected_at = None;
                 self.status_message = "✓ Daemon reconnected".to_string();
+            }
+            AppEvent::LogBridge(ev) => {
+                if self.event_ring.len() >= EVENT_RING_CAP {
+                    self.event_ring.pop_front();
+                }
+                self.event_ring.push_back(ev);
             }
         }
         None

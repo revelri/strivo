@@ -1,6 +1,7 @@
 pub mod anim;
 pub mod event;
 pub mod layout;
+pub mod log_bridge;
 pub mod theme;
 pub mod widgets;
 
