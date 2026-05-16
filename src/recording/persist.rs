@@ -215,6 +215,46 @@ impl PersistDb {
         Ok(out)
     }
 
+    /// Reconstruct `RecordingJob`s persisted by `persist_event`. Called once
+    /// at daemon startup so the TUI sees its history (including
+    /// interrupted-but-not-finished rows) even after a crash.
+    pub async fn load_recording_jobs(&self) -> Result<Vec<crate::recording::job::RecordingJob>> {
+        let conn = self.inner.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT payload, state, last_error FROM jobs
+             WHERE kind = 'Recording'
+             ORDER BY updated_at DESC
+             LIMIT 500",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            let (payload, state, err) = r?;
+            let Ok(mut job) =
+                serde_json::from_str::<crate::recording::job::RecordingJob>(&payload)
+            else {
+                continue;
+            };
+            // Force the state field to match the journal — `payload` was
+            // serialized at job-creation time and may say 'queued'.
+            if let Some(mapped) = map_journal_state(&state) {
+                job.state = mapped;
+            }
+            if job.error.is_none() {
+                job.error = err;
+            }
+            out.push(job);
+        }
+        Ok(out)
+    }
+
     pub async fn upsert_crunchr_queue(&self, entry: &CrunchrQueueEntry) -> Result<()> {
         let conn = self.inner.lock().await;
         let now = chrono::Utc::now().to_rfc3339();
@@ -303,6 +343,20 @@ pub struct PersistedJob {
     pub attempts: i64,
     pub last_error: Option<String>,
     pub episode_dir: Option<PathBuf>,
+}
+
+fn map_journal_state(s: &str) -> Option<crate::recording::job::RecordingState> {
+    use crate::recording::job::RecordingState as S;
+    match s {
+        "resolvingurl" | "resolving" => Some(S::ResolvingUrl),
+        "recording" | "running" => Some(S::Recording),
+        "stopping" => Some(S::Stopping),
+        "finished" => Some(S::Finished),
+        // 'interrupted' isn't a RecordingState variant — surface it as
+        // Failed so the TUI shows the row in the failure styling.
+        "failed" | "interrupted" => Some(S::Failed),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone)]

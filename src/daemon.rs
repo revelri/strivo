@@ -310,6 +310,26 @@ pub async fn run() -> Result<()> {
         state.recordings.insert(job.id, job);
     }
 
+    // Replay recordings from the journal so the TUI sees jobs that
+    // started before a crash (with their original IDs, channel links,
+    // and last-known progress). Disk-scan above is the backstop for
+    // jobs that pre-date the journal; journal wins on conflict because
+    // it preserves the original Uuid and metadata.
+    if let Some(ref db) = persist_db {
+        match db.load_recording_jobs().await {
+            Ok(jobs) => {
+                let n = jobs.len();
+                for job in jobs {
+                    state.recordings.insert(job.id, job);
+                }
+                if n > 0 {
+                    tracing::info!("daemon: replayed {n} recording(s) from journal");
+                }
+            }
+            Err(e) => tracing::warn!("daemon: failed to load recording journal: {e}"),
+        }
+    }
+
     // Set up Unix socket
     let socket_path = ipc::socket_path();
     // Remove stale socket
