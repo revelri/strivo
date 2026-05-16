@@ -5,7 +5,7 @@ use ratatui::{
 
 use crate::app::{ActivePane, AppState};
 use crate::plugin::registry::PluginRegistry;
-use crate::tui::widgets::{channel_detail, dialog, log_viewer, platform_debug, properties, recording_list, settings, sidebar, status_bar, theme_picker, wizard};
+use crate::tui::widgets::{channel_detail, dialog, log_viewer, platform_debug, properties, recording_list, schedule, settings, sidebar, status_bar, theme_picker, wizard};
 
 pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) {
     app.update_focus_timing();
@@ -40,6 +40,7 @@ pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) 
         ActivePane::Plugin(_) => {
             registry.render_active_pane(frame, detail_area, app);
         }
+        ActivePane::Schedule => schedule::render(frame, detail_area, app),
         // Default: show recording list (Sidebar, RecordingList, or anything else)
         _ => recording_list::render(frame, detail_area, app),
     }

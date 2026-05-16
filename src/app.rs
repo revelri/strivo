@@ -171,6 +171,7 @@ pub enum ActivePane {
     Settings,
     Log,
     Wizard,
+    Schedule,
     Plugin(PaneId),
     StatusBar,
 }
@@ -243,6 +244,8 @@ pub struct AppState {
     /// is the foundation for future bulk rename / move.
     pub recording_selections_order: Vec<Uuid>,
     pub recording_selections_set: HashSet<Uuid>,
+    /// Schedule-pane cursor.
+    pub selected_schedule: usize,
     pub transcode_mode: bool,
 
     // Playback
@@ -446,6 +449,7 @@ impl AppState {
             selected_recording_id: None,
             recording_selections_order: Vec::new(),
             recording_selections_set: HashSet::new(),
+            selected_schedule: 0,
             transcode_mode: initial_transcode,
             watching_channel: None,
             twitch_connected: false,
@@ -1325,6 +1329,17 @@ impl AppState {
                 self.active_pane = ActivePane::Log;
                 return None;
             }
+            KeyCode::Char('S')
+                if self.active_pane != ActivePane::Wizard
+                    && self.active_pane != ActivePane::Schedule =>
+            {
+                self.clear_search();
+                self.active_pane = ActivePane::Schedule;
+                self.selected_schedule = self
+                    .selected_schedule
+                    .min(self.config.schedule.len().saturating_sub(1));
+                return None;
+            }
             KeyCode::Char('/') if matches!(self.active_pane, ActivePane::Sidebar | ActivePane::RecordingList | ActivePane::Detail) => {
                 self.search_active = true;
                 self.search_query.clear();
@@ -1345,10 +1360,66 @@ impl AppState {
             ActivePane::Settings => self.handle_settings_key(key),
             ActivePane::Log => self.handle_log_key(key),
             ActivePane::Wizard => self.handle_wizard_key(key),
+            ActivePane::Schedule => self.handle_schedule_key(key),
             // Plugin key events handled by caller which owns the registry
             ActivePane::Plugin(_) => None,
             ActivePane::StatusBar => self.handle_status_bar_key(key),
         }
+    }
+
+    /// Schedule pane: j/k navigate, D delete current row (writes config),
+    /// Esc/h returns to Sidebar. Add/edit modals are deferred until the
+    /// generic text-input modal lands (alongside rename/move in M1.3.b).
+    fn handle_schedule_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> Option<AppAction> {
+        use crossterm::event::KeyCode;
+        let count = self.config.schedule.len();
+        if count > 0 {
+            self.selected_schedule = self.selected_schedule.min(count - 1);
+        }
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
+                self.active_pane = ActivePane::Sidebar;
+            }
+            KeyCode::Char('j') | KeyCode::Down if count > 0 => {
+                self.selected_schedule = (self.selected_schedule + 1) % count;
+            }
+            KeyCode::Char('k') | KeyCode::Up if count > 0 => {
+                self.selected_schedule = if self.selected_schedule == 0 {
+                    count - 1
+                } else {
+                    self.selected_schedule - 1
+                };
+            }
+            KeyCode::Char('g') | KeyCode::Home if count > 0 => {
+                self.selected_schedule = 0;
+            }
+            KeyCode::Char('G') | KeyCode::End if count > 0 => {
+                self.selected_schedule = count - 1;
+            }
+            KeyCode::Char('D') if count > 0 => {
+                let removed = self.config.schedule.remove(self.selected_schedule);
+                if let Err(e) = self.config.save(None) {
+                    self.status_message =
+                        format!("Schedule removed in-memory but save failed: {e}");
+                } else {
+                    self.status_message = format!(
+                        "Removed schedule for {} ({})",
+                        removed.channel, removed.cron
+                    );
+                }
+                let new_count = self.config.schedule.len();
+                if new_count == 0 {
+                    self.selected_schedule = 0;
+                } else if self.selected_schedule >= new_count {
+                    self.selected_schedule = new_count - 1;
+                }
+            }
+            _ => {}
+        }
+        None
     }
 
     /// Open the theme picker, snapshot current theme so Esc can revert.
