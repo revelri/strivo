@@ -60,6 +60,24 @@ async fn run_loop(
         app.clock.tick();
         terminal.draw(|frame| layout::render(frame, app, registry))?;
 
+        // Drain any thumbnail decode requests the grid renderer
+        // queued this frame (M5.4). The render pass marks IDs
+        // in_flight; here we spawn the actual extraction.
+        if !app.pending_recording_thumb_jobs.is_empty() {
+            let picker = app.picker.clone();
+            let jobs = std::mem::take(&mut app.pending_recording_thumb_jobs);
+            for (id, path) in jobs {
+                let tx = internal_tx.clone();
+                let picker = picker.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = extract_and_decode_recording_thumb(id, path, picker, tx).await
+                    {
+                        tracing::debug!("recording thumbnail failed for {id}: {e}");
+                    }
+                });
+            }
+        }
+
         // Poll crossterm events — adaptive cadence (16 ms during motion,
         // 120 ms when idle) to conserve CPU while preserving the 60 fps feel.
         let poll = app.poll_duration().min(FRAME_DURATION * 8);
@@ -232,6 +250,33 @@ fn seed_playback(app: &mut AppState, path: &std::path::Path, start_secs: f64) {
         volume: 100,
         speed: 1.0,
     });
+}
+
+async fn extract_and_decode_recording_thumb(
+    id: uuid::Uuid,
+    source: PathBuf,
+    picker: Option<Picker>,
+    tx: mpsc::UnboundedSender<AppEvent>,
+) -> Result<()> {
+    // Step 1: pull or extract the cached JPEG via the M5.4 substrate.
+    let thumb_path = match crate::recording::thumbnail::cached(&source) {
+        Some(p) => p,
+        None => crate::recording::thumbnail::extract(&source, 10.0).await?,
+    };
+    let bytes = tokio::fs::read(&thumb_path).await?;
+    let Some(picker) = picker else {
+        // No graphics protocol — caller's grid renderer just shows
+        // the placeholder.
+        return Ok(());
+    };
+    let protocol = tokio::task::spawn_blocking(move || -> Result<ratatui_image::protocol::StatefulProtocol> {
+        let img = image::load_from_memory(&bytes)?;
+        let proto = picker.new_resize_protocol(img);
+        Ok(proto)
+    })
+    .await??;
+    let _ = tx.send(AppEvent::RecordingThumbnailDecoded { id, protocol });
+    Ok(())
 }
 
 fn spawn_thumbnail_downloads(

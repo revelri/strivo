@@ -157,6 +157,8 @@ pub enum KeyAction {
     /// Undo the last destructive action (M4.follow.a). Cleared on quit;
     /// limited to 5 entries.
     UndoLast,
+    /// Toggle the RecordingList between List and Grid view (M5.4).
+    ToggleRecordingListView,
 
     // Schedule
     ScheduleAdd,
@@ -211,6 +213,7 @@ impl KeyAction {
             Self::CopyToClipboard => "copy to clipboard",
             Self::OpenInFolder => "open folder",
             Self::UndoLast => "undo last destructive action",
+            Self::ToggleRecordingListView => "toggle list / grid view",
             Self::PlaybackTogglePause => "play/pause",
             Self::PlaybackSeekForward => "seek +10s",
             Self::PlaybackSeekBack => "seek -10s",
@@ -274,6 +277,7 @@ impl KeyAction {
             "CopyToClipboard" => Self::CopyToClipboard,
             "OpenInFolder" => Self::OpenInFolder,
             "UndoLast" => Self::UndoLast,
+            "ToggleRecordingListView" => Self::ToggleRecordingListView,
             "PlaybackTogglePause" => Self::PlaybackTogglePause,
             "PlaybackSeekForward" => Self::PlaybackSeekForward,
             "PlaybackSeekBack" => Self::PlaybackSeekBack,
@@ -618,6 +622,7 @@ fn table() -> &'static [Chord] {
         c(Layer::RecordingList, KeyPattern { code: Char('R'), modifiers: M::SHIFT }, KeyAction::RenameRecording,          "rename"),
         c(Layer::RecordingList, KeyPattern { code: Char('M'), modifiers: M::SHIFT }, KeyAction::MoveRecording,            "move"),
         c(Layer::RecordingList, KeyPattern::plain(Char('y')), KeyAction::CopyToClipboard,                                 "copy path"),
+        c(Layer::RecordingList, KeyPattern::plain(Tab),       KeyAction::ToggleRecordingListView,                        "toggle list/grid"),
         c(Layer::RecordingList, KeyPattern { code: Char('O'), modifiers: M::SHIFT }, KeyAction::OpenInFolder,             "open folder"),
         // Playback overlay keys (active only while playback.is_some()).
         c(Layer::RecordingList, KeyPattern::plain(Char(' ')), KeyAction::PlaybackTogglePause, "play/pause"),

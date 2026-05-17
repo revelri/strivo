@@ -112,6 +112,12 @@ pub enum AppEvent {
     /// (`tui::log_bridge`). Lands in `event_ring` so the Shift+E pop-over
     /// can display recent tracing events alongside daemon events.
     LogBridge(UiEvent),
+    /// Decoded recording thumbnail (M5.4 grid). Run-loop swaps the
+    /// protocol into AppState.recording_thumb_protocols.
+    RecordingThumbnailDecoded {
+        id: Uuid,
+        protocol: StatefulProtocol,
+    },
 }
 
 // Convenience constructors so existing code that sends DaemonEvent variants
@@ -161,6 +167,14 @@ impl AppEvent {
     ) -> Self {
         Self::Daemon(DaemonEvent::ScheduleFired { channel, platform, job_id, duration_secs })
     }
+}
+
+/// RecordingList view mode (M5.4 full grid). Persisted only in-process;
+/// next launch defaults back to List.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecordingListView {
+    List,
+    Grid,
 }
 
 /// Input mode (yazi audit §1). Distinct from `ActivePane`. Visual mode
@@ -332,6 +346,20 @@ pub struct AppState {
     /// finishes, deletes, and journal-replay reorderings instead of
     /// snapping to whatever index 0 happens to be after the mutation.
     pub selected_recording_id: Option<Uuid>,
+    /// List vs grid view on the RecordingList pane (M5.4 full grid).
+    pub recording_list_view: RecordingListView,
+    /// Decoded `StatefulProtocol` per recording UUID, keyed for the
+    /// grid view. Mirror of `thumbnail_protocols` (channels) — entries
+    /// are populated lazily by the run-loop thumbnail decoder when the
+    /// user enters grid mode.
+    pub recording_thumb_protocols: HashMap<Uuid, StatefulProtocol>,
+    /// IDs whose extraction+decode is in flight, so we don't spawn
+    /// duplicates per frame.
+    pub recording_thumb_in_flight: HashSet<Uuid>,
+    /// Render-frame queue of (id, file path) the run loop drains and
+    /// dispatches to background decoder tasks. The grid renderer pushes
+    /// here; the run loop consumes after `terminal.draw`.
+    pub pending_recording_thumb_jobs: Vec<(Uuid, PathBuf)>,
     /// Multi-select set (yazi-style: insertion-ordered, dedup via parallel set).
     /// `v` toggles current row, `V` clears. Used by bulk delete (`D`) and
     /// is the foundation for future bulk rename / move.
@@ -602,6 +630,10 @@ impl AppState {
             active_recording_channels: HashSet::new(),
             selected_recording: 0,
             selected_recording_id: initial_recording_id,
+            recording_list_view: RecordingListView::List,
+            recording_thumb_protocols: HashMap::new(),
+            recording_thumb_in_flight: HashSet::new(),
+            pending_recording_thumb_jobs: Vec::new(),
             recording_selections_order: Vec::new(),
             recording_selections_set: HashSet::new(),
             selected_schedule: 0,
@@ -1069,6 +1101,10 @@ impl AppState {
                 self.thumbnail_changed_at
                     .insert(channel_id.clone(), std::time::Instant::now());
                 self.thumbnail_protocols.insert(channel_id, protocol);
+            }
+            AppEvent::RecordingThumbnailDecoded { id, protocol } => {
+                self.recording_thumb_in_flight.remove(&id);
+                self.recording_thumb_protocols.insert(id, protocol);
             }
             AppEvent::WatchResolved { channel_name, stream_url } => {
                 self.watching_channel = Some(channel_name.clone());
@@ -1968,6 +2004,13 @@ impl AppState {
             }
             A::UndoLast => {
                 self.undo_last();
+                None
+            }
+            A::ToggleRecordingListView => {
+                self.recording_list_view = match self.recording_list_view {
+                    RecordingListView::List => RecordingListView::Grid,
+                    RecordingListView::Grid => RecordingListView::List,
+                };
                 None
             }
         }

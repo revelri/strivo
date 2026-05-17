@@ -1,12 +1,12 @@
 use ratatui::{
     Frame,
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, List, ListItem, ListState},
+    widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
 };
 
-use crate::app::{ActivePane, AppState};
+use crate::app::{ActivePane, AppState, RecordingListView};
 use crate::platform::PlatformKind;
 use crate::recording::job::RecordingState;
 use crate::tui::theme::Theme;
@@ -23,7 +23,11 @@ fn spinner_frame(elapsed_secs: f32) -> &'static str {
     SPINNER_FRAMES[idx]
 }
 
-pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
+pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
+    if app.recording_list_view == RecordingListView::Grid {
+        render_grid(frame, area, app);
+        return;
+    }
     let border_style = app.pane_border(&ActivePane::RecordingList);
 
     let active_count = app.active_recording_count();
@@ -214,4 +218,137 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
         .highlight_style(Theme::selected());
 
     frame.render_stateful_widget(list, area, &mut state);
+}
+
+/// M5.4 grid renderer. 3 cols × N rows of thumbnail cells. Each cell
+/// renders the cached protocol if present, a placeholder otherwise.
+/// The cursor moves cell-by-cell using selected_recording (linear);
+/// h/l jump ±1 cell, j/k jump ±3 (one row).
+pub fn render_grid(frame: &mut Frame, area: Rect, app: &mut AppState) {
+    let border_style = app.pane_border(&ActivePane::RecordingList);
+    let total = app.sorted_recordings().len();
+    let title = format!(" Recordings · Grid ({total}) [Tab to list] ");
+    let outer = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(border_style)
+        .title(title)
+        .title_style(Theme::title());
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
+
+    if total == 0 {
+        let hint = Paragraph::new(Line::styled(
+            "  No recordings yet",
+            Style::new().fg(Theme::muted()),
+        ));
+        frame.render_widget(hint, inner);
+        return;
+    }
+
+    const COLS: u16 = 3;
+    let cell_h: u16 = 8;
+    let rows = inner.height.saturating_sub(1) / cell_h;
+    let visible = (rows as usize) * (COLS as usize);
+    if rows == 0 {
+        return;
+    }
+
+    // Center the cursor in the visible window when possible.
+    let sel = app.selected_recording.min(total.saturating_sub(1));
+    let scroll_start = if visible >= total {
+        0usize
+    } else {
+        sel.saturating_sub(visible / 2).min(total - visible)
+    };
+
+    // Gather (id, channel_name, duration_str) for the visible window.
+    let visible_recs: Vec<(uuid::Uuid, std::path::PathBuf, String, String)> = {
+        let recs = app.sorted_recordings();
+        recs.iter()
+            .skip(scroll_start)
+            .take(visible)
+            .map(|r| {
+                (
+                    r.id,
+                    r.output_path.clone(),
+                    r.channel_name.clone(),
+                    r.format_duration(),
+                )
+            })
+            .collect()
+    };
+
+    // Best-effort spawn of decode jobs for any visible recording that
+    // doesn't have a decoded protocol yet. The actual ffmpeg + image
+    // decode happens in the run loop; here we just mark the in-flight
+    // set so the run loop knows what's wanted.
+    let to_decode: Vec<(uuid::Uuid, std::path::PathBuf)> = visible_recs
+        .iter()
+        .filter_map(|(id, path, _, _)| {
+            if app.recording_thumb_protocols.contains_key(id)
+                || app.recording_thumb_in_flight.contains(id)
+            {
+                None
+            } else {
+                Some((*id, path.clone()))
+            }
+        })
+        .collect();
+    for (id, _) in &to_decode {
+        app.recording_thumb_in_flight.insert(*id);
+    }
+    // The actual spawn happens in src/tui/mod.rs; we publish the
+    // wishlist via AppState so the run loop can pull it on the next
+    // tick without us holding a sender here.
+    app.pending_recording_thumb_jobs.extend(to_decode);
+
+    // Render row by row.
+    let row_constraints: Vec<Constraint> =
+        std::iter::repeat(Constraint::Length(cell_h)).take(rows as usize).collect();
+    let row_rects = Layout::vertical(row_constraints).split(inner);
+
+    let local_index_of_sel = sel.checked_sub(scroll_start);
+
+    for (row_idx, row_rect) in row_rects.iter().enumerate() {
+        let col_constraints: [Constraint; 3] = [
+            Constraint::Ratio(1, COLS as u32),
+            Constraint::Ratio(1, COLS as u32),
+            Constraint::Ratio(1, COLS as u32),
+        ];
+        let cells = Layout::horizontal(col_constraints).split(*row_rect);
+        for (col_idx, cell_rect) in cells.iter().enumerate() {
+            let local = row_idx * (COLS as usize) + col_idx;
+            let Some((id, _, channel_name, duration)) = visible_recs.get(local) else {
+                continue;
+            };
+            let is_selected = local_index_of_sel == Some(local);
+            let cell_border = if is_selected {
+                Style::new()
+                    .fg(Theme::primary())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(Theme::dim())
+            };
+            let label = format!(" {channel_name} · {duration} ");
+            let cell_block = Block::default()
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(cell_border)
+                .title(label);
+            let cell_inner = cell_block.inner(*cell_rect);
+            frame.render_widget(cell_block, *cell_rect);
+
+            if let Some(proto) = app.recording_thumb_protocols.get_mut(id) {
+                let image_widget = ratatui_image::StatefulImage::default();
+                frame.render_stateful_widget(image_widget, cell_inner, proto);
+            } else {
+                let placeholder = Paragraph::new(Line::styled(
+                    "  decoding…",
+                    Style::new().fg(Theme::muted()),
+                ));
+                frame.render_widget(placeholder, cell_inner);
+            }
+        }
+    }
 }
