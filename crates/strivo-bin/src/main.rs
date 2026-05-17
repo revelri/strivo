@@ -72,6 +72,7 @@ async fn handle_command(cmd: &Command, config_path: Option<&std::path::Path>) ->
         Command::Theme { action } => handle_theme_command(action),
         Command::Doctor => handle_doctor(),
         Command::Chapter { file, every } => handle_chapter(file, *every),
+        Command::Import { source } => handle_import(source, config_path),
         Command::Merge { output, sources } => handle_merge(output, sources),
         Command::Thumbnail { file, seek } => handle_thumbnail(file, *seek).await,
         Command::Completions { shell } => handle_completions(*shell),
@@ -252,6 +253,56 @@ fn handle_theme_command(action: &ThemeAction) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn handle_import(
+    source: &cli::ImportSource,
+    config_path: Option<&std::path::Path>,
+) -> Result<()> {
+    use strivo_core::config::import::{parse_obs_export, parse_streamlink_lines, Candidate};
+
+    let (candidates, apply, source_path) = match source {
+        cli::ImportSource::Obs { file, apply } => {
+            (parse_obs_export(file)?, *apply, file.clone())
+        }
+        cli::ImportSource::Streamlink { file, apply } => {
+            (parse_streamlink_lines(file)?, *apply, file.clone())
+        }
+    };
+
+    if candidates.is_empty() {
+        println!("No channels discovered in {}", source_path.display());
+        return Ok(());
+    }
+
+    println!("Discovered {} channel(s):", candidates.len());
+    for c in &candidates {
+        println!("  + {}:{}  ({})", c.platform, c.channel_id, c.channel_name);
+    }
+
+    if !apply {
+        println!();
+        println!("Dry-run. Pass --apply to write into config.toml.");
+        return Ok(());
+    }
+
+    let mut cfg = config::AppConfig::load(config_path).context("load config")?;
+    let mut added = 0usize;
+    let mut skipped = 0usize;
+    for c in candidates {
+        let exists = cfg.auto_record_channels.iter().any(|a| {
+            a.platform == c.platform && a.channel_id == c.channel_id
+        });
+        if exists {
+            skipped += 1;
+            continue;
+        }
+        cfg.auto_record_channels.push(Candidate::into_auto_record(c));
+        added += 1;
+    }
+    cfg.save(config_path).context("save config")?;
+    println!("Applied: {added} added, {skipped} already present.");
+    Ok(())
 }
 
 fn handle_merge(output: &std::path::Path, sources: &[std::path::PathBuf]) -> Result<()> {

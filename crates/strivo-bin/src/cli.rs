@@ -71,6 +71,12 @@ pub enum Command {
 
     /// Check that required external tools are installed
     Doctor,
+    /// Import auto-record channels from an OBS scene collection or a
+    /// Streamlink-style stream list (M5.7).
+    Import {
+        #[command(subcommand)]
+        source: ImportSource,
+    },
     /// Merge resume segments back into a single MKV file (M5.5).
     /// Sources are appended in the order given; the first owns the
     /// timeline. Requires mkvtoolnix.
@@ -108,6 +114,27 @@ pub enum Command {
     },
     /// Print man page (roff) to stdout
     Man,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ImportSource {
+    /// Parse an OBS Studio scene-collection JSON export.
+    Obs {
+        /// Path to the .json export.
+        file: std::path::PathBuf,
+        /// Commit results to config.toml. Without this, the command
+        /// only previews what would be added.
+        #[arg(long)]
+        apply: bool,
+    },
+    /// Parse a Streamlink config / streams.txt file. Any line
+    /// containing a Twitch / YouTube / Patreon URL is candidate.
+    Streamlink {
+        /// Path to the streamlink config or stream-list.
+        file: std::path::PathBuf,
+        #[arg(long)]
+        apply: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
