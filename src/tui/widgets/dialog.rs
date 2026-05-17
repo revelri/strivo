@@ -46,6 +46,16 @@ fn format_pattern(p: &crate::tui::keymap::KeyPattern) -> String {
     out
 }
 
+/// Collect (key-label, desc) pairs for every chord in `layer` from the
+/// keymap table. Used to auto-build pane sections of the help overlay.
+fn layer_rows(layer: crate::tui::keymap::Layer) -> Vec<(String, &'static str)> {
+    crate::tui::keymap::all_chords()
+        .iter()
+        .filter(|c| c.layer == layer)
+        .map(|c| (format_pattern(&c.key), c.desc))
+        .collect()
+}
+
 pub fn render_help(
     frame: &mut Frame,
     area: Rect,
@@ -102,43 +112,32 @@ pub fn render_help(
         ("Esc", "Clear filter / go back"),
     ]);
 
-    let sidebar_keys: Vec<(&str, &str)> = vec![
-        ("j/k, ↑/↓", "Navigate channels"),
-        ("g/G, Home/End", "Jump first / last"),
-        ("Enter/l/→", "Select channel"),
-        ("S", "Settings"),
-        ("L", "Recording list"),
-    ];
+    // Pane sections auto-generated from the keymap table (M3.followup.e).
+    // The base table is the single source of truth; help text falls out
+    // of each Chord's `.desc`.
+    let sidebar_owned = layer_rows(crate::tui::keymap::Layer::Sidebar);
+    let detail_owned = layer_rows(crate::tui::keymap::Layer::Detail);
+    let recording_owned = layer_rows(crate::tui::keymap::Layer::RecordingList);
+    let schedule_owned = layer_rows(crate::tui::keymap::Layer::Schedule);
+    let settings_owned = layer_rows(crate::tui::keymap::Layer::Settings);
+    let log_owned = layer_rows(crate::tui::keymap::Layer::Log);
 
-    let detail_keys: Vec<(&str, &str)> = vec![
-        ("j/k, ↑/↓", "Cycle channels"),
-        ("g/G, Home/End", "Jump first / last"),
-        ("r", "Start recording"),
-        ("R", "Record from start (YT)"),
-        ("w", "Watch in mpv"),
-        ("a", "Toggle monitor"),
-        ("t", "Toggle transcode mode"),
-        ("Esc/h/←", "Go back"),
-    ];
+    let sidebar_keys: Vec<(&str, &str)> =
+        sidebar_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
+    let detail_keys: Vec<(&str, &str)> =
+        detail_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
+    let recording_keys: Vec<(&str, &str)> =
+        recording_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
+    let schedule_keys: Vec<(&str, &str)> =
+        schedule_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
+    let settings_keys: Vec<(&str, &str)> =
+        settings_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
+    let log_keys: Vec<(&str, &str)> =
+        log_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
 
-    let recording_keys: Vec<(&str, &str)> = vec![
-        ("j/k, ↑/↓", "Navigate recordings"),
-        ("g/G, Home/End", "Jump first / last"),
-        ("s", "Stop recording"),
-        ("p", "Play recording"),
-        ("i", "Recording info"),
-        ("Esc/h/←", "Go back"),
-    ];
-
-    let log_keys: Vec<(&str, &str)> = vec![
-        ("j/k, ↑/↓", "Scroll"),
-        ("g/Home", "Jump to top"),
-        ("G/End", "Jump to bottom"),
-        ("PgUp/Dn", "Scroll page"),
-        ("c", "Clear log"),
-        ("Esc/h/←", "Go back"),
-    ];
-
+    // Wizard stays hardcoded — its keys aren't in the table because they
+    // intentionally diverge from universal navigation (tab-style auth
+    // platform switcher).
     let wizard_keys: Vec<(&str, &str)> = vec![
         ("o", "Open auth URL in browser"),
         ("Esc", "Dismiss wizard"),
@@ -163,6 +162,16 @@ pub fn render_help(
             "Recordings",
             &recording_keys,
             matches!(active_pane, ActivePane::RecordingList),
+        ),
+        (
+            "Schedule",
+            &schedule_keys,
+            matches!(active_pane, ActivePane::Schedule),
+        ),
+        (
+            "Settings",
+            &settings_keys,
+            matches!(active_pane, ActivePane::Settings),
         ),
         (
             "Log Viewer",

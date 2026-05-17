@@ -1499,6 +1499,178 @@ impl AppState {
             }
             A::SearchStart => None,
             A::PluginActivate => None,
+            A::EnterSettings => {
+                self.active_pane = ActivePane::Settings;
+                None
+            }
+            A::EnterRecordingList => {
+                self.active_pane = ActivePane::RecordingList;
+                None
+            }
+            A::NavDown => {
+                self.pane_nav_down();
+                None
+            }
+            A::NavUp => {
+                self.pane_nav_up();
+                None
+            }
+            A::NavTop => {
+                self.pane_nav_top();
+                None
+            }
+            A::NavBottom => {
+                self.pane_nav_bottom();
+                None
+            }
+            A::NavBack => {
+                self.pane_nav_back();
+                None
+            }
+            A::NavActivate => self.pane_nav_activate(),
+            A::ToggleAutoRecord => {
+                self.toggle_auto_record_on_selected();
+                None
+            }
+            A::StartRecording => self.start_recording_on_selected(false),
+            A::StartRecordingFromStart => self.start_recording_on_selected(true),
+            A::WatchStream => self.watch_selected_stream(),
+            A::ToggleTranscode => {
+                self.transcode_mode = !self.transcode_mode;
+                self.config.recording.transcode = self.transcode_mode;
+                let _ = self.config.save(None);
+                self.status_message = if self.transcode_mode {
+                    "Transcode mode: ON".into()
+                } else {
+                    "Transcode mode: OFF".into()
+                };
+                None
+            }
+            A::StopRecording => self.recording_list_stop_selected(),
+            A::PlayRecording => self.recording_list_play_selected(),
+            A::ShowRecordingProperties => self.recording_list_open_props(),
+            A::ToggleRecordingSelect => {
+                self.recording_list_toggle_select();
+                None
+            }
+            A::ClearRecordingSelections => {
+                self.recording_selections_order.clear();
+                self.recording_selections_set.clear();
+                None
+            }
+            A::TrashSelectedRecordings => {
+                self.recording_list_trash_selected();
+                None
+            }
+            A::RenameRecording => {
+                self.recording_list_open_rename();
+                None
+            }
+            A::MoveRecording => {
+                self.recording_list_open_move();
+                None
+            }
+            A::PlaybackTogglePause => {
+                if self.playback.is_some() {
+                    if let Some(ref mut st) = self.playback {
+                        st.is_paused = !st.is_paused;
+                    }
+                    Some(AppAction::MpvTogglePause)
+                } else {
+                    None
+                }
+            }
+            A::PlaybackSeekForward => {
+                if self.playback.is_some() { Some(AppAction::MpvSeek(10.0)) } else { None }
+            }
+            A::PlaybackSeekBack => {
+                if self.playback.is_some() { Some(AppAction::MpvSeek(-10.0)) } else { None }
+            }
+            A::PlaybackSpeedUp => {
+                if let Some(ref mut st) = self.playback {
+                    st.speed = (st.speed + 0.25).min(4.0);
+                    Some(AppAction::MpvSetSpeed(st.speed))
+                } else {
+                    None
+                }
+            }
+            A::PlaybackSpeedDown => {
+                if let Some(ref mut st) = self.playback {
+                    st.speed = (st.speed - 0.25).max(0.25);
+                    Some(AppAction::MpvSetSpeed(st.speed))
+                } else {
+                    None
+                }
+            }
+            A::PlaybackVolumeUp => {
+                if let Some(ref mut st) = self.playback {
+                    st.volume = (st.volume + 5).min(150);
+                    Some(AppAction::MpvSetVolume(st.volume))
+                } else {
+                    None
+                }
+            }
+            A::PlaybackVolumeDown => {
+                if let Some(ref mut st) = self.playback {
+                    st.volume = st.volume.saturating_sub(5);
+                    Some(AppAction::MpvSetVolume(st.volume))
+                } else {
+                    None
+                }
+            }
+            A::ScheduleAdd => {
+                self.open_text_input(
+                    crate::tui::widgets::text_input::TextInputPurpose::ScheduleAddChannel,
+                    "Channel (e.g. `twitch:shroud`)",
+                    "twitch:",
+                );
+                None
+            }
+            A::ScheduleEditCron => {
+                if let Some(entry) = self.config.schedule.get(self.selected_schedule) {
+                    let index = self.selected_schedule;
+                    let cron = entry.cron.clone();
+                    self.open_text_input(
+                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditCron { index },
+                        "Edit cron expression",
+                        cron,
+                    );
+                }
+                None
+            }
+            A::ScheduleEditDuration => {
+                if let Some(entry) = self.config.schedule.get(self.selected_schedule) {
+                    let index = self.selected_schedule;
+                    let duration = entry.duration.clone();
+                    self.open_text_input(
+                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditDuration { index },
+                        "Edit duration",
+                        duration,
+                    );
+                }
+                None
+            }
+            A::ScheduleDelete => {
+                self.schedule_delete_selected();
+                None
+            }
+            A::LogScrollPageDown => {
+                self.log_scroll = (self.log_scroll + 30).min(self.log_lines.len().saturating_sub(1));
+                self.log_auto_scroll = false;
+                None
+            }
+            A::LogScrollPageUp => {
+                self.log_scroll = self.log_scroll.saturating_sub(30);
+                self.log_auto_scroll = false;
+                None
+            }
+            A::LogClear => {
+                let _ = std::fs::write(&self.log_path, "");
+                self.log_lines.clear();
+                self.log_scroll = 0;
+                self.status_message = "Log cleared".into();
+                None
+            }
         }
     }
 
@@ -1724,82 +1896,10 @@ impl AppState {
     /// generic text-input modal lands (alongside rename/move in M1.3.b).
     fn handle_schedule_key(
         &mut self,
-        key: crossterm::event::KeyEvent,
+        _key: crossterm::event::KeyEvent,
     ) -> Option<AppAction> {
-        use crossterm::event::KeyCode;
-        let count = self.config.schedule.len();
-        if count > 0 {
-            self.selected_schedule = self.selected_schedule.min(count - 1);
-        }
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
-                self.active_pane = ActivePane::Sidebar;
-            }
-            KeyCode::Char('j') | KeyCode::Down if count > 0 => {
-                self.selected_schedule = (self.selected_schedule + 1) % count;
-            }
-            KeyCode::Char('k') | KeyCode::Up if count > 0 => {
-                self.selected_schedule = if self.selected_schedule == 0 {
-                    count - 1
-                } else {
-                    self.selected_schedule - 1
-                };
-            }
-            KeyCode::Char('g') | KeyCode::Home if count > 0 => {
-                self.selected_schedule = 0;
-            }
-            KeyCode::Char('G') | KeyCode::End if count > 0 => {
-                self.selected_schedule = count - 1;
-            }
-            KeyCode::Char('a') => {
-                self.open_text_input(
-                    crate::tui::widgets::text_input::TextInputPurpose::ScheduleAddChannel,
-                    "Channel (e.g. `twitch:shroud`)",
-                    "twitch:",
-                );
-            }
-            KeyCode::Char('e') | KeyCode::Enter if count > 0 => {
-                if let Some(entry) = self.config.schedule.get(self.selected_schedule) {
-                    self.open_text_input(
-                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditCron {
-                            index: self.selected_schedule,
-                        },
-                        "Edit cron expression",
-                        entry.cron.clone(),
-                    );
-                }
-            }
-            KeyCode::Char('d') if count > 0 => {
-                if let Some(entry) = self.config.schedule.get(self.selected_schedule) {
-                    self.open_text_input(
-                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditDuration {
-                            index: self.selected_schedule,
-                        },
-                        "Edit duration",
-                        entry.duration.clone(),
-                    );
-                }
-            }
-            KeyCode::Char('D') if count > 0 => {
-                let removed = self.config.schedule.remove(self.selected_schedule);
-                if let Err(e) = self.config.save(None) {
-                    self.status_message =
-                        format!("Schedule removed in-memory but save failed: {e}");
-                } else {
-                    self.status_message = format!(
-                        "Removed schedule for {} ({})",
-                        removed.channel, removed.cron
-                    );
-                }
-                let new_count = self.config.schedule.len();
-                if new_count == 0 {
-                    self.selected_schedule = 0;
-                } else if self.selected_schedule >= new_count {
-                    self.selected_schedule = new_count - 1;
-                }
-            }
-            _ => {}
-        }
+        // Schedule pane bindings all live in src/tui/keymap.rs and route
+        // through apply_key_action / schedule_delete_selected.
         None
     }
 
@@ -1935,426 +2035,445 @@ impl AppState {
         None
     }
 
-    fn handle_sidebar_key(&mut self, key: crossterm::event::KeyEvent) -> Option<AppAction> {
-        use crossterm::event::KeyCode;
+    // ---- Pane-context-sensitive nav helpers — invoked from apply_key_action ----
 
-        match key.code {
-            KeyCode::Esc if !self.search_query.is_empty() => {
-                self.clear_search();
+    fn pane_nav_down(&mut self) {
+        match self.active_pane {
+            ActivePane::Sidebar | ActivePane::Detail => self.navigate_channel(true),
+            ActivePane::RecordingList => {
+                let n = self.sorted_recordings().len();
+                if n == 0 {
+                    return;
+                }
+                self.selected_recording = (self.selected_recording + 1) % n;
+                self.remember_recording_selection();
             }
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.navigate_channel(true);
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.navigate_channel(false);
-            }
-            KeyCode::Char('g') | KeyCode::Home => {
-                self.jump_channel_to(true);
-            }
-            KeyCode::Char('G') | KeyCode::End => {
-                self.jump_channel_to(false);
-            }
-            KeyCode::Enter | KeyCode::Right | KeyCode::Char('l') => {
-                if !self.channels.is_empty() {
-                    self.active_pane = ActivePane::Detail;
+            ActivePane::Schedule => {
+                let n = self.config.schedule.len();
+                if n > 0 {
+                    self.selected_schedule = (self.selected_schedule + 1) % n;
                 }
             }
-            KeyCode::Char('L') => {
-                self.active_pane = ActivePane::RecordingList;
+            ActivePane::Settings => {
+                use crate::tui::widgets::settings as sw;
+                let rows = sw::settings_rows(self);
+                let n = sw::selectable_indices(&rows).len();
+                if n > 0 {
+                    self.settings_selected = (self.settings_selected + 1) % n;
+                }
             }
-            KeyCode::Char('s') | KeyCode::Char('C') => {
-                self.active_pane = ActivePane::Settings;
+            ActivePane::Log => {
+                if self.log_scroll + 1 < self.log_lines.len() {
+                    self.log_scroll += 1;
+                    self.log_auto_scroll = false;
+                }
             }
             _ => {}
         }
+    }
+
+    fn pane_nav_up(&mut self) {
+        match self.active_pane {
+            ActivePane::Sidebar | ActivePane::Detail => self.navigate_channel(false),
+            ActivePane::RecordingList => {
+                let n = self.sorted_recordings().len();
+                if n == 0 {
+                    return;
+                }
+                self.selected_recording = if self.selected_recording == 0 {
+                    n - 1
+                } else {
+                    self.selected_recording - 1
+                };
+                self.remember_recording_selection();
+            }
+            ActivePane::Schedule => {
+                let n = self.config.schedule.len();
+                if n > 0 {
+                    self.selected_schedule = if self.selected_schedule == 0 {
+                        n - 1
+                    } else {
+                        self.selected_schedule - 1
+                    };
+                }
+            }
+            ActivePane::Settings => {
+                use crate::tui::widgets::settings as sw;
+                let rows = sw::settings_rows(self);
+                let n = sw::selectable_indices(&rows).len();
+                if n > 0 {
+                    self.settings_selected = if self.settings_selected == 0 {
+                        n - 1
+                    } else {
+                        self.settings_selected - 1
+                    };
+                }
+            }
+            ActivePane::Log => {
+                self.log_scroll = self.log_scroll.saturating_sub(1);
+                self.log_auto_scroll = false;
+            }
+            _ => {}
+        }
+    }
+
+    fn pane_nav_top(&mut self) {
+        match self.active_pane {
+            ActivePane::Sidebar | ActivePane::Detail => self.jump_channel_to(true),
+            ActivePane::RecordingList => {
+                if !self.sorted_recordings().is_empty() {
+                    self.selected_recording = 0;
+                    self.remember_recording_selection();
+                }
+            }
+            ActivePane::Schedule => {
+                if !self.config.schedule.is_empty() {
+                    self.selected_schedule = 0;
+                }
+            }
+            ActivePane::Settings => {
+                self.settings_selected = 0;
+            }
+            ActivePane::Log => {
+                self.log_scroll = 0;
+                self.log_auto_scroll = false;
+            }
+            _ => {}
+        }
+    }
+
+    fn pane_nav_bottom(&mut self) {
+        match self.active_pane {
+            ActivePane::Sidebar | ActivePane::Detail => self.jump_channel_to(false),
+            ActivePane::RecordingList => {
+                let n = self.sorted_recordings().len();
+                if n > 0 {
+                    self.selected_recording = n - 1;
+                    self.remember_recording_selection();
+                }
+            }
+            ActivePane::Schedule => {
+                let n = self.config.schedule.len();
+                if n > 0 {
+                    self.selected_schedule = n - 1;
+                }
+            }
+            ActivePane::Settings => {
+                use crate::tui::widgets::settings as sw;
+                let rows = sw::settings_rows(self);
+                let n = sw::selectable_indices(&rows).len();
+                if n > 0 {
+                    self.settings_selected = n - 1;
+                }
+            }
+            ActivePane::Log => {
+                self.log_scroll = self.log_lines.len().saturating_sub(1);
+                self.log_auto_scroll = true;
+            }
+            _ => {}
+        }
+    }
+
+    fn pane_nav_back(&mut self) {
+        if !self.search_query.is_empty() {
+            self.clear_search();
+            return;
+        }
+        match self.active_pane {
+            ActivePane::Detail
+            | ActivePane::RecordingList
+            | ActivePane::Settings
+            | ActivePane::Log
+            | ActivePane::Schedule => {
+                if matches!(self.active_pane, ActivePane::Settings) {
+                    let _ = self.config.save(None);
+                }
+                self.active_pane = ActivePane::Sidebar;
+            }
+            _ => {}
+        }
+    }
+
+    fn pane_nav_activate(&mut self) -> Option<AppAction> {
+        match self.active_pane {
+            ActivePane::Sidebar => {
+                if !self.channels.is_empty() {
+                    self.active_pane = ActivePane::Detail;
+                }
+                None
+            }
+            ActivePane::Settings => {
+                use crate::tui::widgets::settings as sw;
+                let rows = sw::settings_rows(self);
+                let selectable = sw::selectable_indices(&rows);
+                if let Some(&full_idx) = selectable.get(self.settings_selected) {
+                    if let Some(row) = rows.get(full_idx).cloned() {
+                        self.apply_settings_row(&row);
+                    }
+                }
+                None
+            }
+            ActivePane::Schedule => {
+                if let Some(entry) = self.config.schedule.get(self.selected_schedule) {
+                    let index = self.selected_schedule;
+                    let cron = entry.cron.clone();
+                    self.open_text_input(
+                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditCron { index },
+                        "Edit cron expression",
+                        cron,
+                    );
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    // ---- Pane-action helpers ----
+
+    fn toggle_auto_record_on_selected(&mut self) {
+        let Some(idx) = self.channels.get(self.selected_channel).map(|_| self.selected_channel) else {
+            return;
+        };
+        let ch = &mut self.channels[idx];
+        ch.auto_record = !ch.auto_record;
+        if ch.auto_record {
+            self.config.auto_record_channels.push(crate::config::AutoRecordEntry {
+                platform: ch.platform.to_string(),
+                channel_id: ch.id.clone(),
+                channel_name: ch.name.clone(),
+                format: None,
+            });
+            self.status_message = format!("Monitor ON for {}", ch.display_name);
+        } else {
+            let id = ch.id.clone();
+            let plat = ch.platform.to_string();
+            self.config
+                .auto_record_channels
+                .retain(|a| !(a.channel_id == id && a.platform == plat));
+            self.status_message = format!("Monitor OFF for {}", ch.display_name);
+        }
+        self.rebuild_sidebar_order();
+        if let Err(e) = self.config.save(None) {
+            self.status_message = format!("Failed to save config: {e}");
+        }
+    }
+
+    fn start_recording_on_selected(&mut self, from_start: bool) -> Option<AppAction> {
+        let ch = self.selected_channel()?;
+        if !ch.is_live {
+            self.status_message = "Channel is not live".to_string();
+            return None;
+        }
+        if self.is_channel_recording(&ch.id) {
+            self.status_message = format!("Already recording {}", ch.display_name);
+            return None;
+        }
+        if from_start && ch.platform != PlatformKind::YouTube {
+            self.status_message = "Record from start is only supported for YouTube".to_string();
+            return None;
+        }
+        let ch = ch.clone();
+        Some(AppAction::StartRecording {
+            channel_id: ch.id,
+            channel_name: ch.name,
+            platform: ch.platform,
+            transcode: self.transcode_mode,
+            from_start,
+        })
+    }
+
+    fn watch_selected_stream(&mut self) -> Option<AppAction> {
+        let ch = self.selected_channel()?;
+        if !ch.is_live {
+            self.status_message = "Channel is not live".to_string();
+            return None;
+        }
+        let ch = ch.clone();
+        self.watching_channel = Some(ch.name.clone());
+        Some(AppAction::Watch {
+            channel_name: ch.name,
+            platform: ch.platform,
+        })
+    }
+
+    fn recording_list_stop_selected(&mut self) -> Option<AppAction> {
+        let recs = self.sorted_recordings();
+        let rec = recs.get(self.selected_recording)?;
+        if matches!(rec.state, RecordingState::Recording | RecordingState::ResolvingUrl) {
+            let job_id = rec.id;
+            self.send_recording_command(RecordingCommand::Stop { job_id });
+            self.status_message = format!("Stopping recording: {}", rec.channel_name);
+        }
+        None
+    }
+
+    fn recording_list_play_selected(&mut self) -> Option<AppAction> {
+        let recs = self.sorted_recordings();
+        let rec = recs.get(self.selected_recording)?;
+        if rec.state != RecordingState::Finished {
+            return None;
+        }
+        let job_id = rec.id;
+        let path = rec.output_path.clone();
+        if let Some(job) = self.recordings.get_mut(&job_id) {
+            job.watched = true;
+        }
+        self.state.watched.insert(job_id);
+        self.state.save();
+        Some(AppAction::PlayFile { path })
+    }
+
+    fn recording_list_open_props(&mut self) -> Option<AppAction> {
+        let recs = self.sorted_recordings();
+        let rec = recs.get(self.selected_recording)?;
+        let job_id = rec.id;
+        let path = rec.output_path.clone();
+        self.show_properties = Some(job_id);
+        if !self.media_info_cache.contains_key(&job_id) {
+            return Some(AppAction::ProbeMedia { job_id, path });
+        }
+        None
+    }
+
+    fn recording_list_toggle_select(&mut self) {
+        let recs = self.sorted_recordings();
+        let Some(rec) = recs.get(self.selected_recording) else { return };
+        let id = rec.id;
+        if self.recording_selections_set.remove(&id) {
+            self.recording_selections_order.retain(|x| *x != id);
+        } else {
+            self.recording_selections_set.insert(id);
+            self.recording_selections_order.push(id);
+        }
+    }
+
+    fn recording_list_trash_selected(&mut self) {
+        let mut targets: Vec<Uuid> = if self.recording_selections_order.is_empty() {
+            let recs = self.sorted_recordings();
+            recs.get(self.selected_recording).map(|r| r.id).into_iter().collect()
+        } else {
+            self.recording_selections_order.clone()
+        };
+        if targets.is_empty() {
+            return;
+        }
+        targets.retain(|id| {
+            self.recordings
+                .get(id)
+                .map(|j| !matches!(j.state, RecordingState::Recording | RecordingState::ResolvingUrl))
+                .unwrap_or(false)
+        });
+        let mut trashed = 0usize;
+        let mut errors = 0usize;
+        for id in &targets {
+            if let Some(job) = self.recordings.get(id) {
+                match crate::recording::trash::move_to_trash(&job.output_path) {
+                    Ok(new_path) => {
+                        tracing::info!(job_id = %id, new_path = %new_path.display(), "recording moved to trash");
+                        trashed += 1;
+                    }
+                    Err(e) => {
+                        tracing::warn!(job_id = %id, error = %e, "trash failed");
+                        errors += 1;
+                    }
+                }
+            }
+        }
+        for id in &targets {
+            self.recordings.remove(id);
+        }
+        self.recording_selections_order.clear();
+        self.recording_selections_set.clear();
+        self.rebuild_active_channels();
+        self.rebuild_sidebar_order();
+        self.reconcile_selected_recording();
+        self.status_message = if errors == 0 {
+            format!("Trashed {trashed} recording(s)")
+        } else {
+            format!("Trashed {trashed}, {errors} failed (see log)")
+        };
+    }
+
+    fn recording_list_open_rename(&mut self) {
+        let recs = self.sorted_recordings();
+        let Some(rec) = recs.get(self.selected_recording) else { return };
+        let job_id = rec.id;
+        let initial = rec
+            .output_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        self.open_text_input(
+            crate::tui::widgets::text_input::TextInputPurpose::RenameRecording { job_id },
+            "Rename recording (no extension required)",
+            initial,
+        );
+    }
+
+    fn recording_list_open_move(&mut self) {
+        let recs = self.sorted_recordings();
+        let Some(rec) = recs.get(self.selected_recording) else { return };
+        let job_id = rec.id;
+        let initial = rec
+            .output_path
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        self.open_text_input(
+            crate::tui::widgets::text_input::TextInputPurpose::MoveRecording { job_id },
+            "Move to directory (~ expands)",
+            initial,
+        );
+    }
+
+    fn schedule_delete_selected(&mut self) {
+        let count = self.config.schedule.len();
+        if count == 0 {
+            return;
+        }
+        if self.selected_schedule >= count {
+            return;
+        }
+        let removed = self.config.schedule.remove(self.selected_schedule);
+        if let Err(e) = self.config.save(None) {
+            self.status_message = format!("Schedule removed in-memory but save failed: {e}");
+        } else {
+            self.status_message = format!(
+                "Removed schedule for {} ({})",
+                removed.channel, removed.cron
+            );
+        }
+        let new_count = self.config.schedule.len();
+        if new_count == 0 {
+            self.selected_schedule = 0;
+        } else if self.selected_schedule >= new_count {
+            self.selected_schedule = new_count - 1;
+        }
+    }
+
+    fn handle_sidebar_key(&mut self, _key: crossterm::event::KeyEvent) -> Option<AppAction> {
+        // All sidebar bindings now live in src/tui/keymap.rs and route
+        // through apply_key_action. This handler stays as a fallthrough
+        // for plugin-specific keys that may flow through layer Sidebar.
         None
     }
 
     fn handle_detail_key(
         &mut self,
-        key: crossterm::event::KeyEvent,
+        _key: crossterm::event::KeyEvent,
     ) -> Option<AppAction> {
-        use crossterm::event::KeyCode;
-
-        match key.code {
-            KeyCode::Esc if !self.search_query.is_empty() => {
-                self.clear_search();
-            }
-            KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
-                self.active_pane = ActivePane::Sidebar;
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.navigate_channel(true);
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.navigate_channel(false);
-            }
-            KeyCode::Char('g') | KeyCode::Home => {
-                self.jump_channel_to(true);
-            }
-            KeyCode::Char('G') | KeyCode::End => {
-                self.jump_channel_to(false);
-            }
-            KeyCode::Char('r') => {
-                // Start recording
-                if let Some(ch) = self.selected_channel() {
-                    if !ch.is_live {
-                        self.status_message = "Channel is not live".to_string();
-                        return None;
-                    }
-                    if self.is_channel_recording(&ch.id) {
-                        self.status_message = format!("Already recording {}", ch.display_name);
-                        return None;
-                    }
-                    let ch = ch.clone();
-                    return Some(AppAction::StartRecording {
-                        channel_id: ch.id,
-                        channel_name: ch.name,
-                        platform: ch.platform,
-                        transcode: self.transcode_mode,
-                        from_start: false,
-                    });
-                }
-            }
-            KeyCode::Char('R') => {
-                // Record from start (YouTube only — uses yt-dlp --live-from-start)
-                if let Some(ch) = self.selected_channel() {
-                    if !ch.is_live {
-                        self.status_message = "Channel is not live".to_string();
-                        return None;
-                    }
-                    if self.is_channel_recording(&ch.id) {
-                        self.status_message = format!("Already recording {}", ch.display_name);
-                        return None;
-                    }
-                    if ch.platform != PlatformKind::YouTube {
-                        self.status_message = "Record from start is only supported for YouTube".to_string();
-                        return None;
-                    }
-                    let ch = ch.clone();
-                    return Some(AppAction::StartRecording {
-                        channel_id: ch.id,
-                        channel_name: ch.name,
-                        platform: ch.platform,
-                        transcode: self.transcode_mode,
-                        from_start: true,
-                    });
-                }
-            }
-            KeyCode::Char('w') => {
-                // Watch in mpv
-                if let Some(ch) = self.selected_channel() {
-                    if !ch.is_live {
-                        self.status_message = "Channel is not live".to_string();
-                        return None;
-                    }
-                    let ch = ch.clone();
-                    self.watching_channel = Some(ch.name.clone());
-                    return Some(AppAction::Watch {
-                        channel_name: ch.name,
-                        platform: ch.platform,
-                    });
-                }
-            }
-            KeyCode::Char('a') => {
-                // Toggle auto-record
-                if let Some(idx) = self.channels.get(self.selected_channel).map(|_| self.selected_channel) {
-                    let ch = &mut self.channels[idx];
-                    ch.auto_record = !ch.auto_record;
-
-                    if ch.auto_record {
-                        self.config.auto_record_channels.push(
-                            crate::config::AutoRecordEntry {
-                                platform: ch.platform.to_string(),
-                                channel_id: ch.id.clone(),
-                                channel_name: ch.name.clone(),
-                                format: None,
-                            },
-                        );
-                        self.status_message =
-                            format!("Monitor ON for {}", ch.display_name);
-                    } else {
-                        self.config.auto_record_channels.retain(|a| {
-                            !(a.channel_id == ch.id
-                                && a.platform == ch.platform.to_string())
-                        });
-                        self.status_message =
-                            format!("Monitor OFF for {}", ch.display_name);
-                    }
-
-                    self.rebuild_sidebar_order();
-
-                    // Persist config
-                    if let Err(e) = self.config.save(None) {
-                        self.status_message = format!("Failed to save config: {e}");
-                    }
-                }
-            }
-            KeyCode::Char('t') => {
-                self.transcode_mode = !self.transcode_mode;
-                self.config.recording.transcode = self.transcode_mode;
-                if let Err(e) = self.config.save(None) {
-                    self.status_message = format!("Failed to save transcode toggle: {e}");
-                } else {
-                    self.status_message = if self.transcode_mode {
-                        "Transcode mode: ON (NVENC) · saved".to_string()
-                    } else {
-                        "Transcode mode: OFF (passthrough) · saved".to_string()
-                    };
-                }
-            }
-            _ => {}
-        }
+        // All detail bindings now live in src/tui/keymap.rs.
         None
     }
 
     fn handle_recording_list_key(
         &mut self,
-        key: crossterm::event::KeyEvent,
+        _key: crossterm::event::KeyEvent,
     ) -> Option<AppAction> {
-        use crossterm::event::KeyCode;
-
-        let recordings = self.sorted_recordings();
-        let count = recordings.len();
-
-        // Clamp selection to valid range
-        if count > 0 {
-            self.selected_recording = self.selected_recording.min(count - 1);
-        }
-
-        match key.code {
-            KeyCode::Esc if !self.search_query.is_empty() => {
-                self.clear_search();
-            }
-            KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
-                self.active_pane = ActivePane::Sidebar;
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if count > 0 {
-                    self.selected_recording = (self.selected_recording + 1) % count;
-                    self.remember_recording_selection();
-                }
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if count > 0 {
-                    self.selected_recording = if self.selected_recording == 0 {
-                        count - 1
-                    } else {
-                        self.selected_recording - 1
-                    };
-                    self.remember_recording_selection();
-                }
-            }
-            KeyCode::Char('g') | KeyCode::Home => {
-                if count > 0 {
-                    self.selected_recording = 0;
-                    self.remember_recording_selection();
-                }
-            }
-            KeyCode::Char('G') | KeyCode::End => {
-                if count > 0 {
-                    self.selected_recording = count - 1;
-                    self.remember_recording_selection();
-                }
-            }
-            KeyCode::Char('s') => {
-                // Stop selected recording
-                let recs = self.sorted_recordings();
-                if let Some(rec) = recs.get(self.selected_recording) {
-                    if rec.state == RecordingState::Recording
-                        || rec.state == RecordingState::ResolvingUrl
-                    {
-                        let job_id = rec.id;
-                        self.send_recording_command(RecordingCommand::Stop { job_id });
-                        self.status_message = format!("Stopping recording: {}", rec.channel_name);
-                    }
-                }
-            }
-            KeyCode::Char('p') => {
-                // Play finished recording
-                let recs = self.sorted_recordings();
-                if let Some(rec) = recs.get(self.selected_recording) {
-                    if rec.state == RecordingState::Finished {
-                        let job_id = rec.id;
-                        let path = rec.output_path.clone();
-                        // Mark as watched (in-memory + persisted).
-                        if let Some(job) = self.recordings.get_mut(&job_id) {
-                            job.watched = true;
-                        }
-                        self.state.watched.insert(job_id);
-                        self.state.save();
-                        return Some(AppAction::PlayFile { path });
-                    }
-                }
-            }
-            KeyCode::Char('i') => {
-                // Show recording properties modal
-                let recs = self.sorted_recordings();
-                if let Some(rec) = recs.get(self.selected_recording) {
-                    let job_id = rec.id;
-                    let path = rec.output_path.clone();
-                    self.show_properties = Some(job_id);
-                    if !self.media_info_cache.contains_key(&job_id) {
-                        return Some(AppAction::ProbeMedia { job_id, path });
-                    }
-                }
-            }
-            KeyCode::Char('v') => {
-                // Toggle multi-select on the current row (insertion-ordered,
-                // dedup via parallel set — yazi pattern).
-                let recs = self.sorted_recordings();
-                if let Some(rec) = recs.get(self.selected_recording) {
-                    let id = rec.id;
-                    if self.recording_selections_set.remove(&id) {
-                        self.recording_selections_order.retain(|x| *x != id);
-                    } else {
-                        self.recording_selections_set.insert(id);
-                        self.recording_selections_order.push(id);
-                    }
-                }
-            }
-            KeyCode::Char('V') => {
-                self.recording_selections_order.clear();
-                self.recording_selections_set.clear();
-            }
-            KeyCode::Char(' ') if self.playback.is_some() => {
-                if let Some(ref mut st) = self.playback {
-                    st.is_paused = !st.is_paused;
-                }
-                return Some(AppAction::MpvTogglePause);
-            }
-            KeyCode::Char(',') | KeyCode::Char('<') if self.playback.is_some() => {
-                if let Some(ref mut st) = self.playback {
-                    st.speed = (st.speed - 0.25).max(0.25);
-                    return Some(AppAction::MpvSetSpeed(st.speed));
-                }
-            }
-            KeyCode::Char('.') | KeyCode::Char('>') if self.playback.is_some() => {
-                if let Some(ref mut st) = self.playback {
-                    st.speed = (st.speed + 0.25).min(4.0);
-                    return Some(AppAction::MpvSetSpeed(st.speed));
-                }
-            }
-            KeyCode::Char('+') | KeyCode::Char('=') if self.playback.is_some() => {
-                if let Some(ref mut st) = self.playback {
-                    st.volume = (st.volume + 5).min(150);
-                    return Some(AppAction::MpvSetVolume(st.volume));
-                }
-            }
-            KeyCode::Char('-') | KeyCode::Char('_') if self.playback.is_some() => {
-                if let Some(ref mut st) = self.playback {
-                    st.volume = st.volume.saturating_sub(5);
-                    return Some(AppAction::MpvSetVolume(st.volume));
-                }
-            }
-            KeyCode::Char(']') if self.playback.is_some() => {
-                return Some(AppAction::MpvSeek(10.0));
-            }
-            KeyCode::Char('[') if self.playback.is_some() => {
-                return Some(AppAction::MpvSeek(-10.0));
-            }
-            KeyCode::Char('R')
-                if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) =>
-            {
-                let recs = self.sorted_recordings();
-                if let Some(rec) = recs.get(self.selected_recording) {
-                    let job_id = rec.id;
-                    let initial = rec
-                        .output_path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        .to_string();
-                    self.open_text_input(
-                        crate::tui::widgets::text_input::TextInputPurpose::RenameRecording { job_id },
-                        "Rename recording (no extension required)",
-                        initial,
-                    );
-                }
-            }
-            KeyCode::Char('M')
-                if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) =>
-            {
-                let recs = self.sorted_recordings();
-                if let Some(rec) = recs.get(self.selected_recording) {
-                    let job_id = rec.id;
-                    let initial = rec
-                        .output_path
-                        .parent()
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_default();
-                    self.open_text_input(
-                        crate::tui::widgets::text_input::TextInputPurpose::MoveRecording { job_id },
-                        "Move to directory (~ expands)",
-                        initial,
-                    );
-                }
-            }
-            KeyCode::Char('D') => {
-                // Delete to trash. Defaults to the current row when no
-                // multi-select is active.
-                let mut targets: Vec<Uuid> = if self.recording_selections_order.is_empty() {
-                    let recs = self.sorted_recordings();
-                    recs.get(self.selected_recording).map(|r| r.id).into_iter().collect()
-                } else {
-                    self.recording_selections_order.clone()
-                };
-                if targets.is_empty() {
-                    return None;
-                }
-                // Refuse to trash anything still being written.
-                targets.retain(|id| {
-                    self.recordings
-                        .get(id)
-                        .map(|j| {
-                            !matches!(
-                                j.state,
-                                RecordingState::Recording | RecordingState::ResolvingUrl
-                            )
-                        })
-                        .unwrap_or(false)
-                });
-
-                let mut trashed = 0usize;
-                let mut errors = 0usize;
-                for id in &targets {
-                    if let Some(job) = self.recordings.get(id) {
-                        match crate::recording::trash::move_to_trash(&job.output_path) {
-                            Ok(new_path) => {
-                                tracing::info!(
-                                    job_id = %id,
-                                    new_path = %new_path.display(),
-                                    "recording moved to trash"
-                                );
-                                trashed += 1;
-                            }
-                            Err(e) => {
-                                tracing::warn!(job_id = %id, error = %e, "trash failed");
-                                errors += 1;
-                            }
-                        }
-                    }
-                }
-                // Drop from in-memory state regardless of trash outcome —
-                // if the file move failed the user can manually clean up;
-                // the AppState entry pointing at a missing file is worse UX.
-                for id in &targets {
-                    self.recordings.remove(id);
-                }
-                self.recording_selections_order.clear();
-                self.recording_selections_set.clear();
-                self.rebuild_active_channels();
-                self.rebuild_sidebar_order();
-                self.reconcile_selected_recording();
-
-                self.status_message = if errors == 0 {
-                    format!("Trashed {trashed} recording(s)")
-                } else {
-                    format!("Trashed {trashed}, {errors} failed (see log)")
-                };
-            }
-            _ => {}
-        }
+        // RecordingList bindings (nav, s/p/i/v/V/D, Shift+R/M, playback
+        // overlay) all live in src/tui/keymap.rs.
         None
     }
 
@@ -2397,47 +2516,10 @@ impl AppState {
 
     fn handle_settings_key(
         &mut self,
-        key: crossterm::event::KeyEvent,
+        _key: crossterm::event::KeyEvent,
     ) -> Option<AppAction> {
-        use crossterm::event::KeyCode;
-        use crate::tui::widgets::settings as sw;
-
-        let rows = sw::settings_rows(self);
-        let selectable = sw::selectable_indices(&rows);
-        let n = selectable.len();
-        if n == 0 {
-            return None;
-        }
-        let clamped = self.settings_selected.min(n - 1);
-        self.settings_selected = clamped;
-
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
-                if let Err(e) = self.config.save(None) {
-                    self.status_message = format!("Failed to save config: {e}");
-                }
-                self.active_pane = ActivePane::Sidebar;
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                self.settings_selected = (clamped + 1) % n;
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.settings_selected = if clamped == 0 { n - 1 } else { clamped - 1 };
-            }
-            KeyCode::Home | KeyCode::Char('g') => {
-                self.settings_selected = 0;
-            }
-            KeyCode::End | KeyCode::Char('G') => {
-                self.settings_selected = n - 1;
-            }
-            KeyCode::Enter | KeyCode::Char(' ') => {
-                let row_idx = selectable[clamped];
-                if let Some(row) = rows.get(row_idx).cloned() {
-                    self.apply_settings_row(&row);
-                }
-            }
-            _ => {}
-        }
+        // Settings bindings live in src/tui/keymap.rs (nav rows for
+        // Settings + Global). Row Enter dispatch lives in pane_nav_activate.
         None
     }
 
@@ -2585,53 +2667,10 @@ impl AppState {
 
     fn handle_log_key(
         &mut self,
-        key: crossterm::event::KeyEvent,
+        _key: crossterm::event::KeyEvent,
     ) -> Option<AppAction> {
-        use crossterm::event::KeyCode;
-
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
-                self.active_pane = ActivePane::Sidebar;
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if self.log_scroll + 1 < self.log_lines.len() {
-                    self.log_scroll += 1;
-                    self.log_auto_scroll = false;
-                }
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                self.log_scroll = self.log_scroll.saturating_sub(1);
-                self.log_auto_scroll = false;
-            }
-            KeyCode::Char('G') | KeyCode::End => {
-                // Jump to bottom, re-enable auto-scroll
-                self.log_scroll = self.log_lines.len().saturating_sub(1);
-                self.log_auto_scroll = true;
-            }
-            KeyCode::Char('g') | KeyCode::Home => {
-                // Jump to top
-                self.log_scroll = 0;
-                self.log_auto_scroll = false;
-            }
-            KeyCode::PageDown => {
-                self.log_scroll = (self.log_scroll + 30).min(
-                    self.log_lines.len().saturating_sub(1),
-                );
-                self.log_auto_scroll = false;
-            }
-            KeyCode::PageUp => {
-                self.log_scroll = self.log_scroll.saturating_sub(30);
-                self.log_auto_scroll = false;
-            }
-            KeyCode::Char('c') => {
-                // Clear log
-                std::fs::write(&self.log_path, "").ok();
-                self.log_lines.clear();
-                self.log_scroll = 0;
-                self.status_message = "Log cleared".to_string();
-            }
-            _ => {}
-        }
+        // Log pane bindings (nav, PageUp/Down, c clear) live in
+        // src/tui/keymap.rs.
         None
     }
 

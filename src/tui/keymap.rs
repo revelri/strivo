@@ -96,11 +96,60 @@ pub enum KeyAction {
     EnterStatusBar,
     EnterLogPane,
     EnterSchedulePane,
+    EnterSettings,
+    EnterRecordingList,
     SearchStart,
     /// Plugin-layer activation commands are still routed via the
     /// registry; this variant exists so the table can document them
     /// even though dispatch happens elsewhere.
     PluginActivate,
+
+    // Universal navigation (pane-context-sensitive)
+    NavDown,
+    NavUp,
+    NavTop,
+    NavBottom,
+    NavBack,
+    NavActivate,
+
+    // Sidebar / Detail
+    ToggleAutoRecord,
+
+    // Detail
+    StartRecording,
+    StartRecordingFromStart,
+    WatchStream,
+    ToggleTranscode,
+
+    // RecordingList
+    StopRecording,
+    PlayRecording,
+    ShowRecordingProperties,
+    ToggleRecordingSelect,
+    ClearRecordingSelections,
+    TrashSelectedRecordings,
+    RenameRecording,
+    MoveRecording,
+
+    // Playback overlay
+    PlaybackTogglePause,
+    PlaybackSeekForward,
+    PlaybackSeekBack,
+    PlaybackSpeedUp,
+    PlaybackSpeedDown,
+    PlaybackVolumeUp,
+    PlaybackVolumeDown,
+
+    // Schedule
+    ScheduleAdd,
+    ScheduleEditCron,
+    ScheduleEditDuration,
+    ScheduleDelete,
+
+    // Log
+    LogScrollPageDown,
+    LogScrollPageUp,
+    LogClear,
 }
 
 impl KeyAction {
@@ -114,8 +163,43 @@ impl KeyAction {
             Self::EnterStatusBar => "status-bar focus",
             Self::EnterLogPane => "log pane",
             Self::EnterSchedulePane => "schedule pane",
+            Self::EnterSettings => "settings",
+            Self::EnterRecordingList => "recordings",
             Self::SearchStart => "search filter",
             Self::PluginActivate => "plugin command",
+            Self::NavDown => "next",
+            Self::NavUp => "previous",
+            Self::NavTop => "first",
+            Self::NavBottom => "last",
+            Self::NavBack => "back",
+            Self::NavActivate => "open / activate",
+            Self::ToggleAutoRecord => "toggle auto-record",
+            Self::StartRecording => "start recording",
+            Self::StartRecordingFromStart => "record from start (YouTube)",
+            Self::WatchStream => "watch in mpv",
+            Self::ToggleTranscode => "toggle transcode mode",
+            Self::StopRecording => "stop recording",
+            Self::PlayRecording => "play recording",
+            Self::ShowRecordingProperties => "recording properties",
+            Self::ToggleRecordingSelect => "toggle multi-select",
+            Self::ClearRecordingSelections => "clear multi-select",
+            Self::TrashSelectedRecordings => "delete to trash",
+            Self::RenameRecording => "rename recording",
+            Self::MoveRecording => "move recording",
+            Self::PlaybackTogglePause => "play/pause",
+            Self::PlaybackSeekForward => "seek +10s",
+            Self::PlaybackSeekBack => "seek -10s",
+            Self::PlaybackSpeedUp => "speed +0.25x",
+            Self::PlaybackSpeedDown => "speed -0.25x",
+            Self::PlaybackVolumeUp => "volume +5",
+            Self::PlaybackVolumeDown => "volume -5",
+            Self::ScheduleAdd => "add schedule",
+            Self::ScheduleEditCron => "edit cron",
+            Self::ScheduleEditDuration => "edit duration",
+            Self::ScheduleDelete => "delete schedule",
+            Self::LogScrollPageDown => "page down",
+            Self::LogScrollPageUp => "page up",
+            Self::LogClear => "clear log",
         }
     }
 
@@ -124,6 +208,8 @@ impl KeyAction {
     /// to the source. Unknown names return `None` and the loader logs
     /// a warning.
     pub fn from_name(s: &str) -> Option<Self> {
+        // Variant name -> enum. New variants must be added here so the
+        // user remap TOML can reach them; tests verify the roundtrip.
         Some(match s {
             "Quit" => Self::Quit,
             "HelpToggle" => Self::HelpToggle,
@@ -133,8 +219,43 @@ impl KeyAction {
             "EnterStatusBar" => Self::EnterStatusBar,
             "EnterLogPane" => Self::EnterLogPane,
             "EnterSchedulePane" => Self::EnterSchedulePane,
+            "EnterSettings" => Self::EnterSettings,
+            "EnterRecordingList" => Self::EnterRecordingList,
             "SearchStart" => Self::SearchStart,
             "PluginActivate" => Self::PluginActivate,
+            "NavDown" => Self::NavDown,
+            "NavUp" => Self::NavUp,
+            "NavTop" => Self::NavTop,
+            "NavBottom" => Self::NavBottom,
+            "NavBack" => Self::NavBack,
+            "NavActivate" => Self::NavActivate,
+            "ToggleAutoRecord" => Self::ToggleAutoRecord,
+            "StartRecording" => Self::StartRecording,
+            "StartRecordingFromStart" => Self::StartRecordingFromStart,
+            "WatchStream" => Self::WatchStream,
+            "ToggleTranscode" => Self::ToggleTranscode,
+            "StopRecording" => Self::StopRecording,
+            "PlayRecording" => Self::PlayRecording,
+            "ShowRecordingProperties" => Self::ShowRecordingProperties,
+            "ToggleRecordingSelect" => Self::ToggleRecordingSelect,
+            "ClearRecordingSelections" => Self::ClearRecordingSelections,
+            "TrashSelectedRecordings" => Self::TrashSelectedRecordings,
+            "RenameRecording" => Self::RenameRecording,
+            "MoveRecording" => Self::MoveRecording,
+            "PlaybackTogglePause" => Self::PlaybackTogglePause,
+            "PlaybackSeekForward" => Self::PlaybackSeekForward,
+            "PlaybackSeekBack" => Self::PlaybackSeekBack,
+            "PlaybackSpeedUp" => Self::PlaybackSpeedUp,
+            "PlaybackSpeedDown" => Self::PlaybackSpeedDown,
+            "PlaybackVolumeUp" => Self::PlaybackVolumeUp,
+            "PlaybackVolumeDown" => Self::PlaybackVolumeDown,
+            "ScheduleAdd" => Self::ScheduleAdd,
+            "ScheduleEditCron" => Self::ScheduleEditCron,
+            "ScheduleEditDuration" => Self::ScheduleEditDuration,
+            "ScheduleDelete" => Self::ScheduleDelete,
+            "LogScrollPageDown" => Self::LogScrollPageDown,
+            "LogScrollPageUp" => Self::LogScrollPageUp,
+            "LogClear" => Self::LogClear,
             _ => return None,
         })
     }
@@ -398,7 +519,27 @@ fn table() -> &'static [Chord] {
     }
     // Global. Per-pane keys (j/k navigation, etc.) still live in
     // their handler match arms and will migrate in M3 follow-ups.
-    static T: &[Chord] = &[
+    const fn nav_rows(layer: Layer) -> [Chord; 12] {
+        [
+            c(layer, KeyPattern::plain(Char('j')), KeyAction::NavDown, "next"),
+            c(layer, KeyPattern::plain(Down),       KeyAction::NavDown, "next"),
+            c(layer, KeyPattern::plain(Char('k')), KeyAction::NavUp,   "previous"),
+            c(layer, KeyPattern::plain(Up),         KeyAction::NavUp,   "previous"),
+            c(layer, KeyPattern::plain(Char('g')), KeyAction::NavTop,  "first"),
+            c(layer, KeyPattern::plain(Home),       KeyAction::NavTop,  "first"),
+            c(layer, KeyPattern { code: Char('G'), modifiers: M::SHIFT }, KeyAction::NavBottom, "last"),
+            c(layer, KeyPattern::plain(End),        KeyAction::NavBottom, "last"),
+            c(layer, KeyPattern::plain(Char('h')), KeyAction::NavBack, "back"),
+            c(layer, KeyPattern::plain(Left),       KeyAction::NavBack, "back"),
+            c(layer, KeyPattern::plain(Esc),        KeyAction::NavBack, "back"),
+            c(layer, KeyPattern::plain(Enter),      KeyAction::NavActivate, "open / activate"),
+        ]
+    }
+
+    // Per-pane rows are stored as separate static slices so they can be
+    // const-initialized. Walking nested slices keeps lookup O(table_size)
+    // but the table is tiny.
+    static GLOBAL: &[Chord] = &[
         c(Layer::Global, KeyPattern::plain(Char('q')),      KeyAction::Quit,                "quit"),
         c(Layer::Global, KeyPattern::plain(Char('?')),      KeyAction::HelpToggle,          "toggle help"),
         c(Layer::Global, KeyPattern::ctrl('t'),             KeyAction::ThemePickerOpen,     "theme picker"),
@@ -408,7 +549,83 @@ fn table() -> &'static [Chord] {
         c(Layer::Global, KeyPattern { code: Char('S'), modifiers: M::SHIFT }, KeyAction::EnterSchedulePane, "schedule pane"),
         c(Layer::Global, KeyPattern::plain(Char('/')),      KeyAction::SearchStart,         "search filter"),
     ];
-    T
+
+    static SIDEBAR_NAV: [Chord; 12] = nav_rows(Layer::Sidebar);
+    static SIDEBAR_LOCAL: &[Chord] = &[
+        c(Layer::Sidebar, KeyPattern::plain(Char('l')), KeyAction::NavActivate, "open detail"),
+        c(Layer::Sidebar, KeyPattern::plain(Right),     KeyAction::NavActivate, "open detail"),
+        c(Layer::Sidebar, KeyPattern { code: Char('L'), modifiers: M::SHIFT }, KeyAction::EnterRecordingList, "recordings"),
+        c(Layer::Sidebar, KeyPattern::plain(Char('s')), KeyAction::EnterSettings,           "settings"),
+        c(Layer::Sidebar, KeyPattern { code: Char('C'), modifiers: M::SHIFT }, KeyAction::EnterSettings, "settings"),
+        c(Layer::Sidebar, KeyPattern::plain(Char('a')), KeyAction::ToggleAutoRecord,        "toggle auto-record"),
+    ];
+
+    static DETAIL_NAV: [Chord; 12] = nav_rows(Layer::Detail);
+    static DETAIL_LOCAL: &[Chord] = &[
+        c(Layer::Detail, KeyPattern::plain(Char('r')), KeyAction::StartRecording,            "start recording"),
+        c(Layer::Detail, KeyPattern { code: Char('R'), modifiers: M::SHIFT }, KeyAction::StartRecordingFromStart, "record from start (YT)"),
+        c(Layer::Detail, KeyPattern::plain(Char('w')), KeyAction::WatchStream,               "watch in mpv"),
+        c(Layer::Detail, KeyPattern::plain(Char('a')), KeyAction::ToggleAutoRecord,          "toggle auto-record"),
+        c(Layer::Detail, KeyPattern::plain(Char('t')), KeyAction::ToggleTranscode,           "toggle transcode mode"),
+    ];
+
+    static REC_NAV: [Chord; 12] = nav_rows(Layer::RecordingList);
+    static REC_LOCAL: &[Chord] = &[
+        c(Layer::RecordingList, KeyPattern::plain(Char('s')), KeyAction::StopRecording,           "stop recording"),
+        c(Layer::RecordingList, KeyPattern::plain(Char('p')), KeyAction::PlayRecording,           "play"),
+        c(Layer::RecordingList, KeyPattern::plain(Char('i')), KeyAction::ShowRecordingProperties, "properties"),
+        c(Layer::RecordingList, KeyPattern::plain(Char('v')), KeyAction::ToggleRecordingSelect,   "toggle select"),
+        c(Layer::RecordingList, KeyPattern { code: Char('V'), modifiers: M::SHIFT }, KeyAction::ClearRecordingSelections, "clear selections"),
+        c(Layer::RecordingList, KeyPattern { code: Char('D'), modifiers: M::SHIFT }, KeyAction::TrashSelectedRecordings,  "delete to trash"),
+        c(Layer::RecordingList, KeyPattern { code: Char('R'), modifiers: M::SHIFT }, KeyAction::RenameRecording,          "rename"),
+        c(Layer::RecordingList, KeyPattern { code: Char('M'), modifiers: M::SHIFT }, KeyAction::MoveRecording,            "move"),
+        // Playback overlay keys (active only while playback.is_some()).
+        c(Layer::RecordingList, KeyPattern::plain(Char(' ')), KeyAction::PlaybackTogglePause, "play/pause"),
+        c(Layer::RecordingList, KeyPattern::plain(Char(']')), KeyAction::PlaybackSeekForward, "seek +10s"),
+        c(Layer::RecordingList, KeyPattern::plain(Char('[')), KeyAction::PlaybackSeekBack,    "seek -10s"),
+        c(Layer::RecordingList, KeyPattern::plain(Char('.')), KeyAction::PlaybackSpeedUp,     "speed +0.25x"),
+        c(Layer::RecordingList, KeyPattern::plain(Char(',')), KeyAction::PlaybackSpeedDown,   "speed -0.25x"),
+        c(Layer::RecordingList, KeyPattern::plain(Char('+')), KeyAction::PlaybackVolumeUp,    "volume +5"),
+        c(Layer::RecordingList, KeyPattern::plain(Char('-')), KeyAction::PlaybackVolumeDown,  "volume -5"),
+    ];
+
+    static SCHEDULE_NAV: [Chord; 12] = nav_rows(Layer::Schedule);
+    static SCHEDULE_LOCAL: &[Chord] = &[
+        c(Layer::Schedule, KeyPattern::plain(Char('a')), KeyAction::ScheduleAdd,          "add schedule"),
+        c(Layer::Schedule, KeyPattern::plain(Char('e')), KeyAction::ScheduleEditCron,     "edit cron"),
+        c(Layer::Schedule, KeyPattern::plain(Char('d')), KeyAction::ScheduleEditDuration, "edit duration"),
+        c(Layer::Schedule, KeyPattern { code: Char('D'), modifiers: M::SHIFT }, KeyAction::ScheduleDelete, "delete row"),
+    ];
+
+    static LOG_NAV: [Chord; 12] = nav_rows(Layer::Log);
+    static LOG_LOCAL: &[Chord] = &[
+        c(Layer::Log, KeyPattern::plain(PageDown), KeyAction::LogScrollPageDown, "page down"),
+        c(Layer::Log, KeyPattern::plain(PageUp),   KeyAction::LogScrollPageUp,   "page up"),
+        c(Layer::Log, KeyPattern::plain(Char('c')), KeyAction::LogClear,         "clear log"),
+    ];
+
+    static SETTINGS_NAV: [Chord; 12] = nav_rows(Layer::Settings);
+
+    // Concatenated table — assembled lazily on first access. The slices
+    // above are const, so the runtime cost is one Vec::extend per slice.
+    static FULL: OnceLock<Vec<Chord>> = OnceLock::new();
+    FULL.get_or_init(|| {
+        let mut all: Vec<Chord> = Vec::new();
+        all.extend_from_slice(GLOBAL);
+        all.extend_from_slice(&SIDEBAR_NAV);
+        all.extend_from_slice(SIDEBAR_LOCAL);
+        all.extend_from_slice(&DETAIL_NAV);
+        all.extend_from_slice(DETAIL_LOCAL);
+        all.extend_from_slice(&REC_NAV);
+        all.extend_from_slice(REC_LOCAL);
+        all.extend_from_slice(&SCHEDULE_NAV);
+        all.extend_from_slice(SCHEDULE_LOCAL);
+        all.extend_from_slice(&LOG_NAV);
+        all.extend_from_slice(LOG_LOCAL);
+        all.extend_from_slice(&SETTINGS_NAV);
+        all
+    })
+    .as_slice()
 }
 
 /// Look up a `KeyAction` for `key` in `layer`. Layer order:
