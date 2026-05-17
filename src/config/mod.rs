@@ -534,6 +534,24 @@ impl AppConfig {
         }
     }
 
+    /// Reset all user-authored values to their defaults, **preserving
+    /// credentials** (`twitch`, `youtube`, `patreon`) so the user is
+    /// not logged out by a reset. Schedule entries, auto-record
+    /// channels, recording defaults, UI prefs, plugin config — all
+    /// revert. The caller is responsible for `save()`.
+    ///
+    /// M2.1.c — defaults-as-preset model. Defaults live in code
+    /// (`Default::default()`); the on-disk file is the user's overlay.
+    /// "Reset" means "write the empty overlay back."
+    pub fn reset_to_defaults(&mut self) {
+        let mut fresh = Self::default();
+        fresh.config_path = self.config_path.clone();
+        fresh.twitch = self.twitch.take();
+        fresh.youtube = self.youtube.take();
+        fresh.patreon = self.patreon.take();
+        *self = fresh;
+    }
+
     pub fn save(&self, path: Option<&std::path::Path>) -> Result<()> {
         let path = path
             .map(|p| p.to_path_buf())

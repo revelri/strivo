@@ -125,3 +125,33 @@ fn load_falls_back_to_defaults_when_no_backup() {
     let recovered = AppConfig::load(Some(&path)).expect("must fall back to defaults");
     assert!(recovered.twitch.is_none());
 }
+
+#[test]
+fn reset_to_defaults_preserves_credentials() {
+    use strivo_core::config::{ScheduleEntry, TwitchConfig};
+
+    let tmp = TempDir::new().unwrap();
+    let path = tmp.path().join("config.toml");
+    let mut cfg = seeded_config(tmp.path().join("recordings"));
+    cfg.config_path = Some(path.clone());
+    cfg.twitch = Some(TwitchConfig {
+        client_id: "kept".into(),
+        client_secret: "kept-secret".into(),
+    });
+    cfg.schedule.push(ScheduleEntry {
+        channel: "twitch:foo".into(),
+        cron: "0 20 * * *".into(),
+        duration: "1h".into(),
+    });
+    cfg.poll_interval_secs = 7777;
+
+    cfg.reset_to_defaults();
+
+    // Credentials survive.
+    assert_eq!(cfg.twitch.as_ref().unwrap().client_id, "kept");
+    // Path memory survives so save() still works.
+    assert_eq!(cfg.config_path.as_deref(), Some(path.as_path()));
+    // Everything else reverts.
+    assert!(cfg.schedule.is_empty());
+    assert_ne!(cfg.poll_interval_secs, 7777);
+}
