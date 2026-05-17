@@ -164,11 +164,19 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
             };
             let pad = inner_width.saturating_sub(1 + display_name.chars().count() + right_display_len + 1);
 
-            let mut spans = vec![
-                Span::raw(" "),
-                Span::styled(display_name, name_style),
-                Span::raw(" ".repeat(pad)),
-            ];
+            let mut spans = vec![Span::raw(" ")];
+            // Fuzzy-highlight characters matching the active search
+            // query (M4.follow.b). Empty query → single styled span.
+            let hl_style = Style::new()
+                .fg(Theme::secondary())
+                .add_modifier(Modifier::BOLD);
+            spans.extend(crate::tui::widgets::highlight::highlight_spans(
+                &display_name,
+                &app.search_query,
+                name_style,
+                hl_style,
+            ));
+            spans.push(Span::raw(" ".repeat(pad)));
             spans.extend(right_parts);
 
             items.push(ListItem::new(Line::from(spans)));

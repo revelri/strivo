@@ -10,5 +10,6 @@ pub mod platform_debug;
 pub mod properties;
 pub mod theme_picker;
 pub mod event_log;
+pub mod highlight;
 pub mod schedule;
 pub mod text_input;

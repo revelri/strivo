@@ -135,15 +135,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
                 RecordingState::Finished => Span::raw("  "),
             };
 
-            let channel_name = Span::styled(
+            let name_base = Style::new().fg(Theme::fg()).add_modifier(Modifier::BOLD);
+            let title_base = Style::new().fg(Theme::fg());
+            let hl_style = Style::new()
+                .fg(Theme::secondary())
+                .add_modifier(Modifier::BOLD);
+            let channel_spans = crate::tui::widgets::highlight::highlight_spans(
                 &rec.channel_name,
-                Style::new().fg(Theme::fg()).add_modifier(Modifier::BOLD),
+                &app.search_query,
+                name_base,
+                hl_style,
             );
-
-            let title_text = rec
+            let title_text: String = rec
                 .stream_title
                 .as_deref()
-                .unwrap_or("stream");
+                .unwrap_or("stream")
+                .to_string();
+            let title_spans = crate::tui::widgets::highlight::highlight_spans(
+                &title_text,
+                &app.search_query,
+                title_base,
+                hl_style,
+            );
 
             let platform_icon = match rec.platform {
                 PlatformKind::Twitch => Span::styled(
@@ -176,17 +189,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
                 Span::raw("   ")
             };
 
-            items.push(ListItem::new(Line::from(vec![
-                marker,
-                state_prefix,
-                channel_name,
-                Span::styled(" — ", Style::new().fg(Theme::dim())),
-                Span::styled(title_text, Style::new().fg(Theme::fg())),
-                Span::styled(" — ", Style::new().fg(Theme::dim())),
-                duration,
-                Span::styled(" —", Style::new().fg(Theme::dim())),
-                platform_icon,
-            ])));
+            let mut row_spans: Vec<Span> = vec![marker, state_prefix];
+            row_spans.extend(channel_spans);
+            row_spans.push(Span::styled(" — ", Style::new().fg(Theme::dim())));
+            row_spans.extend(title_spans);
+            row_spans.push(Span::styled(" — ", Style::new().fg(Theme::dim())));
+            row_spans.push(duration);
+            row_spans.push(Span::styled(" —", Style::new().fg(Theme::dim())));
+            row_spans.push(platform_icon);
+            items.push(ListItem::new(Line::from(row_spans)));
 
             selectable_indices.push(list_idx);
         }
