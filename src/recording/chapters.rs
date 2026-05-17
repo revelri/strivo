@@ -1,4 +1,4 @@
-//! MKV chapter embedding via `mkvpropedit` (M5.3 — yazi audit M4 polish).
+//! MKV chapter embedding via `mkvpropedit` (M5.3).
 //!
 //! `mkvpropedit` is part of the `mkvtoolnix` suite and lets us embed
 //! chapter markers into a Matroska file without re-muxing. Chapter

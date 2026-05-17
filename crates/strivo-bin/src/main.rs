@@ -72,6 +72,7 @@ async fn handle_command(cmd: &Command, config_path: Option<&std::path::Path>) ->
         Command::Theme { action } => handle_theme_command(action),
         Command::Doctor => handle_doctor(),
         Command::Chapter { file, every } => handle_chapter(file, *every),
+        Command::Merge { output, sources } => handle_merge(output, sources),
         Command::Thumbnail { file, seek } => handle_thumbnail(file, *seek).await,
         Command::Completions { shell } => handle_completions(*shell),
         Command::Man => handle_man(),
@@ -251,6 +252,21 @@ fn handle_theme_command(action: &ThemeAction) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn handle_merge(output: &std::path::Path, sources: &[std::path::PathBuf]) -> Result<()> {
+    use strivo_core::recording::segments::merge_segments;
+    if sources.is_empty() {
+        anyhow::bail!("provide at least one source file");
+    }
+    println!(
+        "Merging {} segment(s) → {}",
+        sources.len(),
+        output.display()
+    );
+    merge_segments(sources, output)?;
+    println!("ok");
+    Ok(())
 }
 
 async fn handle_thumbnail(file: &std::path::Path, seek: f64) -> Result<()> {

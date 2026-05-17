@@ -71,6 +71,16 @@ pub enum Command {
 
     /// Check that required external tools are installed
     Doctor,
+    /// Merge resume segments back into a single MKV file (M5.5).
+    /// Sources are appended in the order given; the first owns the
+    /// timeline. Requires mkvtoolnix.
+    Merge {
+        /// Output MKV path.
+        #[arg(long)]
+        output: std::path::PathBuf,
+        /// Source MKV segments in chronological order.
+        sources: Vec<std::path::PathBuf>,
+    },
     /// Extract a first-frame thumbnail for a recording (M5.4 substrate).
     Thumbnail {
         /// MKV / mp4 file to thumbnail.
