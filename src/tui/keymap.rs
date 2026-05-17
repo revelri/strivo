@@ -10,7 +10,10 @@
 //! [`lookup`] first via [`maybe_global`] and only fall back to their
 //! native match for layer-local keys not yet migrated.
 
+use std::sync::OnceLock;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use serde::Deserialize;
 
 use crate::app::ActivePane;
 
@@ -115,6 +118,26 @@ impl KeyAction {
             Self::PluginActivate => "plugin command",
         }
     }
+
+    /// Parse an action name from the user remap file. Matches the
+    /// variant identifier as written in code so the TOML stays close
+    /// to the source. Unknown names return `None` and the loader logs
+    /// a warning.
+    pub fn from_name(s: &str) -> Option<Self> {
+        Some(match s {
+            "Quit" => Self::Quit,
+            "HelpToggle" => Self::HelpToggle,
+            "HelpClose" => Self::HelpClose,
+            "ThemePickerOpen" => Self::ThemePickerOpen,
+            "EventLogToggle" => Self::EventLogToggle,
+            "EnterStatusBar" => Self::EnterStatusBar,
+            "EnterLogPane" => Self::EnterLogPane,
+            "EnterSchedulePane" => Self::EnterSchedulePane,
+            "SearchStart" => Self::SearchStart,
+            "PluginActivate" => Self::PluginActivate,
+            _ => return None,
+        })
+    }
 }
 
 /// One row in the binding table. `on` matches a `crossterm::KeyEvent`;
@@ -165,6 +188,61 @@ impl KeyPattern {
         }
     }
 
+    /// Parse the yazi-style `<C-s>` / `<S-Tab>` / single-char form
+    /// the user types into `keybindings.toml`.
+    pub fn parse(spec: &str) -> Option<Self> {
+        let trimmed = spec.trim();
+        if trimmed.is_empty() {
+            return None;
+        }
+        if let Some(inner) = trimmed.strip_prefix('<').and_then(|s| s.strip_suffix('>')) {
+            let mut mods = KeyModifiers::NONE;
+            let mut rest = inner;
+            // Parse modifier prefixes greedily: C- / A- / S- / M- (Super)
+            loop {
+                if let Some(r) = rest.strip_prefix("C-") {
+                    mods |= KeyModifiers::CONTROL;
+                    rest = r;
+                } else if let Some(r) = rest.strip_prefix("A-") {
+                    mods |= KeyModifiers::ALT;
+                    rest = r;
+                } else if let Some(r) = rest.strip_prefix("S-") {
+                    mods |= KeyModifiers::SHIFT;
+                    rest = r;
+                } else {
+                    break;
+                }
+            }
+            let code = match rest {
+                "Tab" => KeyCode::Tab,
+                "Enter" => KeyCode::Enter,
+                "Esc" => KeyCode::Esc,
+                "Space" => KeyCode::Char(' '),
+                "Up" => KeyCode::Up,
+                "Down" => KeyCode::Down,
+                "Left" => KeyCode::Left,
+                "Right" => KeyCode::Right,
+                "Home" => KeyCode::Home,
+                "End" => KeyCode::End,
+                "PageUp" => KeyCode::PageUp,
+                "PageDown" => KeyCode::PageDown,
+                "Backspace" => KeyCode::Backspace,
+                "Delete" => KeyCode::Delete,
+                s if s.starts_with('F') => {
+                    let n: u8 = s[1..].parse().ok()?;
+                    KeyCode::F(n)
+                }
+                s if s.chars().count() == 1 => KeyCode::Char(s.chars().next().unwrap()),
+                _ => return None,
+            };
+            return Some(Self { code, modifiers: mods });
+        }
+        if trimmed.chars().count() == 1 {
+            return Some(Self::plain(KeyCode::Char(trimmed.chars().next().unwrap())));
+        }
+        None
+    }
+
     pub fn matches(&self, ev: &KeyEvent) -> bool {
         if self.code != ev.code {
             return false;
@@ -181,6 +259,132 @@ impl KeyPattern {
         }
         self.modifiers == ev.modifiers
     }
+}
+
+/// On-disk schema for `~/.config/strivo/keybindings.toml`. Mirrors yazi's
+/// three-bucket model: `prepend_keymap` rows are matched before the
+/// base table, `append_keymap` rows after. `keymap` replaces the base
+/// for a layer (rare; for full takeovers).
+#[derive(Debug, Default, Deserialize)]
+pub struct RemapFile {
+    #[serde(default)]
+    pub prepend_keymap: Vec<RemapRow>,
+    #[serde(default)]
+    pub append_keymap: Vec<RemapRow>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RemapRow {
+    pub layer: Option<String>,
+    pub on: String,
+    pub action: String,
+    #[serde(default)]
+    pub desc: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParsedChord {
+    pub layer: Layer,
+    pub key: KeyPattern,
+    pub action: KeyAction,
+    pub desc: String,
+}
+
+impl RemapRow {
+    pub fn parse(&self) -> Option<ParsedChord> {
+        let layer = match self.layer.as_deref().unwrap_or("Global") {
+            "Global" => Layer::Global,
+            "Sidebar" => Layer::Sidebar,
+            "Detail" => Layer::Detail,
+            "RecordingList" => Layer::RecordingList,
+            "Schedule" => Layer::Schedule,
+            "Settings" => Layer::Settings,
+            "Log" => Layer::Log,
+            "Wizard" => Layer::Wizard,
+            "StatusBar" => Layer::StatusBar,
+            _ => return None,
+        };
+        let key = KeyPattern::parse(&self.on)?;
+        let action = KeyAction::from_name(&self.action)?;
+        Some(ParsedChord {
+            layer,
+            key,
+            action,
+            desc: self.desc.clone().unwrap_or_else(|| action.desc().to_string()),
+        })
+    }
+}
+
+/// Loaded user overlay. Lookup checks `prepend` first, then the base
+/// table, then `append`. Initialized at startup via [`load_remap`].
+#[derive(Debug, Default)]
+pub struct RemapOverlay {
+    pub prepend: Vec<ParsedChord>,
+    pub append: Vec<ParsedChord>,
+}
+
+static OVERLAY: OnceLock<RemapOverlay> = OnceLock::new();
+
+/// Read `~/.config/strivo/keybindings.toml` (if present) into the
+/// process-wide overlay. Idempotent: only the first call has effect.
+/// Bad rows are logged and skipped — the base table still works.
+pub fn load_remap() {
+    if OVERLAY.get().is_some() {
+        return;
+    }
+    let path = crate::config::AppConfig::config_dir().join("keybindings.toml");
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        let _ = OVERLAY.set(RemapOverlay::default());
+        return;
+    };
+    let parsed: Result<RemapFile, _> = toml::from_str(&contents);
+    let overlay = match parsed {
+        Ok(f) => {
+            let prepend: Vec<ParsedChord> = f
+                .prepend_keymap
+                .iter()
+                .filter_map(|r| {
+                    let p = r.parse();
+                    if p.is_none() {
+                        tracing::warn!(
+                            row = ?r,
+                            "keybindings.toml: skipping unparseable prepend row"
+                        );
+                    }
+                    p
+                })
+                .collect();
+            let append: Vec<ParsedChord> = f
+                .append_keymap
+                .iter()
+                .filter_map(|r| {
+                    let p = r.parse();
+                    if p.is_none() {
+                        tracing::warn!(
+                            row = ?r,
+                            "keybindings.toml: skipping unparseable append row"
+                        );
+                    }
+                    p
+                })
+                .collect();
+            tracing::info!(
+                prepend = prepend.len(),
+                append = append.len(),
+                "keybindings.toml loaded"
+            );
+            RemapOverlay { prepend, append }
+        }
+        Err(e) => {
+            tracing::warn!("keybindings.toml parse failed: {e} — using base table");
+            RemapOverlay::default()
+        }
+    };
+    let _ = OVERLAY.set(overlay);
+}
+
+fn overlay() -> &'static RemapOverlay {
+    OVERLAY.get_or_init(RemapOverlay::default)
 }
 
 /// The global keymap. New rows go here; per-layer lookup walks this
@@ -207,18 +411,58 @@ fn table() -> &'static [Chord] {
     T
 }
 
-/// Look up a `KeyAction` for `key` in `layer`, falling back to `Global`
-/// if there is no layer-local hit.
+/// Look up a `KeyAction` for `key` in `layer`. Layer order:
+/// 1. User `prepend_keymap` rows for this layer.
+/// 2. Base table rows for this layer.
+/// 3. User `prepend_keymap` rows for `Global` (when `layer != Global`).
+/// 4. Base table rows for `Global` (same).
+/// 5. User `append_keymap` rows for this layer, then `Global`.
 pub fn lookup(layer: Layer, key: &KeyEvent) -> Option<KeyAction> {
+    let overlay = overlay();
+    // Prepend (user-supplied wins over base) — current layer.
+    if let Some(c) = overlay
+        .prepend
+        .iter()
+        .find(|c| c.layer == layer && c.key.matches(key))
+    {
+        return Some(c.action);
+    }
+    // Base table — current layer.
     let t = table();
-    // Layer-specific entries first.
     if let Some(chord) = t.iter().find(|c| c.layer == layer && c.key.matches(key)) {
         return Some(chord.action);
     }
-    // Global fallback (only when the active layer isn't already Global).
+    // Global fallback.
     if layer != Layer::Global {
-        if let Some(chord) = t.iter().find(|c| c.layer == Layer::Global && c.key.matches(key)) {
+        if let Some(c) = overlay
+            .prepend
+            .iter()
+            .find(|c| c.layer == Layer::Global && c.key.matches(key))
+        {
+            return Some(c.action);
+        }
+        if let Some(chord) = t
+            .iter()
+            .find(|c| c.layer == Layer::Global && c.key.matches(key))
+        {
             return Some(chord.action);
+        }
+    }
+    // Append (last-chance user-supplied).
+    if let Some(c) = overlay
+        .append
+        .iter()
+        .find(|c| c.layer == layer && c.key.matches(key))
+    {
+        return Some(c.action);
+    }
+    if layer != Layer::Global {
+        if let Some(c) = overlay
+            .append
+            .iter()
+            .find(|c| c.layer == Layer::Global && c.key.matches(key))
+        {
+            return Some(c.action);
         }
     }
     None
@@ -285,5 +529,36 @@ mod tests {
     #[test]
     fn no_conflicts_in_table() {
         assert_no_conflicts();
+    }
+
+    #[test]
+    fn parse_yazi_style_chords() {
+        let p = KeyPattern::parse("<C-s>").unwrap();
+        assert_eq!(p.code, KeyCode::Char('s'));
+        assert!(p.modifiers.contains(KeyModifiers::CONTROL));
+
+        let p = KeyPattern::parse("<S-Tab>").unwrap();
+        assert_eq!(p.code, KeyCode::Tab);
+        assert!(p.modifiers.contains(KeyModifiers::SHIFT));
+
+        let p = KeyPattern::parse("q").unwrap();
+        assert_eq!(p.code, KeyCode::Char('q'));
+        assert!(p.modifiers.is_empty());
+
+        assert!(KeyPattern::parse("").is_none());
+        assert!(KeyPattern::parse("<not-a-key>").is_none());
+    }
+
+    #[test]
+    fn action_name_roundtrip() {
+        for action in [
+            KeyAction::Quit,
+            KeyAction::ThemePickerOpen,
+            KeyAction::EventLogToggle,
+        ] {
+            let name = format!("{action:?}");
+            // Variant names are stable identifiers — same as from_name().
+            assert_eq!(KeyAction::from_name(&name), Some(action));
+        }
     }
 }

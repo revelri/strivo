@@ -489,6 +489,9 @@ impl AppState {
         // same assertion vector — panic on first run is preferable to
         // silent shadow-binding.
         crate::tui::keymap::assert_no_conflicts();
+        // M3.4 — fold ~/.config/strivo/keybindings.toml into the lookup
+        // path. Absent file is fine; bad rows are logged and skipped.
+        crate::tui::keymap::load_remap();
 
         let first_run = config.twitch.is_none() && config.youtube.is_none();
         let initial_transcode = config.recording.transcode;
