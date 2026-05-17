@@ -95,6 +95,15 @@ pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) 
         );
     }
 
+    if app.text_input.is_some() {
+        crate::tui::widgets::text_input::render(
+            frame,
+            frame.area(),
+            app,
+            app.overlay_enter(crate::app::OverlayKey::TextInput, 0.18),
+        );
+    }
+
     if app.stop_all_deadline.is_some() {
         dialog::render_stopping(frame, frame.area(), app);
     }

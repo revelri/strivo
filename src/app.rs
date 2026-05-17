@@ -264,6 +264,12 @@ pub struct AppState {
     /// file the TUI launched. Position / duration are polled every
     /// ~250 ms by the TUI loop and rendered as a status-bar overlay.
     pub playback: Option<PlaybackState>,
+
+    /// Generic text-input modal. Set `Some` to open; the TUI dispatches
+    /// keys to it before the active pane sees them. Enter commits and
+    /// the caller routes the value based on `purpose`.
+    pub text_input: Option<crate::tui::widgets::text_input::TextInputState>,
+    pub text_input_opened_at: Option<std::time::Instant>,
     pub transcode_mode: bool,
 
     // Playback
@@ -421,6 +427,7 @@ pub enum OverlayKey {
     Wizard,
     Stopping,
     EventLog,
+    TextInput,
 }
 
 /// Live state for the theme picker overlay. Preview is applied immediately
@@ -475,6 +482,8 @@ impl AppState {
             recording_selections_set: HashSet::new(),
             selected_schedule: 0,
             playback: None,
+            text_input: None,
+            text_input_opened_at: None,
             transcode_mode: initial_transcode,
             watching_channel: None,
             twitch_connected: false,
@@ -559,6 +568,7 @@ impl AppState {
             OverlayKey::Wizard => self.wizard_opened_at,
             OverlayKey::Stopping => self.stopping_opened_at,
             OverlayKey::EventLog => self.event_log_opened_at,
+            OverlayKey::TextInput => self.text_input_opened_at,
         };
         let Some(at) = at else {
             return 1.0;
@@ -586,6 +596,7 @@ impl AppState {
         sync_open(&mut self.wizard_opened_at, wizard_live);
         sync_open(&mut self.stopping_opened_at, self.stop_all_deadline.is_some());
         sync_open(&mut self.event_log_opened_at, self.show_event_log);
+        sync_open(&mut self.text_input_opened_at, self.text_input.is_some());
     }
 
     /// Seconds since the active pane last changed. Used by widget borders to
@@ -1144,6 +1155,143 @@ impl AppState {
         None
     }
 
+    /// Open the text-input modal with a given purpose, prompt, and initial value.
+    pub fn open_text_input(
+        &mut self,
+        purpose: crate::tui::widgets::text_input::TextInputPurpose,
+        prompt: impl Into<String>,
+        initial: impl Into<String>,
+    ) {
+        self.text_input = Some(crate::tui::widgets::text_input::TextInputState::new(
+            purpose, prompt, initial,
+        ));
+    }
+
+    /// Drain `text_input` and act on it by purpose.
+    fn commit_text_input(&mut self) {
+        use crate::tui::widgets::text_input::TextInputPurpose as P;
+        let Some(state) = self.text_input.take() else {
+            return;
+        };
+        let value = state.value;
+        match state.purpose {
+            P::RenameRecording { job_id } => {
+                let Some(job) = self.recordings.get(&job_id).cloned() else {
+                    self.status_message = "Recording vanished before rename".into();
+                    return;
+                };
+                let old = job.output_path.clone();
+                let Some(parent) = old.parent() else {
+                    self.status_message = "Recording has no parent dir".into();
+                    return;
+                };
+                // Preserve extension on rename if user didn't supply one.
+                let new_name = if std::path::Path::new(&value).extension().is_some() {
+                    value
+                } else {
+                    let ext = old.extension().and_then(|s| s.to_str()).unwrap_or("mkv");
+                    format!("{value}.{ext}")
+                };
+                let new = parent.join(&new_name);
+                if new.exists() {
+                    self.status_message = format!("Target already exists: {}", new.display());
+                    return;
+                }
+                match std::fs::rename(&old, &new) {
+                    Ok(()) => {
+                        if let Some(job) = self.recordings.get_mut(&job_id) {
+                            job.output_path = new.clone();
+                        }
+                        self.status_message = format!("Renamed to {}", new_name);
+                    }
+                    Err(e) => self.status_message = format!("Rename failed: {e}"),
+                }
+            }
+            P::MoveRecording { job_id } => {
+                let Some(job) = self.recordings.get(&job_id).cloned() else {
+                    self.status_message = "Recording vanished before move".into();
+                    return;
+                };
+                let dest_dir = std::path::PathBuf::from(shellexpand(&value));
+                if !dest_dir.exists() {
+                    if let Err(e) = std::fs::create_dir_all(&dest_dir) {
+                        self.status_message = format!("Create dest failed: {e}");
+                        return;
+                    }
+                }
+                let file_name = job.output_path.file_name().unwrap_or_default();
+                let dest = dest_dir.join(file_name);
+                if dest.exists() {
+                    self.status_message = format!("Target already exists: {}", dest.display());
+                    return;
+                }
+                match std::fs::rename(&job.output_path, &dest) {
+                    Ok(()) => {
+                        if let Some(job) = self.recordings.get_mut(&job_id) {
+                            job.output_path = dest.clone();
+                        }
+                        self.status_message = format!("Moved to {}", dest.display());
+                    }
+                    Err(e) => self.status_message = format!("Move failed: {e}"),
+                }
+            }
+            P::ScheduleAddChannel => {
+                // First step: take channel, ask for cron next.
+                self.open_text_input(
+                    P::ScheduleAddCron { channel: value },
+                    "Cron expression (5-field, e.g. `0 20 * * 1-5`)",
+                    "0 20 * * 1-5",
+                );
+            }
+            P::ScheduleAddCron { channel } => {
+                self.open_text_input(
+                    P::ScheduleAddDuration { channel, cron: value },
+                    "Duration (e.g. `4h`, `90m`, `2h30m`)",
+                    "4h",
+                );
+            }
+            P::ScheduleAddDuration { channel, cron } => {
+                self.config.schedule.push(crate::config::ScheduleEntry {
+                    channel,
+                    cron,
+                    duration: value,
+                });
+                if let Err(e) = self.config.save(None) {
+                    self.status_message = format!("Add schedule: save failed: {e}");
+                } else {
+                    self.status_message = "Schedule added".into();
+                }
+            }
+            P::ScheduleEditCron { index } => {
+                if let Some(entry) = self.config.schedule.get_mut(index) {
+                    entry.cron = value;
+                    if let Err(e) = self.config.save(None) {
+                        self.status_message = format!("Edit schedule: save failed: {e}");
+                    } else {
+                        self.status_message = "Schedule cron updated".into();
+                    }
+                }
+            }
+            P::ScheduleEditDuration { index } => {
+                if let Some(entry) = self.config.schedule.get_mut(index) {
+                    entry.duration = value;
+                    if let Err(e) = self.config.save(None) {
+                        self.status_message = format!("Edit schedule: save failed: {e}");
+                    } else {
+                        self.status_message = "Schedule duration updated".into();
+                    }
+                }
+            }
+            P::SettingsString { key }
+            | P::SettingsInt { key }
+            | P::SettingsPath { key } => {
+                // Routed by the settings handler in M2 Phase 2; for now
+                // ignore so the modal stays generic.
+                tracing::debug!(key = %key, value = %value, "settings text input committed (no consumer yet)");
+            }
+        }
+    }
+
     /// Translate a typed [`crate::tui::keymap::KeyAction`] into a state
     /// mutation (or an [`AppAction`] for the TUI loop). Single source of
     /// truth for what a global key does — when migrating per-pane keys
@@ -1241,6 +1389,27 @@ impl AppState {
         if let KeyCode::Char(c) = key.code {
             self.last_hotkey = Some(c);
             self.last_hotkey_at = Some(std::time::Instant::now());
+        }
+
+        // Text-input modal owns the keyboard while open. Dispatched
+        // before search/quit/themepicker so callers can layer this on
+        // top of any other state.
+        if self.text_input.is_some() {
+            let result = self
+                .text_input
+                .as_mut()
+                .map(|st| st.handle_key(&key))
+                .unwrap_or(crate::tui::widgets::text_input::TextInputResult::Idle);
+            match result {
+                crate::tui::widgets::text_input::TextInputResult::Cancel => {
+                    self.text_input = None;
+                }
+                crate::tui::widgets::text_input::TextInputResult::Commit => {
+                    self.commit_text_input();
+                }
+                crate::tui::widgets::text_input::TextInputResult::Idle => {}
+            }
+            return None;
         }
 
         // Search mode input handling — intercept all keys
@@ -1456,6 +1625,35 @@ impl AppState {
             }
             KeyCode::Char('G') | KeyCode::End if count > 0 => {
                 self.selected_schedule = count - 1;
+            }
+            KeyCode::Char('a') => {
+                self.open_text_input(
+                    crate::tui::widgets::text_input::TextInputPurpose::ScheduleAddChannel,
+                    "Channel (e.g. `twitch:shroud`)",
+                    "twitch:",
+                );
+            }
+            KeyCode::Char('e') | KeyCode::Enter if count > 0 => {
+                if let Some(entry) = self.config.schedule.get(self.selected_schedule) {
+                    self.open_text_input(
+                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditCron {
+                            index: self.selected_schedule,
+                        },
+                        "Edit cron expression",
+                        entry.cron.clone(),
+                    );
+                }
+            }
+            KeyCode::Char('d') if count > 0 => {
+                if let Some(entry) = self.config.schedule.get(self.selected_schedule) {
+                    self.open_text_input(
+                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditDuration {
+                            index: self.selected_schedule,
+                        },
+                        "Edit duration",
+                        entry.duration.clone(),
+                    );
+                }
             }
             KeyCode::Char('D') if count > 0 => {
                 let removed = self.config.schedule.remove(self.selected_schedule);
@@ -1930,6 +2128,43 @@ impl AppState {
             KeyCode::Char('[') if self.playback.is_some() => {
                 return Some(AppAction::MpvSeek(-10.0));
             }
+            KeyCode::Char('R')
+                if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) =>
+            {
+                let recs = self.sorted_recordings();
+                if let Some(rec) = recs.get(self.selected_recording) {
+                    let job_id = rec.id;
+                    let initial = rec
+                        .output_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    self.open_text_input(
+                        crate::tui::widgets::text_input::TextInputPurpose::RenameRecording { job_id },
+                        "Rename recording (no extension required)",
+                        initial,
+                    );
+                }
+            }
+            KeyCode::Char('M')
+                if key.modifiers.contains(crossterm::event::KeyModifiers::SHIFT) =>
+            {
+                let recs = self.sorted_recordings();
+                if let Some(rec) = recs.get(self.selected_recording) {
+                    let job_id = rec.id;
+                    let initial = rec
+                        .output_path
+                        .parent()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
+                    self.open_text_input(
+                        crate::tui::widgets::text_input::TextInputPurpose::MoveRecording { job_id },
+                        "Move to directory (~ expands)",
+                        initial,
+                    );
+                }
+            }
             KeyCode::Char('D') => {
                 // Delete to trash. Defaults to the current row when no
                 // multi-select is active.
@@ -2358,6 +2593,22 @@ impl AppState {
 }
 
 use crate::search::fuzzy_subsequence;
+
+/// Tilde-expand a leading `~` in a path string. The std lib doesn't
+/// expand `~` for `PathBuf::from`, so we do it explicitly for paths
+/// users type into the move-modal and future settings path editors.
+fn shellexpand(s: &str) -> String {
+    if let Some(rest) = s.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return format!("{}/{}", home.to_string_lossy(), rest);
+        }
+    } else if s == "~" {
+        if let Some(home) = std::env::var_os("HOME") {
+            return home.to_string_lossy().into_owned();
+        }
+    }
+    s.to_string()
+}
 
 /// Actions the TUI loop should execute in response to key events
 pub enum AppAction {
