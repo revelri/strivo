@@ -2971,42 +2971,50 @@ impl AppState {
             return;
         }
 
-        let query = self.search_query.to_lowercase();
+        let query = self.search_query.clone();
 
-        // Filter channels: fuzzy subsequence match on display_name or name
-        self.search_filtered_channels = self
+        // M4.2.c — score every candidate via fuzzy_match and sort by score.
+        // The score-based order replaces the previous filter-only behavior
+        // so the user sees their best match first instead of whatever
+        // sidebar_order happens to put on top.
+        let mut channel_scored: Vec<(usize, i32)> = self
             .sidebar_order
             .iter()
             .copied()
-            .filter(|&i| {
-                if let Some(ch) = self.channels.get(i) {
-                    let haystack = ch.display_name.to_lowercase();
-                    let name_lower = ch.name.to_lowercase();
-                    haystack.contains(&query)
-                        || name_lower.contains(&query)
-                        || fuzzy_subsequence(&query, &haystack)
-                        || fuzzy_subsequence(&query, &name_lower)
+            .filter_map(|i| {
+                let ch = self.channels.get(i)?;
+                let display_score = crate::search::fuzzy_match(&query, &ch.display_name)
+                    .map(|m| m.score)
+                    .unwrap_or(i32::MIN);
+                let name_score = crate::search::fuzzy_match(&query, &ch.name)
+                    .map(|m| m.score)
+                    .unwrap_or(i32::MIN);
+                let best = display_score.max(name_score);
+                if best == i32::MIN {
+                    None
                 } else {
-                    false
+                    Some((i, best))
                 }
             })
             .collect();
+        channel_scored.sort_by(|a, b| b.1.cmp(&a.1));
+        self.search_filtered_channels = channel_scored.into_iter().map(|(i, _)| i).collect();
 
-        // Filter recordings: match channel_name or stream_title
-        self.search_filtered_recordings = self
+        let mut rec_scored: Vec<(Uuid, i32)> = self
             .recordings
             .iter()
-            .filter(|(_, rec)| {
-                let haystack = format!(
+            .filter_map(|(id, rec)| {
+                let hay = format!(
                     "{} {}",
                     rec.channel_name,
                     rec.stream_title.as_deref().unwrap_or(""),
-                )
-                .to_lowercase();
-                haystack.contains(&query) || fuzzy_subsequence(&query, &haystack)
+                );
+                let score = crate::search::fuzzy_match(&query, &hay).map(|m| m.score)?;
+                Some((*id, score))
             })
-            .map(|(id, _)| *id)
             .collect();
+        rec_scored.sort_by(|a, b| b.1.cmp(&a.1));
+        self.search_filtered_recordings = rec_scored.into_iter().map(|(id, _)| id).collect();
 
         // If current selection is filtered out, jump to first visible
         if !self.search_filtered_channels.is_empty()
@@ -3042,7 +3050,8 @@ impl AppState {
     }
 }
 
-use crate::search::fuzzy_subsequence;
+// fuzzy_subsequence was the M1 search predicate; M4.2.c replaced it with
+// fuzzy_match (score + spans). Re-export removed to keep the surface clean.
 
 /// Tilde-expand a leading `~` in a path string. The std lib doesn't
 /// expand `~` for `PathBuf::from`, so we do it explicitly for paths
