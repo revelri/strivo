@@ -11,7 +11,7 @@
 //! Migration: the legacy `watched.json` (flat `[Uuid]`) is folded into
 //! the new structure on first load if `state.json` doesn't yet exist.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,12 @@ pub struct TuiState {
     /// the cursor lands where they left it.
     #[serde(default)]
     pub last_pane: Option<String>,
+
+    /// Channel marks (M4.2.b — yazi audit §11). Map a single lowercase
+    /// char to a channel id; `'{c}` jumps to it. Insertion-ordered via
+    /// BTreeMap so serialization is deterministic.
+    #[serde(default)]
+    pub marks: BTreeMap<char, String>,
 }
 
 fn path() -> PathBuf {

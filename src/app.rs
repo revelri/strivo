@@ -1420,6 +1420,43 @@ impl AppState {
                 let expanded = shellexpand(&value);
                 self.apply_settings_string(key, expanded);
             }
+            P::CommandPalette => {
+                let trimmed = value.trim();
+                if let Some(action) = crate::tui::keymap::KeyAction::from_name(trimmed) {
+                    let _ = self.apply_key_action(action);
+                    self.status_message = format!("→ {trimmed}");
+                } else {
+                    self.status_message = format!("unknown command: {trimmed}");
+                }
+            }
+            P::SetMark => {
+                let Some(c) = value.chars().next() else { return };
+                if !c.is_ascii_lowercase() {
+                    self.status_message = "marks must be lowercase a-z".into();
+                    return;
+                }
+                if let Some(ch) = self.selected_channel() {
+                    let id = ch.id.clone();
+                    let display = ch.display_name.clone();
+                    self.state.marks.insert(c, id);
+                    self.state.save();
+                    self.status_message = format!("mark '{c}' = {display}");
+                }
+            }
+            P::JumpMark => {
+                let Some(c) = value.chars().next() else { return };
+                let Some(channel_id) = self.state.marks.get(&c).cloned() else {
+                    self.status_message = format!("no mark '{c}'");
+                    return;
+                };
+                if let Some(idx) = self.channels.iter().position(|ch| ch.id == channel_id) {
+                    self.selected_channel = idx;
+                    self.active_pane = ActivePane::Sidebar;
+                    self.status_message = format!("jumped to mark '{c}'");
+                } else {
+                    self.status_message = format!("mark '{c}' points at a stale channel");
+                }
+            }
         }
     }
 
@@ -1572,6 +1609,30 @@ impl AppState {
             }
             A::SearchStart => None,
             A::PluginActivate => None,
+            A::CommandPaletteOpen => {
+                self.open_text_input(
+                    crate::tui::widgets::text_input::TextInputPurpose::CommandPalette,
+                    "Command (KeyAction name, e.g. Quit, EventLogToggle)",
+                    "",
+                );
+                None
+            }
+            A::MarkSetPrompt => {
+                self.open_text_input(
+                    crate::tui::widgets::text_input::TextInputPurpose::SetMark,
+                    "Set mark (single lowercase letter)",
+                    "",
+                );
+                None
+            }
+            A::MarkJumpPrompt => {
+                self.open_text_input(
+                    crate::tui::widgets::text_input::TextInputPurpose::JumpMark,
+                    "Jump to mark (single lowercase letter)",
+                    "",
+                );
+                None
+            }
             A::VisualModeToggle => {
                 self.input_mode = match self.input_mode {
                     InputMode::Visual => InputMode::Normal,

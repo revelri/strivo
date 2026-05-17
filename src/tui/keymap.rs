@@ -143,6 +143,14 @@ pub enum KeyAction {
     /// Toggle Visual mode (yazi audit §1). On the RecordingList this
     /// makes j/k extend the multi-selection.
     VisualModeToggle,
+    /// Open the command palette (yazi audit §3). Typed names hit
+    /// KeyAction::from_name and dispatch through apply_key_action.
+    CommandPaletteOpen,
+    /// Channel marks (yazi audit §11). MarkSetPrompt opens the modal
+    /// to bind the current row to a char; MarkJumpPrompt opens it to
+    /// jump.
+    MarkSetPrompt,
+    MarkJumpPrompt,
 
     // Schedule
     ScheduleAdd,
@@ -191,6 +199,9 @@ impl KeyAction {
             Self::RenameRecording => "rename recording",
             Self::MoveRecording => "move recording",
             Self::VisualModeToggle => "visual mode (multi-select)",
+            Self::CommandPaletteOpen => "command palette",
+            Self::MarkSetPrompt => "set mark",
+            Self::MarkJumpPrompt => "jump to mark",
             Self::PlaybackTogglePause => "play/pause",
             Self::PlaybackSeekForward => "seek +10s",
             Self::PlaybackSeekBack => "seek -10s",
@@ -248,6 +259,9 @@ impl KeyAction {
             "RenameRecording" => Self::RenameRecording,
             "MoveRecording" => Self::MoveRecording,
             "VisualModeToggle" => Self::VisualModeToggle,
+            "CommandPaletteOpen" => Self::CommandPaletteOpen,
+            "MarkSetPrompt" => Self::MarkSetPrompt,
+            "MarkJumpPrompt" => Self::MarkJumpPrompt,
             "PlaybackTogglePause" => Self::PlaybackTogglePause,
             "PlaybackSeekForward" => Self::PlaybackSeekForward,
             "PlaybackSeekBack" => Self::PlaybackSeekBack,
@@ -554,6 +568,7 @@ fn table() -> &'static [Chord] {
         c(Layer::Global, KeyPattern { code: Char('F'), modifiers: M::SHIFT }, KeyAction::EnterLogPane,   "log pane"),
         c(Layer::Global, KeyPattern { code: Char('S'), modifiers: M::SHIFT }, KeyAction::EnterSchedulePane, "schedule pane"),
         c(Layer::Global, KeyPattern::plain(Char('/')),      KeyAction::SearchStart,         "search filter"),
+        c(Layer::Global, KeyPattern::plain(Char(':')),      KeyAction::CommandPaletteOpen,  "command palette"),
     ];
 
     static SIDEBAR_NAV: [Chord; 12] = nav_rows(Layer::Sidebar);
@@ -564,6 +579,8 @@ fn table() -> &'static [Chord] {
         c(Layer::Sidebar, KeyPattern::plain(Char('s')), KeyAction::EnterSettings,           "settings"),
         c(Layer::Sidebar, KeyPattern { code: Char('C'), modifiers: M::SHIFT }, KeyAction::EnterSettings, "settings"),
         c(Layer::Sidebar, KeyPattern::plain(Char('a')), KeyAction::ToggleAutoRecord,        "toggle auto-record"),
+        c(Layer::Sidebar, KeyPattern::plain(Char('m')), KeyAction::MarkSetPrompt,           "set mark on current"),
+        c(Layer::Sidebar, KeyPattern::plain(Char('\'')), KeyAction::MarkJumpPrompt,         "jump to mark"),
     ];
 
     static DETAIL_NAV: [Chord; 12] = nav_rows(Layer::Detail);

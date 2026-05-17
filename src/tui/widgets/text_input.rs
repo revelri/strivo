@@ -34,6 +34,12 @@ pub enum TextInputPurpose {
     SettingsInt { key: &'static str },
     /// Edit a settings path. Tilde is expanded on commit.
     SettingsPath { key: &'static str },
+    /// Command palette (M4.2.a). Value is parsed as a KeyAction name
+    /// and dispatched through apply_key_action.
+    CommandPalette,
+    /// Channel marks (M4.2.b). Single-char value sets / jumps a mark.
+    SetMark,
+    JumpMark,
 }
 
 /// Live state for an open text-input modal.
