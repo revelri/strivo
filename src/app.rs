@@ -234,6 +234,33 @@ impl ActivePane {
 /// blowing up memory.
 pub const EVENT_RING_CAP: usize = 100;
 
+/// Cap on the in-memory undo stack (M4.follow.a). Five matches the
+/// audit and is enough to recover from a "fat-fingered Shift+D burst"
+/// without storing arbitrary history.
+pub const UNDO_DEPTH: usize = 5;
+
+/// Reversible destructive actions. Each variant carries the data
+/// needed to reverse itself without re-querying state.
+#[derive(Debug, Clone)]
+pub enum UndoAction {
+    ToggleAutoRecord {
+        channel_id: String,
+        platform: String,
+        was_on: bool,
+        channel_name: String,
+        format: Option<crate::config::RecordingFormat>,
+    },
+    ScheduleDelete {
+        index: usize,
+        entry: crate::config::ScheduleEntry,
+    },
+    TrashRecording {
+        /// (Original RecordingJob, current trash path). Reversing
+        /// restores both.
+        items: Vec<(crate::recording::job::RecordingJob, PathBuf)>,
+    },
+}
+
 /// Live playback snapshot displayed in the playback overlay. Polled from
 /// mpv every ~250 ms; values are best-effort and stale on the order of
 /// a frame.
@@ -345,6 +372,13 @@ pub struct AppState {
     /// `~/.config/strivo/plugins/*.toml`. Today informational only —
     /// surfaced in the Settings tab so users can verify discovery.
     pub user_plugin_manifests: Vec<crate::plugin::PluginManifest>,
+
+    /// In-memory undo stack — last 5 reversible destructive actions
+    /// (M4.follow.a). `u` pops the newest and reverses it. Cleared on
+    /// quit; not persisted (an undo across sessions would race the
+    /// daemon's own state). Stop-recording and log-clear are
+    /// intrinsically irreversible and never push here.
+    pub undo_stack: std::collections::VecDeque<UndoAction>,
     /// Recording-id → TaskId mapping so RecordingFinished can close the
     /// matching task without scanning the registry.
     pub task_by_recording: std::collections::HashMap<Uuid, crate::tasks::TaskId>,
@@ -581,6 +615,7 @@ impl AppState {
             user_plugin_manifests: crate::plugin::scan_user_plugins(
                 &crate::plugin::user_plugin_dir(),
             ),
+            undo_stack: std::collections::VecDeque::with_capacity(UNDO_DEPTH),
             transcode_mode: initial_transcode,
             watching_channel: None,
             twitch_connected: false,
@@ -1931,6 +1966,10 @@ impl AppState {
                 self.status_message = "Log cleared".into();
                 None
             }
+            A::UndoLast => {
+                self.undo_last();
+                None
+            }
         }
     }
 
@@ -2509,23 +2548,45 @@ impl AppState {
         let Some(idx) = self.channels.get(self.selected_channel).map(|_| self.selected_channel) else {
             return;
         };
+        let (id, plat, name, display, was_on, format) = {
+            let ch = &self.channels[idx];
+            (
+                ch.id.clone(),
+                ch.platform.to_string(),
+                ch.name.clone(),
+                ch.display_name.clone(),
+                ch.auto_record,
+                self.config
+                    .auto_record_channels
+                    .iter()
+                    .find(|a| a.channel_id == ch.id && a.platform == ch.platform.to_string())
+                    .and_then(|a| a.format.clone()),
+            )
+        };
+        // Snapshot the pre-mutation state for undo.
+        self.push_undo(UndoAction::ToggleAutoRecord {
+            channel_id: id.clone(),
+            platform: plat.clone(),
+            was_on,
+            channel_name: name.clone(),
+            format: format.clone(),
+        });
+
         let ch = &mut self.channels[idx];
-        ch.auto_record = !ch.auto_record;
+        ch.auto_record = !was_on;
         if ch.auto_record {
             self.config.auto_record_channels.push(crate::config::AutoRecordEntry {
-                platform: ch.platform.to_string(),
-                channel_id: ch.id.clone(),
-                channel_name: ch.name.clone(),
+                platform: plat.clone(),
+                channel_id: id.clone(),
+                channel_name: name,
                 format: None,
             });
-            self.status_message = format!("Monitor ON for {}", ch.display_name);
+            self.status_message = format!("Monitor ON for {display}");
         } else {
-            let id = ch.id.clone();
-            let plat = ch.platform.to_string();
             self.config
                 .auto_record_channels
                 .retain(|a| !(a.channel_id == id && a.platform == plat));
-            self.status_message = format!("Monitor OFF for {}", ch.display_name);
+            self.status_message = format!("Monitor OFF for {display}");
         }
         self.rebuild_sidebar_order();
         if let Err(e) = self.config.save(None) {
@@ -2652,11 +2713,16 @@ impl AppState {
         });
         let mut trashed = 0usize;
         let mut errors = 0usize;
+        // Capture (original job, trash path) tuples for undo. Only the
+        // jobs whose move-to-trash succeeded participate — a failed
+        // move leaves the file in place and the job in memory.
+        let mut undo_items: Vec<(crate::recording::job::RecordingJob, PathBuf)> = Vec::new();
         for id in &targets {
-            if let Some(job) = self.recordings.get(id) {
+            if let Some(job) = self.recordings.get(id).cloned() {
                 match crate::recording::trash::move_to_trash(&job.output_path) {
                     Ok(new_path) => {
                         tracing::info!(job_id = %id, new_path = %new_path.display(), "recording moved to trash");
+                        undo_items.push((job, new_path));
                         trashed += 1;
                     }
                     Err(e) => {
@@ -2665,6 +2731,9 @@ impl AppState {
                     }
                 }
             }
+        }
+        if !undo_items.is_empty() {
+            self.push_undo(UndoAction::TrashRecording { items: undo_items });
         }
         for id in &targets {
             self.recordings.remove(id);
@@ -2675,10 +2744,90 @@ impl AppState {
         self.rebuild_sidebar_order();
         self.reconcile_selected_recording();
         self.status_message = if errors == 0 {
-            format!("Trashed {trashed} recording(s)")
+            format!("Trashed {trashed} recording(s) · u to undo")
         } else {
             format!("Trashed {trashed}, {errors} failed (see log)")
         };
+    }
+
+    /// Push a reversible action onto the bounded undo stack. Oldest
+    /// entries fall off the front when capacity is exceeded; they're
+    /// irrecoverable but the user retains five operations of history.
+    fn push_undo(&mut self, action: UndoAction) {
+        if self.undo_stack.len() >= UNDO_DEPTH {
+            self.undo_stack.pop_front();
+        }
+        self.undo_stack.push_back(action);
+    }
+
+    /// Pop and apply the most recent undoable action.
+    fn undo_last(&mut self) {
+        let Some(action) = self.undo_stack.pop_back() else {
+            self.status_message = "Nothing to undo".into();
+            return;
+        };
+        match action {
+            UndoAction::ToggleAutoRecord {
+                channel_id,
+                platform,
+                was_on,
+                channel_name,
+                format,
+            } => {
+                if let Some(ch) = self
+                    .channels
+                    .iter_mut()
+                    .find(|c| c.id == channel_id && c.platform.to_string() == platform)
+                {
+                    ch.auto_record = was_on;
+                }
+                if was_on {
+                    // Was on before the toggle that turned it off — restore the entry.
+                    self.config.auto_record_channels.push(crate::config::AutoRecordEntry {
+                        platform: platform.clone(),
+                        channel_id: channel_id.clone(),
+                        channel_name,
+                        format,
+                    });
+                } else {
+                    self.config
+                        .auto_record_channels
+                        .retain(|a| !(a.channel_id == channel_id && a.platform == platform));
+                }
+                self.rebuild_sidebar_order();
+                let _ = self.config.save(None);
+                self.status_message = "Undo: auto-record toggle".into();
+            }
+            UndoAction::ScheduleDelete { index, entry } => {
+                let i = index.min(self.config.schedule.len());
+                self.config.schedule.insert(i, entry);
+                let _ = self.config.save(None);
+                self.status_message = "Undo: schedule restored".into();
+            }
+            UndoAction::TrashRecording { items } => {
+                let n = items.len();
+                for (job, trash_path) in items {
+                    let dest = job.output_path.clone();
+                    if let Some(parent) = dest.parent() {
+                        let _ = std::fs::create_dir_all(parent);
+                    }
+                    if let Err(e) = std::fs::rename(&trash_path, &dest) {
+                        tracing::warn!(
+                            from = %trash_path.display(),
+                            to = %dest.display(),
+                            error = %e,
+                            "undo: trash restore failed",
+                        );
+                        continue;
+                    }
+                    self.recordings.insert(job.id, job);
+                }
+                self.rebuild_active_channels();
+                self.rebuild_sidebar_order();
+                self.reconcile_selected_recording();
+                self.status_message = format!("Undo: restored {n} recording(s)");
+            }
+        }
     }
 
     fn recording_list_open_rename(&mut self) {
@@ -2722,7 +2871,14 @@ impl AppState {
         if self.selected_schedule >= count {
             return;
         }
-        let removed = self.config.schedule.remove(self.selected_schedule);
+        let index = self.selected_schedule;
+        let removed = self.config.schedule.remove(index);
+        // Record for undo before we save so a save failure doesn't
+        // leave the stack lying about a non-persisted mutation.
+        self.push_undo(UndoAction::ScheduleDelete {
+            index,
+            entry: removed.clone(),
+        });
         if let Err(e) = self.config.save(None) {
             self.status_message = format!("Schedule removed in-memory but save failed: {e}");
         } else {

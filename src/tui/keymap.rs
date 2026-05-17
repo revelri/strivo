@@ -154,6 +154,9 @@ pub enum KeyAction {
     /// Clipboard / open helpers (M4.6).
     CopyToClipboard,
     OpenInFolder,
+    /// Undo the last destructive action (M4.follow.a). Cleared on quit;
+    /// limited to 5 entries.
+    UndoLast,
 
     // Schedule
     ScheduleAdd,
@@ -207,6 +210,7 @@ impl KeyAction {
             Self::MarkJumpPrompt => "jump to mark",
             Self::CopyToClipboard => "copy to clipboard",
             Self::OpenInFolder => "open folder",
+            Self::UndoLast => "undo last destructive action",
             Self::PlaybackTogglePause => "play/pause",
             Self::PlaybackSeekForward => "seek +10s",
             Self::PlaybackSeekBack => "seek -10s",
@@ -269,6 +273,7 @@ impl KeyAction {
             "MarkJumpPrompt" => Self::MarkJumpPrompt,
             "CopyToClipboard" => Self::CopyToClipboard,
             "OpenInFolder" => Self::OpenInFolder,
+            "UndoLast" => Self::UndoLast,
             "PlaybackTogglePause" => Self::PlaybackTogglePause,
             "PlaybackSeekForward" => Self::PlaybackSeekForward,
             "PlaybackSeekBack" => Self::PlaybackSeekBack,
@@ -576,6 +581,7 @@ fn table() -> &'static [Chord] {
         c(Layer::Global, KeyPattern { code: Char('S'), modifiers: M::SHIFT }, KeyAction::EnterSchedulePane, "schedule pane"),
         c(Layer::Global, KeyPattern::plain(Char('/')),      KeyAction::SearchStart,         "search filter"),
         c(Layer::Global, KeyPattern::plain(Char(':')),      KeyAction::CommandPaletteOpen,  "command palette"),
+        c(Layer::Global, KeyPattern::plain(Char('u')),      KeyAction::UndoLast,            "undo last"),
     ];
 
     static SIDEBAR_NAV: [Chord; 12] = nav_rows(Layer::Sidebar);
