@@ -71,6 +71,16 @@ pub enum Command {
 
     /// Check that required external tools are installed
     Doctor,
+    /// Embed chapter markers into a recording (M5.3, requires mkvpropedit).
+    Chapter {
+        /// MKV file to chapter.
+        file: std::path::PathBuf,
+        /// Emit one chapter every N minutes (default 10). Each chapter
+        /// is labeled "Part 1", "Part 2", … so semantic sources (Crunchr
+        /// topics, manual splits) can override later.
+        #[arg(long, default_value = "10")]
+        every: u64,
+    },
     /// Print shell completion script to stdout
     Completions {
         /// Shell to generate completions for

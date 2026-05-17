@@ -71,6 +71,7 @@ async fn handle_command(cmd: &Command, config_path: Option<&std::path::Path>) ->
         Command::Search { query } => handle_search(query, config_path),
         Command::Theme { action } => handle_theme_command(action),
         Command::Doctor => handle_doctor(),
+        Command::Chapter { file, every } => handle_chapter(file, *every),
         Command::Completions { shell } => handle_completions(*shell),
         Command::Man => handle_man(),
         Command::Pull { target, format, since, max, force, no_transcribe } => {
@@ -249,6 +250,38 @@ fn handle_theme_command(action: &ThemeAction) -> Result<()> {
             Ok(())
         }
     }
+}
+
+fn handle_chapter(file: &std::path::Path, every: u64) -> Result<()> {
+    use strivo_core::media::probe_file;
+    use strivo_core::recording::chapters::{embed_chapters, every_n_minutes};
+
+    if !file.exists() {
+        anyhow::bail!("file does not exist: {}", file.display());
+    }
+    // Probe the duration so the chapter set reaches the end of the file.
+    let info = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(probe_file(file))
+        .context("ffprobe the recording duration")?;
+    let duration = info.duration_secs;
+    if duration <= 0.0 {
+        anyhow::bail!("ffprobe reported zero duration; cannot chapter");
+    }
+    let chapters = every_n_minutes(duration, every);
+    if chapters.is_empty() {
+        anyhow::bail!("no chapters generated (file shorter than interval?)");
+    }
+    println!(
+        "Embedding {} chapter(s) every {} min into {}",
+        chapters.len(),
+        every,
+        file.display()
+    );
+    embed_chapters(file, &chapters)?;
+    println!("ok");
+    Ok(())
 }
 
 fn handle_doctor() -> Result<()> {
