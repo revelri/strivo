@@ -75,10 +75,7 @@ pub enum AppEvent {
     /// Tick (frame timer)
     Tick,
     /// Thumbnail downloaded to disk
-    ThumbnailReady {
-        channel_id: String,
-        path: PathBuf,
-    },
+    ThumbnailReady { channel_id: String, path: PathBuf },
     /// Thumbnail decoded into protocol state
     ThumbnailDecoded {
         channel_id: String,
@@ -90,9 +87,7 @@ pub enum AppEvent {
         stream_url: String,
     },
     /// Watch stream URL resolution failed
-    WatchFailed {
-        error: String,
-    },
+    WatchFailed { error: String },
     /// Event from a plugin's async task
     PluginEvent {
         plugin_name: &'static str,
@@ -136,10 +131,22 @@ impl AppEvent {
         Self::Daemon(DaemonEvent::RecordingStarted { job })
     }
     pub fn recording_progress(job_id: Uuid, bytes_written: u64, duration_secs: f64) -> Self {
-        Self::Daemon(DaemonEvent::RecordingProgress { job_id, bytes_written, duration_secs })
+        Self::Daemon(DaemonEvent::RecordingProgress {
+            job_id,
+            bytes_written,
+            duration_secs,
+        })
     }
-    pub fn recording_finished(job_id: Uuid, final_state: RecordingState, error: Option<String>) -> Self {
-        Self::Daemon(DaemonEvent::RecordingFinished { job_id, final_state, error })
+    pub fn recording_finished(
+        job_id: Uuid,
+        final_state: RecordingState,
+        error: Option<String>,
+    ) -> Self {
+        Self::Daemon(DaemonEvent::RecordingFinished {
+            job_id,
+            final_state,
+            error,
+        })
     }
     pub fn notification(title: String, body: String) -> Self {
         Self::Daemon(DaemonEvent::Notification { title, body })
@@ -147,8 +154,16 @@ impl AppEvent {
     pub fn all_recordings_stopped() -> Self {
         Self::Daemon(DaemonEvent::AllRecordingsStopped)
     }
-    pub fn device_code_required(kind: PlatformKind, verification_uri: String, user_code: String) -> Self {
-        Self::Daemon(DaemonEvent::DeviceCodeRequired { kind, verification_uri, user_code })
+    pub fn device_code_required(
+        kind: PlatformKind,
+        verification_uri: String,
+        user_code: String,
+    ) -> Self {
+        Self::Daemon(DaemonEvent::DeviceCodeRequired {
+            kind,
+            verification_uri,
+            user_code,
+        })
     }
     pub fn platform_authenticated(kind: PlatformKind) -> Self {
         Self::Daemon(DaemonEvent::PlatformAuthenticated { kind })
@@ -165,7 +180,12 @@ impl AppEvent {
         job_id: Uuid,
         duration_secs: u64,
     ) -> Self {
-        Self::Daemon(DaemonEvent::ScheduleFired { channel, platform, job_id, duration_secs })
+        Self::Daemon(DaemonEvent::ScheduleFired {
+            channel,
+            platform,
+            job_id,
+            duration_secs,
+        })
     }
 }
 
@@ -708,7 +728,11 @@ impl AppState {
             quit_confirm_opened_at: None,
             properties_opened_at: None,
             platform_debug_opened_at: None,
-            wizard_opened_at: if first_run { Some(std::time::Instant::now()) } else { None },
+            wizard_opened_at: if first_run {
+                Some(std::time::Instant::now())
+            } else {
+                None
+            },
             stopping_opened_at: None,
             event_log_opened_at: None,
             show_event_log: false,
@@ -750,15 +774,20 @@ impl AppState {
     pub fn update_overlay_timing(&mut self) {
         sync_open(&mut self.help_opened_at, self.show_help);
         sync_open(&mut self.quit_confirm_opened_at, self.quit_confirm);
-        sync_open(&mut self.properties_opened_at, self.show_properties.is_some());
+        sync_open(
+            &mut self.properties_opened_at,
+            self.show_properties.is_some(),
+        );
         sync_open(
             &mut self.platform_debug_opened_at,
             self.show_platform_debug.is_some(),
         );
-        let wizard_live =
-            self.active_pane == ActivePane::Wizard || self.pending_auth.is_some();
+        let wizard_live = self.active_pane == ActivePane::Wizard || self.pending_auth.is_some();
         sync_open(&mut self.wizard_opened_at, wizard_live);
-        sync_open(&mut self.stopping_opened_at, self.stop_all_deadline.is_some());
+        sync_open(
+            &mut self.stopping_opened_at,
+            self.stop_all_deadline.is_some(),
+        );
         sync_open(&mut self.event_log_opened_at, self.show_event_log);
         sync_open(&mut self.text_input_opened_at, self.text_input.is_some());
         // Drop terminal tasks 2 seconds after they enter the Done/Failed
@@ -789,9 +818,7 @@ impl AppState {
                     self.state.save();
                 }
             }
-        } else if self
-            .pane_lost_focus
-            .is_some()
+        } else if self.pane_lost_focus.is_some()
             && self.pane_focus_at.elapsed().as_secs_f32() > 0.14
         {
             // Unfocused ramp has settled — stop drawing it.
@@ -831,11 +858,10 @@ impl AppState {
         }
         // Transient bounded animations — check whether their timer is still
         // within the active window (with slack to cover the tail).
-        let within =
-            |at: Option<std::time::Instant>, limit_secs: f32| -> bool {
-                at.map(|t| t.elapsed().as_secs_f32() < limit_secs)
-                    .unwrap_or(false)
-            };
+        let within = |at: Option<std::time::Instant>, limit_secs: f32| -> bool {
+            at.map(|t| t.elapsed().as_secs_f32() < limit_secs)
+                .unwrap_or(false)
+        };
         if within(self.last_hotkey_at, 0.28) {
             return true;
         }
@@ -894,9 +920,7 @@ impl AppState {
         use crate::tui::theme::Theme;
         if self.active_pane == *this {
             Theme::border_focused_ramp(self.focus_fade_secs())
-        } else if self.pane_lost_focus.as_ref() == Some(this)
-            && self.focus_fade_secs() < 0.14
-        {
+        } else if self.pane_lost_focus.as_ref() == Some(this) && self.focus_fade_secs() < 0.14 {
             Theme::border_unfocused_ramp(self.focus_fade_secs())
         } else {
             Theme::border()
@@ -1049,9 +1073,7 @@ impl AppState {
         self.recordings
             .values()
             .filter(|r| {
-                r.channel_id == channel_id
-                    && r.state == RecordingState::Finished
-                    && !r.watched
+                r.channel_id == channel_id && r.state == RecordingState::Finished && !r.watched
             })
             .count()
     }
@@ -1087,7 +1109,10 @@ impl AppState {
                     if let Some(ch) = self.channels.get(self.selected_channel) {
                         if ch.is_live && ch.stream_title.is_some() {
                             if self.tick_counter % 6 == 0 {
-                                let offset = self.scroll_offsets.entry(self.selected_channel).or_insert(0);
+                                let offset = self
+                                    .scroll_offsets
+                                    .entry(self.selected_channel)
+                                    .or_insert(0);
                                 *offset += 1;
                             }
                         }
@@ -1097,7 +1122,10 @@ impl AppState {
             AppEvent::ThumbnailReady { channel_id, path } => {
                 self.thumbnail_cache.insert(channel_id.clone(), path);
             }
-            AppEvent::ThumbnailDecoded { channel_id, protocol } => {
+            AppEvent::ThumbnailDecoded {
+                channel_id,
+                protocol,
+            } => {
                 self.thumbnail_changed_at
                     .insert(channel_id.clone(), std::time::Instant::now());
                 self.thumbnail_protocols.insert(channel_id, protocol);
@@ -1106,7 +1134,10 @@ impl AppState {
                 self.recording_thumb_in_flight.remove(&id);
                 self.recording_thumb_protocols.insert(id, protocol);
             }
-            AppEvent::WatchResolved { channel_name, stream_url } => {
+            AppEvent::WatchResolved {
+                channel_name,
+                stream_url,
+            } => {
                 self.watching_channel = Some(channel_name.clone());
                 return Some(AppAction::LaunchMpv {
                     channel_name,
@@ -1169,10 +1200,9 @@ impl AppState {
         // Mirror the event into the user-facing ring before dispatch so
         // every variant lands there even when the handler is a no-op.
         let (level, message): (UiEventLevel, String) = match &event {
-            DaemonEvent::ChannelWentLive(ch) => (
-                UiEventLevel::Info,
-                format!("{} went live", ch.display_name),
-            ),
+            DaemonEvent::ChannelWentLive(ch) => {
+                (UiEventLevel::Info, format!("{} went live", ch.display_name))
+            }
             DaemonEvent::ChannelWentOffline(ch) => (
                 UiEventLevel::Info,
                 format!("{} went offline", ch.display_name),
@@ -1181,7 +1211,11 @@ impl AppState {
                 UiEventLevel::Info,
                 format!("Recording started: {}", job.channel_name),
             ),
-            DaemonEvent::RecordingFinished { job_id, final_state, error } => {
+            DaemonEvent::RecordingFinished {
+                job_id,
+                final_state,
+                error,
+            } => {
                 let level = match final_state {
                     RecordingState::Finished => UiEventLevel::Info,
                     RecordingState::Failed => UiEventLevel::Warn,
@@ -1194,7 +1228,11 @@ impl AppState {
                 };
                 (level, msg)
             }
-            DaemonEvent::ScheduleFired { channel, duration_secs, .. } => (
+            DaemonEvent::ScheduleFired {
+                channel,
+                duration_secs,
+                ..
+            } => (
                 UiEventLevel::Info,
                 format!("Schedule fired: {channel} ({} min)", duration_secs / 60),
             ),
@@ -1203,7 +1241,11 @@ impl AppState {
             }
             DaemonEvent::Notification { title, body } => (
                 UiEventLevel::Info,
-                if body.is_empty() { title.clone() } else { format!("{title}: {body}") },
+                if body.is_empty() {
+                    title.clone()
+                } else {
+                    format!("{title}: {body}")
+                },
             ),
             DaemonEvent::Error(msg) => (UiEventLevel::Error, msg.clone()),
             _ => (UiEventLevel::Trace, String::new()),
@@ -1215,14 +1257,18 @@ impl AppState {
         match event {
             DaemonEvent::ChannelsUpdated(channels) => {
                 // Remember currently selected channel by ID
-                let prev_selected_id = self.channels.get(self.selected_channel).map(|ch| ch.id.clone());
+                let prev_selected_id = self
+                    .channels
+                    .get(self.selected_channel)
+                    .map(|ch| ch.id.clone());
 
                 // Preserve auto_record settings from config
                 let mut updated = channels;
                 for ch in &mut updated {
-                    ch.auto_record = self.config.auto_record_channels.iter().any(|a| {
-                        a.channel_id == ch.id && a.platform == ch.platform.to_string()
-                    });
+                    ch.auto_record =
+                        self.config.auto_record_channels.iter().any(|a| {
+                            a.channel_id == ch.id && a.platform == ch.platform.to_string()
+                        });
                 }
                 self.channels = updated;
 
@@ -1238,9 +1284,12 @@ impl AppState {
                 }
 
                 // Prune stale thumbnail entries
-                let current_ids: HashSet<String> = self.channels.iter().map(|ch| ch.id.clone()).collect();
-                self.thumbnail_cache.retain(|id, _| current_ids.contains(id));
-                self.thumbnail_protocols.retain(|id, _| current_ids.contains(id));
+                let current_ids: HashSet<String> =
+                    self.channels.iter().map(|ch| ch.id.clone()).collect();
+                self.thumbnail_cache
+                    .retain(|id, _| current_ids.contains(id));
+                self.thumbnail_protocols
+                    .retain(|id, _| current_ids.contains(id));
 
                 self.rebuild_sidebar_order();
             }
@@ -1300,7 +1349,11 @@ impl AppState {
                     );
                 }
             }
-            DaemonEvent::RecordingFinished { job_id, final_state, error } => {
+            DaemonEvent::RecordingFinished {
+                job_id,
+                final_state,
+                error,
+            } => {
                 if let Some(job) = self.recordings.get_mut(&job_id) {
                     job.state = final_state;
                     job.error = error.clone();
@@ -1309,9 +1362,9 @@ impl AppState {
                     match final_state {
                         RecordingState::Finished => self.tasks.complete(task_id),
                         _ => {
-                            let err = error.clone().unwrap_or_else(|| {
-                                format!("ended in state {final_state:?}")
-                            });
+                            let err = error
+                                .clone()
+                                .unwrap_or_else(|| format!("ended in state {final_state:?}"));
                             self.tasks.fail(task_id, err);
                         }
                     }
@@ -1348,10 +1401,13 @@ impl AppState {
             DaemonEvent::AllRecordingsStopped => {
                 self.should_quit = true;
             }
-            DaemonEvent::DeviceCodeRequired { kind, verification_uri, user_code } => {
-                self.status_message = format!(
-                    "{kind} auth: go to {verification_uri} and enter code: {user_code}"
-                );
+            DaemonEvent::DeviceCodeRequired {
+                kind,
+                verification_uri,
+                user_code,
+            } => {
+                self.status_message =
+                    format!("{kind} auth: go to {verification_uri} and enter code: {user_code}");
                 let entry = (kind, verification_uri, user_code);
                 // Deduplicate: a re-fire for the same platform replaces the
                 // previous code rather than stacking.
@@ -1378,13 +1434,19 @@ impl AppState {
                 }
                 self.auth_queue.retain(|(p, _, _)| *p != kind);
             }
-            DaemonEvent::PatreonPostFound { creator_name, post_title } => {
+            DaemonEvent::PatreonPostFound {
+                creator_name,
+                post_title,
+            } => {
                 self.status_message = format!("Patreon: {creator_name} posted '{post_title}'");
             }
-            DaemonEvent::ScheduleFired { channel, duration_secs, .. } => {
+            DaemonEvent::ScheduleFired {
+                channel,
+                duration_secs,
+                ..
+            } => {
                 let mins = duration_secs / 60;
-                self.status_message =
-                    format!("Schedule fired: {channel} ({mins} min)");
+                self.status_message = format!("Schedule fired: {channel} ({mins} min)");
                 return Some(AppAction::Notify {
                     title: "Scheduled recording".into(),
                     body: format!("{channel} — {mins} min"),
@@ -1396,7 +1458,10 @@ impl AppState {
                 let msg_lower = msg.to_lowercase();
                 let kind = if msg_lower.contains("twitch") || msg_lower.contains("streamlink") {
                     Some(PlatformKind::Twitch)
-                } else if msg_lower.contains("youtube") || msg_lower.contains("yt-dlp") || msg_lower.contains("ytdlp") {
+                } else if msg_lower.contains("youtube")
+                    || msg_lower.contains("yt-dlp")
+                    || msg_lower.contains("ytdlp")
+                {
                     Some(PlatformKind::YouTube)
                 } else if msg_lower.contains("patreon") {
                     Some(PlatformKind::Patreon)
@@ -1505,7 +1570,10 @@ impl AppState {
             }
             P::ScheduleAddCron { channel } => {
                 self.open_text_input(
-                    P::ScheduleAddDuration { channel, cron: value },
+                    P::ScheduleAddDuration {
+                        channel,
+                        cron: value,
+                    },
                     "Duration (e.g. `4h`, `90m`, `2h30m`)",
                     "4h",
                 );
@@ -1558,7 +1626,9 @@ impl AppState {
                 }
             }
             P::SetMark => {
-                let Some(c) = value.chars().next() else { return };
+                let Some(c) = value.chars().next() else {
+                    return;
+                };
                 if !c.is_ascii_lowercase() {
                     self.status_message = "marks must be lowercase a-z".into();
                     return;
@@ -1572,7 +1642,9 @@ impl AppState {
                 }
             }
             P::JumpMark => {
-                let Some(c) = value.chars().next() else { return };
+                let Some(c) = value.chars().next() else {
+                    return;
+                };
                 let Some(channel_id) = self.state.marks.get(&c).cloned() else {
                     self.status_message = format!("no mark '{c}'");
                     return;
@@ -1659,10 +1731,7 @@ impl AppState {
     /// mutation (or an [`AppAction`] for the TUI loop). Single source of
     /// truth for what a global key does — when migrating per-pane keys
     /// into the table (M3 follow-ups), variants land here.
-    fn apply_key_action(
-        &mut self,
-        action: crate::tui::keymap::KeyAction,
-    ) -> Option<AppAction> {
+    fn apply_key_action(&mut self, action: crate::tui::keymap::KeyAction) -> Option<AppAction> {
         use crate::tui::keymap::KeyAction as A;
         match action {
             A::Quit if self.active_pane != ActivePane::Wizard => {
@@ -1763,18 +1832,16 @@ impl AppState {
             }
             A::CopyToClipboard => {
                 let target: Option<String> = match self.active_pane {
-                    ActivePane::Detail => self.selected_channel().map(|ch| {
-                        match ch.platform {
-                            PlatformKind::Twitch => format!("https://twitch.tv/{}", ch.name),
-                            PlatformKind::YouTube => {
-                                if ch.id.starts_with("UC") {
-                                    format!("https://youtube.com/channel/{}", ch.id)
-                                } else {
-                                    format!("https://youtube.com/@{}", ch.name)
-                                }
+                    ActivePane::Detail => self.selected_channel().map(|ch| match ch.platform {
+                        PlatformKind::Twitch => format!("https://twitch.tv/{}", ch.name),
+                        PlatformKind::YouTube => {
+                            if ch.id.starts_with("UC") {
+                                format!("https://youtube.com/channel/{}", ch.id)
+                            } else {
+                                format!("https://youtube.com/@{}", ch.name)
                             }
-                            PlatformKind::Patreon => format!("https://patreon.com/{}", ch.name),
                         }
+                        PlatformKind::Patreon => format!("https://patreon.com/{}", ch.name),
                     }),
                     ActivePane::RecordingList => {
                         let recs = self.sorted_recordings();
@@ -1912,10 +1979,18 @@ impl AppState {
                 }
             }
             A::PlaybackSeekForward => {
-                if self.playback.is_some() { Some(AppAction::MpvSeek(10.0)) } else { None }
+                if self.playback.is_some() {
+                    Some(AppAction::MpvSeek(10.0))
+                } else {
+                    None
+                }
             }
             A::PlaybackSeekBack => {
-                if self.playback.is_some() { Some(AppAction::MpvSeek(-10.0)) } else { None }
+                if self.playback.is_some() {
+                    Some(AppAction::MpvSeek(-10.0))
+                } else {
+                    None
+                }
             }
             A::PlaybackSpeedUp => {
                 if let Some(ref mut st) = self.playback {
@@ -1962,7 +2037,9 @@ impl AppState {
                     let index = self.selected_schedule;
                     let cron = entry.cron.clone();
                     self.open_text_input(
-                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditCron { index },
+                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditCron {
+                            index,
+                        },
                         "Edit cron expression",
                         cron,
                     );
@@ -1974,7 +2051,9 @@ impl AppState {
                     let index = self.selected_schedule;
                     let duration = entry.duration.clone();
                     self.open_text_input(
-                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditDuration { index },
+                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditDuration {
+                            index,
+                        },
                         "Edit duration",
                         duration,
                     );
@@ -1986,7 +2065,8 @@ impl AppState {
                 None
             }
             A::LogScrollPageDown => {
-                self.log_scroll = (self.log_scroll + 30).min(self.log_lines.len().saturating_sub(1));
+                self.log_scroll =
+                    (self.log_scroll + 30).min(self.log_lines.len().saturating_sub(1));
                 self.log_auto_scroll = false;
                 None
             }
@@ -2236,10 +2316,7 @@ impl AppState {
     /// Schedule pane: j/k navigate, D delete current row (writes config),
     /// Esc/h returns to Sidebar. Add/edit modals are deferred until the
     /// generic text-input modal lands (alongside rename/move in M1.3.b).
-    fn handle_schedule_key(
-        &mut self,
-        _key: crossterm::event::KeyEvent,
-    ) -> Option<AppAction> {
+    fn handle_schedule_key(&mut self, _key: crossterm::event::KeyEvent) -> Option<AppAction> {
         // Schedule pane bindings all live in src/tui/keymap.rs and route
         // through apply_key_action / schedule_delete_selected.
         None
@@ -2574,7 +2651,9 @@ impl AppState {
                     let index = self.selected_schedule;
                     let cron = entry.cron.clone();
                     self.open_text_input(
-                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditCron { index },
+                        crate::tui::widgets::text_input::TextInputPurpose::ScheduleEditCron {
+                            index,
+                        },
                         "Edit cron expression",
                         cron,
                     );
@@ -2588,7 +2667,11 @@ impl AppState {
     // ---- Pane-action helpers ----
 
     fn toggle_auto_record_on_selected(&mut self) {
-        let Some(idx) = self.channels.get(self.selected_channel).map(|_| self.selected_channel) else {
+        let Some(idx) = self
+            .channels
+            .get(self.selected_channel)
+            .map(|_| self.selected_channel)
+        else {
             return;
         };
         let (id, plat, name, display, was_on, format) = {
@@ -2618,12 +2701,14 @@ impl AppState {
         let ch = &mut self.channels[idx];
         ch.auto_record = !was_on;
         if ch.auto_record {
-            self.config.auto_record_channels.push(crate::config::AutoRecordEntry {
-                platform: plat.clone(),
-                channel_id: id.clone(),
-                channel_name: name,
-                format: None,
-            });
+            self.config
+                .auto_record_channels
+                .push(crate::config::AutoRecordEntry {
+                    platform: plat.clone(),
+                    channel_id: id.clone(),
+                    channel_name: name,
+                    format: None,
+                });
             self.status_message = format!("Monitor ON for {display}");
         } else {
             self.config
@@ -2678,7 +2763,10 @@ impl AppState {
     fn recording_list_stop_selected(&mut self) -> Option<AppAction> {
         let recs = self.sorted_recordings();
         let rec = recs.get(self.selected_recording)?;
-        if matches!(rec.state, RecordingState::Recording | RecordingState::ResolvingUrl) {
+        if matches!(
+            rec.state,
+            RecordingState::Recording | RecordingState::ResolvingUrl
+        ) {
             let job_id = rec.id;
             self.send_recording_command(RecordingCommand::Stop { job_id });
             self.status_message = format!("Stopping recording: {}", rec.channel_name);
@@ -2716,7 +2804,9 @@ impl AppState {
 
     fn recording_list_toggle_select(&mut self) {
         let recs = self.sorted_recordings();
-        let Some(rec) = recs.get(self.selected_recording) else { return };
+        let Some(rec) = recs.get(self.selected_recording) else {
+            return;
+        };
         let id = rec.id;
         if self.recording_selections_set.remove(&id) {
             self.recording_selections_order.retain(|x| *x != id);
@@ -2731,7 +2821,9 @@ impl AppState {
     /// j/k movement so the highlight tail follows the cursor.
     fn recording_list_extend_selection(&mut self) {
         let recs = self.sorted_recordings();
-        let Some(rec) = recs.get(self.selected_recording) else { return };
+        let Some(rec) = recs.get(self.selected_recording) else {
+            return;
+        };
         let id = rec.id;
         if self.recording_selections_set.insert(id) {
             self.recording_selections_order.push(id);
@@ -2741,7 +2833,10 @@ impl AppState {
     fn recording_list_trash_selected(&mut self) {
         let mut targets: Vec<Uuid> = if self.recording_selections_order.is_empty() {
             let recs = self.sorted_recordings();
-            recs.get(self.selected_recording).map(|r| r.id).into_iter().collect()
+            recs.get(self.selected_recording)
+                .map(|r| r.id)
+                .into_iter()
+                .collect()
         } else {
             self.recording_selections_order.clone()
         };
@@ -2751,7 +2846,12 @@ impl AppState {
         targets.retain(|id| {
             self.recordings
                 .get(id)
-                .map(|j| !matches!(j.state, RecordingState::Recording | RecordingState::ResolvingUrl))
+                .map(|j| {
+                    !matches!(
+                        j.state,
+                        RecordingState::Recording | RecordingState::ResolvingUrl
+                    )
+                })
                 .unwrap_or(false)
         });
         let mut trashed = 0usize;
@@ -2826,12 +2926,14 @@ impl AppState {
                 }
                 if was_on {
                     // Was on before the toggle that turned it off — restore the entry.
-                    self.config.auto_record_channels.push(crate::config::AutoRecordEntry {
-                        platform: platform.clone(),
-                        channel_id: channel_id.clone(),
-                        channel_name,
-                        format,
-                    });
+                    self.config
+                        .auto_record_channels
+                        .push(crate::config::AutoRecordEntry {
+                            platform: platform.clone(),
+                            channel_id: channel_id.clone(),
+                            channel_name,
+                            format,
+                        });
                 } else {
                     self.config
                         .auto_record_channels
@@ -2875,7 +2977,9 @@ impl AppState {
 
     fn recording_list_open_rename(&mut self) {
         let recs = self.sorted_recordings();
-        let Some(rec) = recs.get(self.selected_recording) else { return };
+        let Some(rec) = recs.get(self.selected_recording) else {
+            return;
+        };
         let job_id = rec.id;
         let initial = rec
             .output_path
@@ -2892,7 +2996,9 @@ impl AppState {
 
     fn recording_list_open_move(&mut self) {
         let recs = self.sorted_recordings();
-        let Some(rec) = recs.get(self.selected_recording) else { return };
+        let Some(rec) = recs.get(self.selected_recording) else {
+            return;
+        };
         let job_id = rec.id;
         let initial = rec
             .output_path
@@ -2945,29 +3051,20 @@ impl AppState {
         None
     }
 
-    fn handle_detail_key(
-        &mut self,
-        _key: crossterm::event::KeyEvent,
-    ) -> Option<AppAction> {
+    fn handle_detail_key(&mut self, _key: crossterm::event::KeyEvent) -> Option<AppAction> {
         // All detail bindings now live in src/tui/keymap.rs.
         None
     }
 
-    fn handle_recording_list_key(
-        &mut self,
-        _key: crossterm::event::KeyEvent,
-    ) -> Option<AppAction> {
+    fn handle_recording_list_key(&mut self, _key: crossterm::event::KeyEvent) -> Option<AppAction> {
         // RecordingList bindings (nav, s/p/i/v/V/D, Shift+R/M, playback
         // overlay) all live in src/tui/keymap.rs.
         None
     }
 
-    fn handle_status_bar_key(
-        &mut self,
-        key: crossterm::event::KeyEvent,
-    ) -> Option<AppAction> {
-        use crossterm::event::KeyCode;
+    fn handle_status_bar_key(&mut self, key: crossterm::event::KeyEvent) -> Option<AppAction> {
         use crate::tui::widgets::status_bar::configured_platforms;
+        use crossterm::event::KeyCode;
 
         let platforms = configured_platforms(self);
         if platforms.is_empty() {
@@ -2999,10 +3096,7 @@ impl AppState {
         None
     }
 
-    fn handle_settings_key(
-        &mut self,
-        _key: crossterm::event::KeyEvent,
-    ) -> Option<AppAction> {
+    fn handle_settings_key(&mut self, _key: crossterm::event::KeyEvent) -> Option<AppAction> {
         // Settings bindings live in src/tui/keymap.rs (nav rows for
         // Settings + Global). Row Enter dispatch lives in pane_nav_activate.
         None
@@ -3139,8 +3233,7 @@ impl AppState {
                 // The Crunchr plugin owns its own modal; the keymap
                 // surfaces Ctrl+ activation via the plugin registry.
                 // From here we just hint the user.
-                self.status_message =
-                    "Open Crunchr pane and press the plugin config key".into();
+                self.status_message = "Open Crunchr pane and press the plugin config key".into();
             }
             "wizard_twitch" | "wizard_youtube" | "wizard_patreon" => {
                 self.status_message =
@@ -3160,10 +3253,7 @@ impl AppState {
         }
     }
 
-    fn handle_log_key(
-        &mut self,
-        _key: crossterm::event::KeyEvent,
-    ) -> Option<AppAction> {
+    fn handle_log_key(&mut self, _key: crossterm::event::KeyEvent) -> Option<AppAction> {
         // Log pane bindings (nav, PageUp/Down, c clear) live in
         // src/tui/keymap.rs.
         None
@@ -3193,7 +3283,8 @@ impl AppState {
     /// Navigate channels using sidebar_order (shared by sidebar and detail panes).
     /// When a search filter is active, only navigates through matching channels.
     fn navigate_channel(&mut self, forward: bool) {
-        let nav_list = if !self.search_query.is_empty() && !self.search_filtered_channels.is_empty() {
+        let nav_list = if !self.search_query.is_empty() && !self.search_filtered_channels.is_empty()
+        {
             &self.search_filtered_channels
         } else {
             &self.sidebar_order
@@ -3209,7 +3300,11 @@ impl AppState {
         let next = if forward {
             (cur + 1) % len
         } else {
-            if cur == 0 { len - 1 } else { cur - 1 }
+            if cur == 0 {
+                len - 1
+            } else {
+                cur - 1
+            }
         };
         self.selected_channel = nav_list[next];
     }
@@ -3273,7 +3368,12 @@ impl AppState {
         self.active_recording_channels = self
             .recordings
             .values()
-            .filter(|r| matches!(r.state, RecordingState::Recording | RecordingState::ResolvingUrl))
+            .filter(|r| {
+                matches!(
+                    r.state,
+                    RecordingState::Recording | RecordingState::ResolvingUrl
+                )
+            })
             .map(|r| r.channel_id.clone())
             .collect();
     }
@@ -3338,7 +3438,9 @@ impl AppState {
 
         // If current selection is filtered out, jump to first visible
         if !self.search_filtered_channels.is_empty()
-            && !self.search_filtered_channels.contains(&self.selected_channel)
+            && !self
+                .search_filtered_channels
+                .contains(&self.selected_channel)
         {
             self.selected_channel = self.search_filtered_channels[0];
         }
@@ -3384,7 +3486,9 @@ fn cycle(current: &Option<String>, options: &[&str]) -> String {
         return current.clone().unwrap_or_default();
     }
     let cur = current.as_deref();
-    let idx = cur.and_then(|c| options.iter().position(|o| *o == c)).unwrap_or(0);
+    let idx = cur
+        .and_then(|c| options.iter().position(|o| *o == c))
+        .unwrap_or(0);
     options[(idx + 1) % options.len()].to_string()
 }
 
@@ -3432,7 +3536,9 @@ pub enum AppAction {
     },
     SpawnPluginTask {
         plugin_name: &'static str,
-        future: std::pin::Pin<Box<dyn std::future::Future<Output = Box<dyn std::any::Any + Send>> + Send>>,
+        future: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Box<dyn std::any::Any + Send>> + Send>,
+        >,
     },
     ProbeMedia {
         job_id: Uuid,
@@ -3475,8 +3581,14 @@ pub fn process_plugin_actions(
                 app.active_pane = ActivePane::Sidebar;
                 registry.set_active_pane(None);
             }
-            crate::plugin::PluginAction::SpawnTask { plugin_name, future } => {
-                result = Some(AppAction::SpawnPluginTask { plugin_name, future });
+            crate::plugin::PluginAction::SpawnTask {
+                plugin_name,
+                future,
+            } => {
+                result = Some(AppAction::SpawnPluginTask {
+                    plugin_name,
+                    future,
+                });
             }
             crate::plugin::PluginAction::PlayFile(path) => {
                 result = Some(AppAction::PlayFile { path });
@@ -3484,7 +3596,10 @@ pub fn process_plugin_actions(
             crate::plugin::PluginAction::PlayFileAt(path, start_secs) => {
                 result = Some(AppAction::PlayFileAt { path, start_secs });
             }
-            crate::plugin::PluginAction::UpdateConfig { plugin_name, config_update } => {
+            crate::plugin::PluginAction::UpdateConfig {
+                plugin_name,
+                config_update,
+            } => {
                 match plugin_name {
                     "crunchr" => {
                         if let Ok(cfg) = config_update.downcast::<crate::config::CrunchrConfig>() {

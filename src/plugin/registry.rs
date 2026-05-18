@@ -72,10 +72,7 @@ impl PluginRegistry {
     /// is set. Manifests with no library_path are informational
     /// (M4.4 surface) and skipped here. Returns the count of plugins
     /// successfully loaded; failures are logged.
-    pub fn load_dylibs_from_manifests(
-        &mut self,
-        manifests: &[super::PluginManifest],
-    ) -> usize {
+    pub fn load_dylibs_from_manifests(&mut self, manifests: &[super::PluginManifest]) -> usize {
         let mut loaded = 0;
         for m in manifests {
             let Some(ref lib_path) = m.library_path else {
@@ -141,11 +138,7 @@ impl PluginRegistry {
     }
 
     /// Dispatch a DaemonEvent to all interested plugins.
-    pub fn dispatch_event(
-        &mut self,
-        event: &DaemonEvent,
-        app: &AppState,
-    ) -> Vec<PluginAction> {
+    pub fn dispatch_event(&mut self, event: &DaemonEvent, app: &AppState) -> Vec<PluginAction> {
         let kind = DaemonEventKind::from_event(event);
         let mut actions = Vec::new();
 
@@ -162,11 +155,7 @@ impl PluginRegistry {
     }
 
     /// Dispatch a key event to the plugin owning the active pane.
-    pub fn dispatch_key(
-        &mut self,
-        key: KeyEvent,
-        app: &AppState,
-    ) -> Vec<PluginAction> {
+    pub fn dispatch_key(&mut self, key: KeyEvent, app: &AppState) -> Vec<PluginAction> {
         if let Some(pane_id) = self.active_plugin_pane {
             if let Some(&idx) = self.pane_map.get(pane_id) {
                 return self.plugins[idx].on_key(key, app);
@@ -245,7 +234,10 @@ impl PluginRegistry {
 
     /// Look up a plugin by name for downcasting via `as_any()`.
     pub fn plugin_ref(&self, name: &str) -> Option<&dyn Plugin> {
-        self.plugins.iter().find(|p| p.name() == name).map(|p| p.as_ref())
+        self.plugins
+            .iter()
+            .find(|p| p.name() == name)
+            .map(|p| p.as_ref())
     }
 }
 
@@ -263,7 +255,11 @@ mod tests {
 
     impl TestPlugin {
         fn new(name: &'static str) -> Self {
-            Self { name, filter: None, pane: None }
+            Self {
+                name,
+                filter: None,
+                pane: None,
+            }
         }
         fn with_pane(mut self, pane: PaneId) -> Self {
             self.pane = Some(pane);
@@ -276,10 +272,18 @@ mod tests {
     }
 
     impl Plugin for TestPlugin {
-        fn name(&self) -> &'static str { self.name }
-        fn display_name(&self) -> &str { self.name }
-        fn init(&mut self, _ctx: &PluginContext) -> anyhow::Result<()> { Ok(()) }
-        fn event_filter(&self) -> Option<Vec<DaemonEventKind>> { self.filter.clone() }
+        fn name(&self) -> &'static str {
+            self.name
+        }
+        fn display_name(&self) -> &str {
+            self.name
+        }
+        fn init(&mut self, _ctx: &PluginContext) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn event_filter(&self) -> Option<Vec<DaemonEventKind>> {
+            self.filter.clone()
+        }
         fn panes(&self) -> Vec<PaneId> {
             self.pane.into_iter().collect()
         }
@@ -295,8 +299,12 @@ mod tests {
                 Vec::new()
             }
         }
-        fn as_any(&self) -> &dyn std::any::Any { self }
-        fn as_any_mut(&mut self) -> &mut dyn std::any::Any { self }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
     }
 
     #[test]
@@ -306,7 +314,8 @@ mod tests {
 
         assert!(reg.pane_map.contains_key("pane1"));
         assert_eq!(
-            reg.command_map.get(&(KeyCode::Char('T'), KeyModifiers::SHIFT)),
+            reg.command_map
+                .get(&(KeyCode::Char('T'), KeyModifiers::SHIFT)),
             Some(&"pane1")
         );
     }

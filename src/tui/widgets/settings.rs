@@ -16,11 +16,11 @@
 //! so the UI stays in sync with config + connection state.
 
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState},
+    Frame,
 };
 
 use crate::app::{ActivePane, AppState};
@@ -40,15 +40,27 @@ pub struct SettingsRow {
 #[derive(Debug, Clone)]
 pub enum SettingsKind {
     Header,
-    Bool { key: &'static str },
+    Bool {
+        key: &'static str,
+    },
     /// Cycle through a fixed set of options on Enter / Space.
-    Cycle { key: &'static str },
-    Int { key: &'static str },
-    Path { key: &'static str },
-    String { key: &'static str },
+    Cycle {
+        key: &'static str,
+    },
+    Int {
+        key: &'static str,
+    },
+    Path {
+        key: &'static str,
+    },
+    String {
+        key: &'static str,
+    },
     /// Read-only status row. `Enter` may trigger a side action (open
     /// wizard, open plugin modal) handled by name.
-    Status { action: &'static str },
+    Status {
+        action: &'static str,
+    },
 }
 
 pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
@@ -64,13 +76,17 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
 
     rows.push(h("Recording"));
     rows.push(SettingsRow {
-        kind: K::Path { key: "recording_dir" },
+        kind: K::Path {
+            key: "recording_dir",
+        },
         label: "Output directory".into(),
         value: app.config.recording_dir.to_string_lossy().into_owned(),
         hint: Some("~ expands"),
     });
     rows.push(SettingsRow {
-        kind: K::String { key: "filename_template" },
+        kind: K::String {
+            key: "filename_template",
+        },
         label: "Filename template".into(),
         value: app.config.recording.filename_template.clone(),
         hint: Some("{channel} {date} {title}"),
@@ -86,7 +102,9 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
         hint: None,
     });
     rows.push(SettingsRow {
-        kind: K::String { key: "recording.format.format" },
+        kind: K::String {
+            key: "recording.format.format",
+        },
         label: "yt-dlp format selector".into(),
         value: app
             .config
@@ -98,7 +116,9 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
         hint: None,
     });
     rows.push(SettingsRow {
-        kind: K::Cycle { key: "recording.format.container" },
+        kind: K::Cycle {
+            key: "recording.format.container",
+        },
         label: "Container".into(),
         value: app
             .config
@@ -110,7 +130,9 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
         hint: Some("mkv / mp4"),
     });
     rows.push(SettingsRow {
-        kind: K::Cycle { key: "recording.format.video_codec" },
+        kind: K::Cycle {
+            key: "recording.format.video_codec",
+        },
         label: "Video codec".into(),
         value: app
             .config
@@ -122,7 +144,9 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
         hint: Some("copy / h264_nvenc / libx264"),
     });
     rows.push(SettingsRow {
-        kind: K::Cycle { key: "recording.format.audio_codec" },
+        kind: K::Cycle {
+            key: "recording.format.audio_codec",
+        },
         label: "Audio codec".into(),
         value: app
             .config
@@ -134,7 +158,9 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
         hint: Some("copy / aac"),
     });
     rows.push(SettingsRow {
-        kind: K::Int { key: "recording.format.bitrate_kbps" },
+        kind: K::Int {
+            key: "recording.format.bitrate_kbps",
+        },
         label: "Bitrate".into(),
         value: app
             .config
@@ -148,31 +174,51 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
 
     rows.push(h("Archiver"));
     rows.push(SettingsRow {
-        kind: K::Bool { key: "archiver.enabled" },
+        kind: K::Bool {
+            key: "archiver.enabled",
+        },
         label: "Enabled".into(),
-        value: if app.config.archiver.enabled { "on" } else { "off" }.into(),
+        value: if app.config.archiver.enabled {
+            "on"
+        } else {
+            "off"
+        }
+        .into(),
         hint: None,
     });
     rows.push(SettingsRow {
-        kind: K::Path { key: "archiver.archive_dir" },
+        kind: K::Path {
+            key: "archiver.archive_dir",
+        },
         label: "Archive directory".into(),
-        value: app.config.archiver.archive_dir.to_string_lossy().into_owned(),
+        value: app
+            .config
+            .archiver
+            .archive_dir
+            .to_string_lossy()
+            .into_owned(),
         hint: None,
     });
     rows.push(SettingsRow {
-        kind: K::String { key: "archiver.format" },
+        kind: K::String {
+            key: "archiver.format",
+        },
         label: "yt-dlp format".into(),
         value: app.config.archiver.format.clone(),
         hint: None,
     });
     rows.push(SettingsRow {
-        kind: K::Int { key: "archiver.concurrent_fragments" },
+        kind: K::Int {
+            key: "archiver.concurrent_fragments",
+        },
         label: "Concurrent fragments".into(),
         value: app.config.archiver.concurrent_fragments.to_string(),
         hint: Some("1..=16"),
     });
     rows.push(SettingsRow {
-        kind: K::String { key: "archiver.rate_limit" },
+        kind: K::String {
+            key: "archiver.rate_limit",
+        },
         label: "Rate limit".into(),
         value: if app.config.archiver.rate_limit.is_empty() {
             "none".into()
@@ -184,19 +230,30 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
 
     rows.push(h("Crunchr"));
     rows.push(SettingsRow {
-        kind: K::Bool { key: "crunchr.enabled" },
+        kind: K::Bool {
+            key: "crunchr.enabled",
+        },
         label: "Enabled".into(),
-        value: if app.config.crunchr.enabled { "on" } else { "off" }.into(),
+        value: if app.config.crunchr.enabled {
+            "on"
+        } else {
+            "off"
+        }
+        .into(),
         hint: None,
     });
     rows.push(SettingsRow {
-        kind: K::Status { action: "crunchr_modal" },
+        kind: K::Status {
+            action: "crunchr_modal",
+        },
         label: "Backend".into(),
         value: app.config.crunchr.backend.clone(),
         hint: Some("Enter: plugin modal"),
     });
     rows.push(SettingsRow {
-        kind: K::String { key: "crunchr.whisper_model" },
+        kind: K::String {
+            key: "crunchr.whisper_model",
+        },
         label: "Whisper model".into(),
         value: app
             .config
@@ -207,19 +264,30 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
         hint: None,
     });
     rows.push(SettingsRow {
-        kind: K::Int { key: "crunchr.whisper_timeout_secs" },
+        kind: K::Int {
+            key: "crunchr.whisper_timeout_secs",
+        },
         label: "Whisper timeout".into(),
         value: format!("{}s", app.config.crunchr.whisper_timeout_secs),
         hint: None,
     });
     rows.push(SettingsRow {
-        kind: K::Bool { key: "crunchr.analysis.enabled" },
+        kind: K::Bool {
+            key: "crunchr.analysis.enabled",
+        },
         label: "Analysis enabled".into(),
-        value: if app.config.crunchr.analysis.enabled { "on" } else { "off" }.into(),
+        value: if app.config.crunchr.analysis.enabled {
+            "on"
+        } else {
+            "off"
+        }
+        .into(),
         hint: None,
     });
     rows.push(SettingsRow {
-        kind: K::String { key: "crunchr.analysis.model" },
+        kind: K::String {
+            key: "crunchr.analysis.model",
+        },
         label: "Analysis model".into(),
         value: app.config.crunchr.analysis.model.clone(),
         hint: None,
@@ -227,21 +295,37 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
 
     rows.push(h("Output"));
     rows.push(SettingsRow {
-        kind: K::Int { key: "poll_interval_secs" },
+        kind: K::Int {
+            key: "poll_interval_secs",
+        },
         label: "Poll interval".into(),
         value: format!("{}s", app.config.poll_interval_secs),
         hint: Some("≥15"),
     });
     rows.push(SettingsRow {
-        kind: K::Bool { key: "ui.reduce_motion" },
+        kind: K::Bool {
+            key: "ui.reduce_motion",
+        },
         label: "Reduce motion".into(),
-        value: if app.config.ui.reduce_motion { "on" } else { "off" }.into(),
+        value: if app.config.ui.reduce_motion {
+            "on"
+        } else {
+            "off"
+        }
+        .into(),
         hint: Some("snap animations to end"),
     });
     rows.push(SettingsRow {
-        kind: K::Bool { key: "ui.verbose_status" },
+        kind: K::Bool {
+            key: "ui.verbose_status",
+        },
         label: "Verbose status".into(),
-        value: if app.config.ui.verbose_status { "on" } else { "off" }.into(),
+        value: if app.config.ui.verbose_status {
+            "on"
+        } else {
+            "off"
+        }
+        .into(),
         hint: Some("longer status labels"),
     });
 
@@ -255,37 +339,36 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
 
     rows.push(h("Connections"));
     rows.push(SettingsRow {
-        kind: K::Status { action: "wizard_twitch" },
+        kind: K::Status {
+            action: "wizard_twitch",
+        },
         label: "Twitch".into(),
-        value: connection_label(
-            app.config.twitch.is_some(),
-            app.twitch_connected,
-        ),
+        value: connection_label(app.config.twitch.is_some(), app.twitch_connected),
         hint: Some("Enter: wizard"),
     });
     rows.push(SettingsRow {
-        kind: K::Status { action: "wizard_youtube" },
+        kind: K::Status {
+            action: "wizard_youtube",
+        },
         label: "YouTube".into(),
-        value: connection_label(
-            app.config.youtube.is_some(),
-            app.youtube_connected,
-        ),
+        value: connection_label(app.config.youtube.is_some(), app.youtube_connected),
         hint: Some("Enter: wizard"),
     });
     rows.push(SettingsRow {
-        kind: K::Status { action: "wizard_patreon" },
+        kind: K::Status {
+            action: "wizard_patreon",
+        },
         label: "Patreon".into(),
-        value: connection_label(
-            app.config.patreon.is_some(),
-            app.patreon_connected,
-        ),
+        value: connection_label(app.config.patreon.is_some(), app.patreon_connected),
         hint: Some("Enter: wizard"),
     });
 
     rows.push(h("Plugins"));
     if app.user_plugin_manifests.is_empty() {
         rows.push(SettingsRow {
-            kind: K::Status { action: "plugin_dir_hint" },
+            kind: K::Status {
+                action: "plugin_dir_hint",
+            },
             label: "User plugins".into(),
             value: "none discovered".into(),
             hint: Some("drop a TOML in ~/.config/strivo/plugins/"),
@@ -299,17 +382,24 @@ pub fn settings_rows(app: &AppState) -> Vec<SettingsRow> {
                 _ => "discovered".into(),
             };
             rows.push(SettingsRow {
-                kind: K::Status { action: "plugin_manifest" },
+                kind: K::Status {
+                    action: "plugin_manifest",
+                },
                 label: m.name.clone(),
                 value,
-                hint: m.description.as_deref().map(|s| Box::leak(s.to_string().into_boxed_str()) as &'static str),
+                hint: m
+                    .description
+                    .as_deref()
+                    .map(|s| Box::leak(s.to_string().into_boxed_str()) as &'static str),
             });
         }
     }
 
     rows.push(h("Maintenance"));
     rows.push(SettingsRow {
-        kind: K::Status { action: "reset_defaults" },
+        kind: K::Status {
+            action: "reset_defaults",
+        },
         label: "Reset to defaults".into(),
         value: "preserves credentials".into(),
         hint: Some("Enter to confirm"),
@@ -348,7 +438,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
 
     let rows = settings_rows(app);
     let selectable = selectable_indices(&rows);
-    let cursor = app.settings_selected.min(selectable.len().saturating_sub(1));
+    let cursor = app
+        .settings_selected
+        .min(selectable.len().saturating_sub(1));
     let selected_full_idx = selectable.get(cursor).copied();
 
     let items: Vec<ListItem> = rows
@@ -368,17 +460,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
                 let cursor_glyph = if Some(i) == selected_full_idx {
                     Span::styled(
                         " ▌ ",
-                        Style::new().fg(Theme::primary()).add_modifier(Modifier::BOLD),
+                        Style::new()
+                            .fg(Theme::primary())
+                            .add_modifier(Modifier::BOLD),
                     )
                 } else {
                     Span::raw("   ")
                 };
                 let mut spans = vec![
                     cursor_glyph,
-                    Span::styled(
-                        format!("{:<22}", row.label),
-                        Style::new().fg(Theme::blue()),
-                    ),
+                    Span::styled(format!("{:<22}", row.label), Style::new().fg(Theme::blue())),
                     Span::raw(" "),
                     Span::styled(row.value.clone(), Style::new().fg(Theme::fg())),
                 ];

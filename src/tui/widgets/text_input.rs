@@ -7,11 +7,11 @@
 //! to do with the committed value.
 
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    Frame,
 };
 
 use crate::app::AppState;
@@ -21,19 +21,38 @@ use crate::tui::theme::Theme;
 /// route the committed string back to the right pane.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TextInputPurpose {
-    RenameRecording { job_id: uuid::Uuid },
-    MoveRecording { job_id: uuid::Uuid },
+    RenameRecording {
+        job_id: uuid::Uuid,
+    },
+    MoveRecording {
+        job_id: uuid::Uuid,
+    },
     ScheduleAddChannel,
-    ScheduleAddCron { channel: String },
-    ScheduleAddDuration { channel: String, cron: String },
-    ScheduleEditCron { index: usize },
-    ScheduleEditDuration { index: usize },
+    ScheduleAddCron {
+        channel: String,
+    },
+    ScheduleAddDuration {
+        channel: String,
+        cron: String,
+    },
+    ScheduleEditCron {
+        index: usize,
+    },
+    ScheduleEditDuration {
+        index: usize,
+    },
     /// Edit a settings string value — used by the M2 settings tab.
-    SettingsString { key: &'static str },
+    SettingsString {
+        key: &'static str,
+    },
     /// Edit a settings integer value (post-validated as u64).
-    SettingsInt { key: &'static str },
+    SettingsInt {
+        key: &'static str,
+    },
     /// Edit a settings path. Tilde is expanded on commit.
-    SettingsPath { key: &'static str },
+    SettingsPath {
+        key: &'static str,
+    },
     /// Command palette (M4.2.a). Value is parsed as a KeyAction name
     /// and dispatched through apply_key_action.
     CommandPalette,
@@ -55,7 +74,11 @@ pub struct TextInputState {
 }
 
 impl TextInputState {
-    pub fn new(purpose: TextInputPurpose, prompt: impl Into<String>, initial: impl Into<String>) -> Self {
+    pub fn new(
+        purpose: TextInputPurpose,
+        prompt: impl Into<String>,
+        initial: impl Into<String>,
+    ) -> Self {
         let value: String = initial.into();
         let cursor = value.chars().count();
         Self {

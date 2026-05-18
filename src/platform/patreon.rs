@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -252,12 +252,14 @@ impl PatreonClient {
         let included = data.get("included").and_then(|v| v.as_array());
 
         // Build tier title lookup: tier_id -> title
-        let mut tier_titles: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut tier_titles: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         if let Some(items) = included {
             for item in items {
                 if item.get("type").and_then(|t| t.as_str()) == Some("tier") {
                     let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
-                    let title = item.get("attributes")
+                    let title = item
+                        .get("attributes")
                         .and_then(|a| a.get("title"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("Unknown Tier");
@@ -270,17 +272,20 @@ impl PatreonClient {
 
         // Build membership -> (campaign_id, tier_name) mapping
         // Each "member" item has relationships.campaign.data.id and relationships.currently_entitled_tiers.data[].id
-        let mut campaign_tier: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        let mut campaign_tier: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
         if let Some(items) = included {
             for item in items {
                 if item.get("type").and_then(|t| t.as_str()) == Some("member") {
-                    let campaign_id = item.get("relationships")
+                    let campaign_id = item
+                        .get("relationships")
                         .and_then(|r| r.get("campaign"))
                         .and_then(|c| c.get("data"))
                         .and_then(|d| d.get("id"))
                         .and_then(|v| v.as_str());
 
-                    let tier_id = item.get("relationships")
+                    let tier_id = item
+                        .get("relationships")
                         .and_then(|r| r.get("currently_entitled_tiers"))
                         .and_then(|t| t.get("data"))
                         .and_then(|d| d.as_array())
@@ -302,7 +307,11 @@ impl PatreonClient {
         if let Some(items) = included {
             for item in items {
                 if item.get("type").and_then(|t| t.as_str()) == Some("campaign") {
-                    let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let id = item
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let attrs = item.get("attributes");
                     let name = attrs
                         .and_then(|a| a.get("creation_name"))
@@ -357,7 +366,11 @@ impl PatreonClient {
 
         if let Some(items) = data.get("data").and_then(|v| v.as_array()) {
             for item in items {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let id = item
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let attrs = item.get("attributes");
                 let title = attrs
                     .and_then(|a| a.get("title"))
@@ -432,24 +445,44 @@ impl PatreonClient {
 
             if let Some(items) = data.get("data").and_then(|v| v.as_array()) {
                 for item in items {
-                    let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    if id.is_empty() { continue; }
-                    let attrs = item.get("attributes");
-                    let post_type = attrs.and_then(|a| a.get("post_type"))
-                        .and_then(|v| v.as_str()).unwrap_or("");
-                    let title = attrs.and_then(|a| a.get("title"))
-                        .and_then(|v| v.as_str()).unwrap_or("Untitled").to_string();
-                    let post_url = attrs.and_then(|a| a.get("url"))
-                        .and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let published_at = attrs.and_then(|a| a.get("published_at"))
+                    let id = item
+                        .get("id")
                         .and_then(|v| v.as_str())
-                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s)
-                            .ok().map(|dt| dt.with_timezone(&chrono::Utc)));
-                    let direct_file = attrs.and_then(|a| a.get("post_file"))
+                        .unwrap_or("")
+                        .to_string();
+                    if id.is_empty() {
+                        continue;
+                    }
+                    let attrs = item.get("attributes");
+                    let post_type = attrs
+                        .and_then(|a| a.get("post_type"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let title = attrs
+                        .and_then(|a| a.get("title"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("Untitled")
+                        .to_string();
+                    let post_url = attrs
+                        .and_then(|a| a.get("url"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let published_at = attrs
+                        .and_then(|a| a.get("published_at"))
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| {
+                            chrono::DateTime::parse_from_rfc3339(s)
+                                .ok()
+                                .map(|dt| dt.with_timezone(&chrono::Utc))
+                        });
+                    let direct_file = attrs
+                        .and_then(|a| a.get("post_file"))
                         .and_then(|f| f.get("url"))
                         .and_then(|v| v.as_str())
                         .map(String::from);
-                    let embed_url = attrs.and_then(|a| a.get("embed"))
+                    let embed_url = attrs
+                        .and_then(|a| a.get("embed"))
                         .and_then(|e| e.get("url"))
                         .and_then(|v| v.as_str())
                         .map(String::from);
@@ -462,8 +495,12 @@ impl PatreonClient {
 
                     let is_video_like = matches!(
                         post_type,
-                        "video_external_file" | "video_embed" | "audio_file"
-                            | "podcast" | "video_file" | "audio_embed"
+                        "video_external_file"
+                            | "video_embed"
+                            | "audio_file"
+                            | "podcast"
+                            | "video_file"
+                            | "audio_embed"
                     );
                     if !is_video_like {
                         continue;
@@ -488,7 +525,8 @@ impl PatreonClient {
                 }
             }
 
-            cursor = data.get("meta")
+            cursor = data
+                .get("meta")
                 .and_then(|m| m.get("pagination"))
                 .and_then(|p| p.get("cursors"))
                 .and_then(|c| c.get("next"))

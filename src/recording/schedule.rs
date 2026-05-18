@@ -107,7 +107,11 @@ pub fn parse_duration_secs(s: &str) -> Option<u64> {
         total += n * 60;
     }
 
-    if total > 0 { Some(total) } else { None }
+    if total > 0 {
+        Some(total)
+    } else {
+        None
+    }
 }
 
 /// Parse "twitch:channelname" or "youtube:channelname" into (PlatformKind, channel_name).
@@ -151,10 +155,15 @@ pub async fn run_schedule_manager(
         let schedule = match Schedule::from_str(&cron_expr) {
             Ok(s) => s,
             Err(e) => {
-                tracing::error!("Invalid cron expression '{}' for {}: {e}", entry.cron, entry.channel);
-                let _ = event_tx.send(AppEvent::error(
-                    format!("Invalid schedule cron '{}': {e}", entry.cron),
-                ));
+                tracing::error!(
+                    "Invalid cron expression '{}' for {}: {e}",
+                    entry.cron,
+                    entry.channel
+                );
+                let _ = event_tx.send(AppEvent::error(format!(
+                    "Invalid schedule cron '{}': {e}",
+                    entry.cron
+                )));
                 continue;
             }
         };

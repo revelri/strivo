@@ -1,5 +1,5 @@
-use std::path::Path;
 use anyhow::Result;
+use std::path::Path;
 use tokio::process::Command;
 
 /// Rich media information extracted via ffprobe.
@@ -68,8 +68,10 @@ impl MediaInfo {
 pub async fn probe_file(path: &Path) -> Result<MediaInfo> {
     let output = Command::new("ffprobe")
         .args([
-            "-v", "quiet",
-            "-print_format", "json",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
             "-show_format",
             "-show_streams",
         ])
@@ -87,19 +89,23 @@ pub async fn probe_file(path: &Path) -> Result<MediaInfo> {
 
     // Parse format section
     if let Some(format) = json.get("format") {
-        info.format_name = format.get("format_name")
+        info.format_name = format
+            .get("format_name")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        info.duration_secs = format.get("duration")
+        info.duration_secs = format
+            .get("duration")
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
-        info.size_bytes = format.get("size")
+        info.size_bytes = format
+            .get("size")
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
-        info.bit_rate = format.get("bit_rate")
+        info.bit_rate = format
+            .get("bit_rate")
             .and_then(|v| v.as_str())
             .and_then(|s| s.parse().ok())
             .unwrap_or(0);
@@ -108,24 +114,32 @@ pub async fn probe_file(path: &Path) -> Result<MediaInfo> {
     // Parse streams
     if let Some(streams) = json.get("streams").and_then(|v| v.as_array()) {
         for stream in streams {
-            let codec_type = stream.get("codec_type").and_then(|v| v.as_str()).unwrap_or("");
+            let codec_type = stream
+                .get("codec_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             match codec_type {
                 "video" if info.video_codec.is_none() => {
-                    info.video_codec = stream.get("codec_name")
+                    info.video_codec = stream
+                        .get("codec_name")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
-                    info.video_width = stream.get("width")
+                    info.video_width = stream
+                        .get("width")
                         .and_then(|v| v.as_u64())
                         .map(|v| v as u32);
-                    info.video_height = stream.get("height")
+                    info.video_height = stream
+                        .get("height")
                         .and_then(|v| v.as_u64())
                         .map(|v| v as u32);
                 }
                 "audio" if info.audio_codec.is_none() => {
-                    info.audio_codec = stream.get("codec_name")
+                    info.audio_codec = stream
+                        .get("codec_name")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
-                    info.audio_sample_rate = stream.get("sample_rate")
+                    info.audio_sample_rate = stream
+                        .get("sample_rate")
                         .and_then(|v| v.as_str())
                         .and_then(|s| s.parse().ok());
                 }

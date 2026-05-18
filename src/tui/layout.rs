@@ -1,27 +1,24 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout},
+    Frame,
 };
 
 use crate::app::{ActivePane, AppState};
 use crate::plugin::registry::PluginRegistry;
-use crate::tui::widgets::{channel_detail, dialog, log_viewer, platform_debug, properties, recording_list, schedule, settings, sidebar, status_bar, theme_picker, wizard};
+use crate::tui::widgets::{
+    channel_detail, dialog, log_viewer, platform_debug, properties, recording_list, schedule,
+    settings, sidebar, status_bar, theme_picker, wizard,
+};
 
 pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) {
     app.update_focus_timing();
     app.update_overlay_timing();
 
-    let [main_area, status_area] = Layout::vertical([
-        Constraint::Fill(1),
-        Constraint::Length(1),
-    ])
-    .areas(frame.area());
+    let [main_area, status_area] =
+        Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
 
-    let [sidebar_area, detail_area] = Layout::horizontal([
-        Constraint::Length(30),
-        Constraint::Fill(1),
-    ])
-    .areas(main_area);
+    let [sidebar_area, detail_area] =
+        Layout::horizontal([Constraint::Length(30), Constraint::Fill(1)]).areas(main_area);
 
     // Sidebar (always visible)
     sidebar::render(frame, sidebar_area, app);

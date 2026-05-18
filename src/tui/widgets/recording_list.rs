@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState, Paragraph},
+    Frame,
 };
 
 use crate::app::{ActivePane, AppState, RecordingListView};
@@ -32,7 +32,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
 
     let active_count = app.active_recording_count();
     let title = if !app.search_query.is_empty() {
-        format!(" Recordings [/{query}] ({active_count} active) ", query = app.search_query)
+        format!(
+            " Recordings [/{query}] ({active_count} active) ",
+            query = app.search_query
+        )
     } else {
         format!(" Recordings ({active_count} active) ")
     };
@@ -112,13 +115,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
                     // C2.5 — crossfade between the ◼ block and a dimmer ◻
                     // outline at 0.5 Hz so the user sees it's actively stopping
                     // vs. a stuck state.
-                    let glyph = if !crate::tui::anim::reduce_motion()
-                        && (secs * 2.0) as i32 % 2 == 0
-                    {
-                        "◼ "
-                    } else {
-                        "◻ "
-                    };
+                    let glyph =
+                        if !crate::tui::anim::reduce_motion() && (secs * 2.0) as i32 % 2 == 0 {
+                            "◼ "
+                        } else {
+                            "◻ "
+                        };
                     Span::styled(glyph, Style::new().fg(Theme::secondary()))
                 }
                 RecordingState::Failed => {
@@ -132,8 +134,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
                             .apply(crate::tui::anim::pulse_phase(secs, 1.4))
                     };
                     let bright = ratatui::style::Color::Rgb(255, 120, 120);
-                    let color =
-                        crate::tui::theme::Theme::blend_for(Theme::red(), bright, flash);
+                    let color = crate::tui::theme::Theme::blend_for(Theme::red(), bright, flash);
                     Span::styled("✗ ", Style::new().fg(color).add_modifier(Modifier::BOLD))
                 }
                 RecordingState::Finished => Span::raw("  "),
@@ -150,11 +151,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
                 name_base,
                 hl_style,
             );
-            let title_text: String = rec
-                .stream_title
-                .as_deref()
-                .unwrap_or("stream")
-                .to_string();
+            let title_text: String = rec.stream_title.as_deref().unwrap_or("stream").to_string();
             let title_spans = crate::tui::widgets::highlight::highlight_spans(
                 &title_text,
                 &app.search_query,
@@ -163,24 +160,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
             );
 
             let platform_icon = match rec.platform {
-                PlatformKind::Twitch => Span::styled(
-                    " \u{F1E8}",
-                    Style::new().fg(Theme::twitch()),
-                ),
-                PlatformKind::YouTube => Span::styled(
-                    " 󰗃",
-                    Style::new().fg(Theme::youtube()),
-                ),
-                PlatformKind::Patreon => Span::styled(
-                    " ",
-                    Style::new().fg(Theme::patreon()),
-                ),
+                PlatformKind::Twitch => Span::styled(" \u{F1E8}", Style::new().fg(Theme::twitch())),
+                PlatformKind::YouTube => Span::styled(" 󰗃", Style::new().fg(Theme::youtube())),
+                PlatformKind::Patreon => Span::styled(" ", Style::new().fg(Theme::patreon())),
             };
 
-            let duration = Span::styled(
-                rec.format_duration(),
-                Style::new().fg(Theme::muted()),
-            );
+            let duration = Span::styled(rec.format_duration(), Style::new().fg(Theme::muted()));
 
             let marker = if app.recording_selections_set.contains(&rec.id) {
                 Span::styled(
@@ -304,8 +289,9 @@ pub fn render_grid(frame: &mut Frame, area: Rect, app: &mut AppState) {
     app.pending_recording_thumb_jobs.extend(to_decode);
 
     // Render row by row.
-    let row_constraints: Vec<Constraint> =
-        std::iter::repeat(Constraint::Length(cell_h)).take(rows as usize).collect();
+    let row_constraints: Vec<Constraint> = std::iter::repeat(Constraint::Length(cell_h))
+        .take(rows as usize)
+        .collect();
     let row_rects = Layout::vertical(row_constraints).split(inner);
 
     let local_index_of_sel = sel.checked_sub(scroll_start);
@@ -343,10 +329,8 @@ pub fn render_grid(frame: &mut Frame, area: Rect, app: &mut AppState) {
                 let image_widget = ratatui_image::StatefulImage::default();
                 frame.render_stateful_widget(image_widget, cell_inner, proto);
             } else {
-                let placeholder = Paragraph::new(Line::styled(
-                    "  decoding…",
-                    Style::new().fg(Theme::muted()),
-                ));
+                let placeholder =
+                    Paragraph::new(Line::styled("  decoding…", Style::new().fg(Theme::muted())));
                 frame.render_widget(placeholder, cell_inner);
             }
         }

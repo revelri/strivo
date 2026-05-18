@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
+    Frame,
 };
 
 use crate::app::{ActivePane, AppState};
@@ -157,9 +157,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
     if app.active_pane == ActivePane::StatusBar {
         let mut spans: Vec<Span> = Vec::new();
         spans.push(Span::styled(" ", bar_style));
-        push_button(&mut spans, "Select", "←→", bar_style, key_style, None, bar_bg);
-        push_button(&mut spans, "Debug", "Enter", bar_style, key_style, None, bar_bg);
-        push_button(&mut spans, "Back", "Esc", bar_style, key_style, None, bar_bg);
+        push_button(
+            &mut spans, "Select", "←→", bar_style, key_style, None, bar_bg,
+        );
+        push_button(
+            &mut spans, "Debug", "Enter", bar_style, key_style, None, bar_bg,
+        );
+        push_button(
+            &mut spans, "Back", "Esc", bar_style, key_style, None, bar_bg,
+        );
 
         let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
         let indicators = build_indicators(app, bar_bg, Some(app.selected_indicator));
@@ -205,9 +211,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
             String::new()
         };
         let body = format!(" {active} active · {summary}{extra}");
-        let pad = area
-            .width
-            .saturating_sub(body.chars().count() as u16 + 1) as usize;
+        let pad = area.width.saturating_sub(body.chars().count() as u16 + 1) as usize;
         let line = Line::from(vec![
             Span::styled(
                 body,
@@ -292,7 +296,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
     // but the input is not focused. Spells out what Esc will do.
     if !app.search_query.is_empty() {
         let (matched, total) = filter_counts(app);
-        let label = format!("[/{}] {}/{} · Esc clears ", app.search_query, matched, total);
+        let label = format!(
+            "[/{}] {}/{} · Esc clears ",
+            app.search_query, matched, total
+        );
         spans.push(Span::styled(
             label,
             Style::new()
@@ -323,25 +330,55 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
     // Context-sensitive buttons
     match app.active_pane {
         ActivePane::Detail => {
-            push_button(&mut spans, "Record", "r", bar_style, key_style, shimmer, bar_bg);
-            push_button(&mut spans, "Watch", "w", bar_style, key_style, shimmer, bar_bg);
+            push_button(
+                &mut spans, "Record", "r", bar_style, key_style, shimmer, bar_bg,
+            );
+            push_button(
+                &mut spans, "Watch", "w", bar_style, key_style, shimmer, bar_bg,
+            );
         }
         ActivePane::RecordingList => {
-            push_button(&mut spans, "Stop", "s", bar_style, key_style, shimmer, bar_bg);
-            push_button(&mut spans, "Play", "p", bar_style, key_style, shimmer, bar_bg);
-            push_button(&mut spans, "Info", "i", bar_style, key_style, shimmer, bar_bg);
+            push_button(
+                &mut spans, "Stop", "s", bar_style, key_style, shimmer, bar_bg,
+            );
+            push_button(
+                &mut spans, "Play", "p", bar_style, key_style, shimmer, bar_bg,
+            );
+            push_button(
+                &mut spans, "Info", "i", bar_style, key_style, shimmer, bar_bg,
+            );
         }
         _ => {}
     }
 
     // Always-visible buttons
-    push_button(&mut spans, "Search", "/", bar_style, key_style, shimmer, bar_bg);
-    push_button(&mut spans, "Intel", "I", bar_style, key_style, shimmer, bar_bg);
-    push_button(&mut spans, "Config", "C", bar_style, key_style, shimmer, bar_bg);
-    push_button(&mut spans, "Help", "?", bar_style, key_style, shimmer, bar_bg);
-    push_button(&mut spans, "Recordings", "L", bar_style, key_style, shimmer, bar_bg);
-    push_button(&mut spans, "Log", "F", bar_style, key_style, shimmer, bar_bg);
-    push_button(&mut spans, "Quit", "q", bar_style, key_style, shimmer, bar_bg);
+    push_button(
+        &mut spans, "Search", "/", bar_style, key_style, shimmer, bar_bg,
+    );
+    push_button(
+        &mut spans, "Intel", "I", bar_style, key_style, shimmer, bar_bg,
+    );
+    push_button(
+        &mut spans, "Config", "C", bar_style, key_style, shimmer, bar_bg,
+    );
+    push_button(
+        &mut spans, "Help", "?", bar_style, key_style, shimmer, bar_bg,
+    );
+    push_button(
+        &mut spans,
+        "Recordings",
+        "L",
+        bar_style,
+        key_style,
+        shimmer,
+        bar_bg,
+    );
+    push_button(
+        &mut spans, "Log", "F", bar_style, key_style, shimmer, bar_bg,
+    );
+    push_button(
+        &mut spans, "Quit", "q", bar_style, key_style, shimmer, bar_bg,
+    );
 
     let used: usize = spans.iter().map(|s| s.content.chars().count()).sum();
     let total_width = area.width as usize;
@@ -385,9 +422,18 @@ fn build_indicators<'a>(
 
     for kind in &configured {
         let (connected, has_errors) = match kind {
-            PlatformKind::Twitch => (app.twitch_connected, app.platform_errors.get(kind).is_some_and(|e| !e.is_empty())),
-            PlatformKind::YouTube => (app.youtube_connected, app.platform_errors.get(kind).is_some_and(|e| !e.is_empty())),
-            PlatformKind::Patreon => (app.patreon_connected, app.platform_errors.get(kind).is_some_and(|e| !e.is_empty())),
+            PlatformKind::Twitch => (
+                app.twitch_connected,
+                app.platform_errors.get(kind).is_some_and(|e| !e.is_empty()),
+            ),
+            PlatformKind::YouTube => (
+                app.youtube_connected,
+                app.platform_errors.get(kind).is_some_and(|e| !e.is_empty()),
+            ),
+            PlatformKind::Patreon => (
+                app.patreon_connected,
+                app.platform_errors.get(kind).is_some_and(|e| !e.is_empty()),
+            ),
         };
 
         let is_highlighted = highlight_idx == Some(idx);
@@ -407,13 +453,19 @@ fn build_indicators<'a>(
         };
 
         let style = if is_highlighted {
-            Style::new().fg(color).bg(bar_bg).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+            Style::new()
+                .fg(color)
+                .bg(bar_bg)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
         } else {
             Style::new().fg(color).bg(bar_bg)
         };
 
         let label_style = if is_highlighted {
-            Style::new().fg(Theme::fg()).bg(bar_bg).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+            Style::new()
+                .fg(Theme::fg())
+                .bg(bar_bg)
+                .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
         } else {
             bar_style
         };

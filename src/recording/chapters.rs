@@ -132,8 +132,14 @@ mod tests {
     #[test]
     fn xml_well_formed() {
         let chs = vec![
-            Chapter { start_secs: 0.0, title: "Intro".into() },
-            Chapter { start_secs: 754.0, title: "Q&A".into() },
+            Chapter {
+                start_secs: 0.0,
+                title: "Intro".into(),
+            },
+            Chapter {
+                start_secs: 754.0,
+                title: "Q&A".into(),
+            },
         ];
         let xml = chapters_xml(&chs);
         assert!(xml.starts_with("<?xml"));

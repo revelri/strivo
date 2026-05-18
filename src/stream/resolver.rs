@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use tokio::process::Command;
 
 use crate::platform::PlatformKind;
@@ -57,9 +57,7 @@ async fn resolve_twitch(channel_name: &str) -> Result<StreamInfo> {
 
     match output {
         Ok(output) if output.status.success() => {
-            let stream_url = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .to_string();
+            let stream_url = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if stream_url.is_empty() {
                 bail!("streamlink returned empty URL for {channel_name}");
             }

@@ -70,15 +70,7 @@ pub async fn extract(source: &Path, seek_secs: f64) -> Result<PathBuf> {
             "-i",
         ])
         .arg(source)
-        .args([
-            "-vframes",
-            "1",
-            "-q:v",
-            "4",
-            "-vf",
-            "scale=320:-2",
-            "-y",
-        ])
+        .args(["-vframes", "1", "-q:v", "4", "-vf", "scale=320:-2", "-y"])
         .arg(&dest)
         .status()
         .await

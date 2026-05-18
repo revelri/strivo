@@ -31,9 +31,8 @@ pub fn move_to_trash(src: &Path) -> Result<PathBuf> {
     let initial = bucket.join(file_name);
     let dest = disambiguate(&initial);
 
-    std::fs::rename(src, &dest).with_context(|| {
-        format!("move {} -> {}", src.display(), dest.display())
-    })?;
+    std::fs::rename(src, &dest)
+        .with_context(|| format!("move {} -> {}", src.display(), dest.display()))?;
     Ok(dest)
 }
 

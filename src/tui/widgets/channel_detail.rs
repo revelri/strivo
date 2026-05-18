@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::{ActivePane, AppState};
@@ -74,30 +74,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
 
     // Responsive layout: horizontal if wide enough, else vertical
     let (info_area, thumbnail_area) = if inner.width >= 70 {
-        let [info, thumb] = Layout::horizontal([
-            Constraint::Fill(1),
-            Constraint::Length(46),
-        ])
-        .areas(inner);
+        let [info, thumb] =
+            Layout::horizontal([Constraint::Fill(1), Constraint::Length(46)]).areas(inner);
         (info, thumb)
     } else {
-        let [info, thumb] = Layout::vertical([
-            Constraint::Length(7),
-            Constraint::Fill(1),
-        ])
-        .areas(inner);
+        let [info, thumb] =
+            Layout::vertical([Constraint::Length(7), Constraint::Fill(1)]).areas(inner);
         (info, thumb)
     };
 
     // Stream info
-    let title = channel
-        .stream_title
-        .as_deref()
-        .unwrap_or("Not streaming");
-    let category = channel
-        .game_or_category
-        .as_deref()
-        .unwrap_or("");
+    let title = channel.stream_title.as_deref().unwrap_or("Not streaming");
+    let category = channel.game_or_category.as_deref().unwrap_or("");
     let viewers = channel
         .viewer_count
         .map(|v| format!("{} viewers", format_count(v)))

@@ -271,9 +271,21 @@ mod tests {
     #[test]
     fn dedupe_skips_repeats() {
         let mut v = vec![
-            Candidate { platform: "Twitch".into(), channel_id: "a".into(), channel_name: "a".into() },
-            Candidate { platform: "Twitch".into(), channel_id: "a".into(), channel_name: "a".into() },
-            Candidate { platform: "Twitch".into(), channel_id: "b".into(), channel_name: "b".into() },
+            Candidate {
+                platform: "Twitch".into(),
+                channel_id: "a".into(),
+                channel_name: "a".into(),
+            },
+            Candidate {
+                platform: "Twitch".into(),
+                channel_id: "a".into(),
+                channel_name: "a".into(),
+            },
+            Candidate {
+                platform: "Twitch".into(),
+                channel_id: "b".into(),
+                channel_name: "b".into(),
+            },
         ];
         dedupe(&mut v);
         assert_eq!(v.len(), 2);

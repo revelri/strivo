@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    Frame,
 };
 
 use crate::app::{AppState, UiEventLevel};
@@ -68,7 +68,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, enter_progress: f32
             UiEventLevel::Warn => Theme::yellow(),
             UiEventLevel::Error => Theme::red(),
         };
-        let ts = ev.at.with_timezone(&chrono::Local).format("%H:%M:%S").to_string();
+        let ts = ev
+            .at
+            .with_timezone(&chrono::Local)
+            .format("%H:%M:%S")
+            .to_string();
         lines.push(Line::from(vec![
             Span::styled(ts, Style::new().fg(Theme::muted())),
             Span::raw("  "),
@@ -93,11 +97,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, enter_progress: f32
         total
     );
     let para = Paragraph::new(lines).style(Style::new().fg(Theme::fg()));
-    let [body_area, footer_area] = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .areas(inner);
+    let [body_area, footer_area] =
+        Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
     frame.render_widget(para, body_area);
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(

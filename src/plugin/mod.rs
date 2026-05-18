@@ -1,9 +1,9 @@
 pub mod registry;
 
 use std::any::Any;
+use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::future::Future;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Rect;
@@ -218,13 +218,14 @@ pub fn load_dylib_plugin(path: &std::path::Path) -> anyhow::Result<LoadedDylibPl
             .map_err(|e| anyhow::anyhow!("dlopen {}: {e}", path.display()))?
     };
     let plugin: Box<dyn Plugin> = unsafe {
-        let symbol: libloading::Symbol<unsafe extern "C" fn() -> *mut std::ffi::c_void> = library
-            .get(PLUGIN_REGISTER_SYMBOL)
-            .map_err(|e| anyhow::anyhow!(
-                "{} missing symbol {}: {e}",
-                path.display(),
-                std::str::from_utf8(PLUGIN_REGISTER_SYMBOL).unwrap_or("?"),
-            ))?;
+        let symbol: libloading::Symbol<unsafe extern "C" fn() -> *mut std::ffi::c_void> =
+            library.get(PLUGIN_REGISTER_SYMBOL).map_err(|e| {
+                anyhow::anyhow!(
+                    "{} missing symbol {}: {e}",
+                    path.display(),
+                    std::str::from_utf8(PLUGIN_REGISTER_SYMBOL).unwrap_or("?"),
+                )
+            })?;
         let raw = symbol();
         if raw.is_null() {
             anyhow::bail!("{} register returned null", path.display());
@@ -324,14 +325,7 @@ pub trait Plugin: Send {
     }
 
     /// Render this plugin's pane.
-    fn render_pane(
-        &self,
-        _pane_id: PaneId,
-        _frame: &mut Frame,
-        _area: Rect,
-        _app: &AppState,
-    ) {
-    }
+    fn render_pane(&self, _pane_id: PaneId, _frame: &mut Frame, _area: Rect, _app: &AppState) {}
 
     /// Optional: contribute a segment to the status bar.
     fn status_line(&self, _app: &AppState) -> Option<String> {

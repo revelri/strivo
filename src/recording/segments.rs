@@ -31,7 +31,10 @@ pub fn segment_path(base: &Path, n: u32) -> PathBuf {
         return base.to_path_buf();
     }
     let parent = base.parent().unwrap_or_else(|| Path::new("."));
-    let stem = base.file_stem().and_then(|s| s.to_str()).unwrap_or("recording");
+    let stem = base
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("recording");
     let ext = base.extension().and_then(|s| s.to_str()).unwrap_or("mkv");
     parent.join(format!("{stem}_part{n}.{ext}"))
 }
@@ -76,14 +79,8 @@ mod tests {
     #[test]
     fn segment_path_part_n() {
         let base = Path::new("/tmp/rec.mkv");
-        assert_eq!(
-            segment_path(base, 2),
-            PathBuf::from("/tmp/rec_part2.mkv")
-        );
-        assert_eq!(
-            segment_path(base, 5),
-            PathBuf::from("/tmp/rec_part5.mkv")
-        );
+        assert_eq!(segment_path(base, 2), PathBuf::from("/tmp/rec_part2.mkv"));
+        assert_eq!(segment_path(base, 5), PathBuf::from("/tmp/rec_part5.mkv"));
     }
 
     #[test]

@@ -179,7 +179,12 @@ impl TaskRegistry {
     }
 
     pub fn fail(&mut self, id: TaskId, error: impl Into<String>) {
-        self.set_progress(id, Progress::Failed { error: error.into() });
+        self.set_progress(
+            id,
+            Progress::Failed {
+                error: error.into(),
+            },
+        );
     }
 
     /// Drop terminal entries older than `keep_after`. Called once per
@@ -242,7 +247,13 @@ mod tests {
         let cancel = CancellationToken::new();
         let id = r.start(TaskKind::Record, "test.mkv", cancel.clone());
         assert_eq!(r.active(), 1);
-        r.set_progress(id, Progress::Bytes { done: 1024, total: Some(2048) });
+        r.set_progress(
+            id,
+            Progress::Bytes {
+                done: 1024,
+                total: Some(2048),
+            },
+        );
         assert_eq!(r.get(id).unwrap().progress.label(), "1 KB/2 KB");
         r.complete(id);
         assert_eq!(r.active(), 0);

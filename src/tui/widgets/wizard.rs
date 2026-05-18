@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::AppState;
@@ -30,7 +30,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Theme::border_ramp(app.overlay_enter(crate::app::OverlayKey::Wizard, 0.24)))
+        .border_style(Theme::border_ramp(
+            app.overlay_enter(crate::app::OverlayKey::Wizard, 0.24),
+        ))
         .title(" Setup Wizard ")
         .title_style(Theme::title());
 
@@ -149,7 +151,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
         Line::raw(""),
         Line::from(Span::styled(
             "  Welcome to StriVo!",
-            Style::new().fg(Theme::primary()).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
         )),
         Line::raw(""),
         Line::styled(
@@ -167,10 +171,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
             Style::new().fg(Theme::blue()).add_modifier(Modifier::BOLD),
         ),
         Line::raw(""),
-        Line::styled(
-            "  [twitch]",
-            Style::new().fg(Theme::twitch()),
-        ),
+        Line::styled("  [twitch]", Style::new().fg(Theme::twitch())),
         Line::styled(
             "  client_id = \"your_client_id\"",
             Style::new().fg(Theme::muted()),
@@ -180,10 +181,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
             Style::new().fg(Theme::muted()),
         ),
         Line::raw(""),
-        Line::styled(
-            "  [youtube]",
-            Style::new().fg(Theme::youtube()),
-        ),
+        Line::styled("  [youtube]", Style::new().fg(Theme::youtube())),
         Line::styled(
             "  client_id = \"your_client_id\"",
             Style::new().fg(Theme::muted()),
@@ -193,10 +191,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
             Style::new().fg(Theme::muted()),
         ),
         Line::raw(""),
-        Line::styled(
-            "  [patreon]",
-            Style::new().fg(Theme::patreon()),
-        ),
+        Line::styled("  [patreon]", Style::new().fg(Theme::patreon())),
         Line::styled(
             "  client_id = \"your_client_id\"",
             Style::new().fg(Theme::muted()),

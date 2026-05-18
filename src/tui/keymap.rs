@@ -392,7 +392,10 @@ impl KeyPattern {
                 s if s.chars().count() == 1 => KeyCode::Char(s.chars().next().unwrap()),
                 _ => return None,
             };
-            return Some(Self { code, modifiers: mods });
+            return Some(Self {
+                code,
+                modifiers: mods,
+            });
         }
         if trimmed.chars().count() == 1 {
             return Some(Self::plain(KeyCode::Char(trimmed.chars().next().unwrap())));
@@ -467,7 +470,10 @@ impl RemapRow {
             layer,
             key,
             action,
-            desc: self.desc.clone().unwrap_or_else(|| action.desc().to_string()),
+            desc: self
+                .desc
+                .clone()
+                .unwrap_or_else(|| action.desc().to_string()),
         })
     }
 }
@@ -551,24 +557,62 @@ fn table() -> &'static [Chord] {
     use KeyCode::*;
     use KeyModifiers as M;
     const fn c(layer: Layer, key: KeyPattern, action: KeyAction, desc: &'static str) -> Chord {
-        Chord { layer, key, action, desc }
+        Chord {
+            layer,
+            key,
+            action,
+            desc,
+        }
     }
     // Global. Per-pane keys (j/k navigation, etc.) still live in
     // their handler match arms and will migrate in M3 follow-ups.
     const fn nav_rows(layer: Layer) -> [Chord; 12] {
         [
-            c(layer, KeyPattern::plain(Char('j')), KeyAction::NavDown, "next"),
-            c(layer, KeyPattern::plain(Down),       KeyAction::NavDown, "next"),
-            c(layer, KeyPattern::plain(Char('k')), KeyAction::NavUp,   "previous"),
-            c(layer, KeyPattern::plain(Up),         KeyAction::NavUp,   "previous"),
-            c(layer, KeyPattern::plain(Char('g')), KeyAction::NavTop,  "first"),
-            c(layer, KeyPattern::plain(Home),       KeyAction::NavTop,  "first"),
-            c(layer, KeyPattern { code: Char('G'), modifiers: M::SHIFT }, KeyAction::NavBottom, "last"),
-            c(layer, KeyPattern::plain(End),        KeyAction::NavBottom, "last"),
-            c(layer, KeyPattern::plain(Char('h')), KeyAction::NavBack, "back"),
-            c(layer, KeyPattern::plain(Left),       KeyAction::NavBack, "back"),
-            c(layer, KeyPattern::plain(Esc),        KeyAction::NavBack, "back"),
-            c(layer, KeyPattern::plain(Enter),      KeyAction::NavActivate, "open / activate"),
+            c(
+                layer,
+                KeyPattern::plain(Char('j')),
+                KeyAction::NavDown,
+                "next",
+            ),
+            c(layer, KeyPattern::plain(Down), KeyAction::NavDown, "next"),
+            c(
+                layer,
+                KeyPattern::plain(Char('k')),
+                KeyAction::NavUp,
+                "previous",
+            ),
+            c(layer, KeyPattern::plain(Up), KeyAction::NavUp, "previous"),
+            c(
+                layer,
+                KeyPattern::plain(Char('g')),
+                KeyAction::NavTop,
+                "first",
+            ),
+            c(layer, KeyPattern::plain(Home), KeyAction::NavTop, "first"),
+            c(
+                layer,
+                KeyPattern {
+                    code: Char('G'),
+                    modifiers: M::SHIFT,
+                },
+                KeyAction::NavBottom,
+                "last",
+            ),
+            c(layer, KeyPattern::plain(End), KeyAction::NavBottom, "last"),
+            c(
+                layer,
+                KeyPattern::plain(Char('h')),
+                KeyAction::NavBack,
+                "back",
+            ),
+            c(layer, KeyPattern::plain(Left), KeyAction::NavBack, "back"),
+            c(layer, KeyPattern::plain(Esc), KeyAction::NavBack, "back"),
+            c(
+                layer,
+                KeyPattern::plain(Enter),
+                KeyAction::NavActivate,
+                "open / activate",
+            ),
         ]
     }
 
@@ -576,77 +620,363 @@ fn table() -> &'static [Chord] {
     // const-initialized. Walking nested slices keeps lookup O(table_size)
     // but the table is tiny.
     static GLOBAL: &[Chord] = &[
-        c(Layer::Global, KeyPattern::plain(Char('q')),      KeyAction::Quit,                "quit"),
-        c(Layer::Global, KeyPattern::plain(Char('?')),      KeyAction::HelpToggle,          "toggle help"),
-        c(Layer::Global, KeyPattern::ctrl('t'),             KeyAction::ThemePickerOpen,     "theme picker"),
-        c(Layer::Global, KeyPattern::ctrl('d'),             KeyAction::EnterStatusBar,      "diagnostics focus"),
-        c(Layer::Global, KeyPattern { code: Char('E'), modifiers: M::SHIFT }, KeyAction::EventLogToggle, "event log"),
-        c(Layer::Global, KeyPattern { code: Char('F'), modifiers: M::SHIFT }, KeyAction::EnterLogPane,   "log pane"),
-        c(Layer::Global, KeyPattern { code: Char('S'), modifiers: M::SHIFT }, KeyAction::EnterSchedulePane, "schedule pane"),
-        c(Layer::Global, KeyPattern::plain(Char('/')),      KeyAction::SearchStart,         "search filter"),
-        c(Layer::Global, KeyPattern::plain(Char(':')),      KeyAction::CommandPaletteOpen,  "command palette"),
-        c(Layer::Global, KeyPattern::plain(Char('u')),      KeyAction::UndoLast,            "undo last"),
+        c(
+            Layer::Global,
+            KeyPattern::plain(Char('q')),
+            KeyAction::Quit,
+            "quit",
+        ),
+        c(
+            Layer::Global,
+            KeyPattern::plain(Char('?')),
+            KeyAction::HelpToggle,
+            "toggle help",
+        ),
+        c(
+            Layer::Global,
+            KeyPattern::ctrl('t'),
+            KeyAction::ThemePickerOpen,
+            "theme picker",
+        ),
+        c(
+            Layer::Global,
+            KeyPattern::ctrl('d'),
+            KeyAction::EnterStatusBar,
+            "diagnostics focus",
+        ),
+        c(
+            Layer::Global,
+            KeyPattern {
+                code: Char('E'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::EventLogToggle,
+            "event log",
+        ),
+        c(
+            Layer::Global,
+            KeyPattern {
+                code: Char('F'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::EnterLogPane,
+            "log pane",
+        ),
+        c(
+            Layer::Global,
+            KeyPattern {
+                code: Char('S'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::EnterSchedulePane,
+            "schedule pane",
+        ),
+        c(
+            Layer::Global,
+            KeyPattern::plain(Char('/')),
+            KeyAction::SearchStart,
+            "search filter",
+        ),
+        c(
+            Layer::Global,
+            KeyPattern::plain(Char(':')),
+            KeyAction::CommandPaletteOpen,
+            "command palette",
+        ),
+        c(
+            Layer::Global,
+            KeyPattern::plain(Char('u')),
+            KeyAction::UndoLast,
+            "undo last",
+        ),
     ];
 
     static SIDEBAR_NAV: [Chord; 12] = nav_rows(Layer::Sidebar);
     static SIDEBAR_LOCAL: &[Chord] = &[
-        c(Layer::Sidebar, KeyPattern::plain(Char('l')), KeyAction::NavActivate, "open detail"),
-        c(Layer::Sidebar, KeyPattern::plain(Right),     KeyAction::NavActivate, "open detail"),
-        c(Layer::Sidebar, KeyPattern { code: Char('L'), modifiers: M::SHIFT }, KeyAction::EnterRecordingList, "recordings"),
-        c(Layer::Sidebar, KeyPattern::plain(Char('s')), KeyAction::EnterSettings,           "settings"),
-        c(Layer::Sidebar, KeyPattern { code: Char('C'), modifiers: M::SHIFT }, KeyAction::EnterSettings, "settings"),
-        c(Layer::Sidebar, KeyPattern::plain(Char('a')), KeyAction::ToggleAutoRecord,        "toggle auto-record"),
-        c(Layer::Sidebar, KeyPattern::plain(Char('m')), KeyAction::MarkSetPrompt,           "set mark on current"),
-        c(Layer::Sidebar, KeyPattern::plain(Char('\'')), KeyAction::MarkJumpPrompt,         "jump to mark"),
+        c(
+            Layer::Sidebar,
+            KeyPattern::plain(Char('l')),
+            KeyAction::NavActivate,
+            "open detail",
+        ),
+        c(
+            Layer::Sidebar,
+            KeyPattern::plain(Right),
+            KeyAction::NavActivate,
+            "open detail",
+        ),
+        c(
+            Layer::Sidebar,
+            KeyPattern {
+                code: Char('L'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::EnterRecordingList,
+            "recordings",
+        ),
+        c(
+            Layer::Sidebar,
+            KeyPattern::plain(Char('s')),
+            KeyAction::EnterSettings,
+            "settings",
+        ),
+        c(
+            Layer::Sidebar,
+            KeyPattern {
+                code: Char('C'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::EnterSettings,
+            "settings",
+        ),
+        c(
+            Layer::Sidebar,
+            KeyPattern::plain(Char('a')),
+            KeyAction::ToggleAutoRecord,
+            "toggle auto-record",
+        ),
+        c(
+            Layer::Sidebar,
+            KeyPattern::plain(Char('m')),
+            KeyAction::MarkSetPrompt,
+            "set mark on current",
+        ),
+        c(
+            Layer::Sidebar,
+            KeyPattern::plain(Char('\'')),
+            KeyAction::MarkJumpPrompt,
+            "jump to mark",
+        ),
     ];
 
     static DETAIL_NAV: [Chord; 12] = nav_rows(Layer::Detail);
     static DETAIL_LOCAL: &[Chord] = &[
-        c(Layer::Detail, KeyPattern::plain(Char('r')), KeyAction::StartRecording,            "start recording"),
-        c(Layer::Detail, KeyPattern { code: Char('R'), modifiers: M::SHIFT }, KeyAction::StartRecordingFromStart, "record from start (YT)"),
-        c(Layer::Detail, KeyPattern::plain(Char('w')), KeyAction::WatchStream,               "watch in mpv"),
-        c(Layer::Detail, KeyPattern::plain(Char('a')), KeyAction::ToggleAutoRecord,          "toggle auto-record"),
-        c(Layer::Detail, KeyPattern::plain(Char('t')), KeyAction::ToggleTranscode,           "toggle transcode mode"),
-        c(Layer::Detail, KeyPattern::plain(Char('y')), KeyAction::CopyToClipboard,           "copy channel URL"),
+        c(
+            Layer::Detail,
+            KeyPattern::plain(Char('r')),
+            KeyAction::StartRecording,
+            "start recording",
+        ),
+        c(
+            Layer::Detail,
+            KeyPattern {
+                code: Char('R'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::StartRecordingFromStart,
+            "record from start (YT)",
+        ),
+        c(
+            Layer::Detail,
+            KeyPattern::plain(Char('w')),
+            KeyAction::WatchStream,
+            "watch in mpv",
+        ),
+        c(
+            Layer::Detail,
+            KeyPattern::plain(Char('a')),
+            KeyAction::ToggleAutoRecord,
+            "toggle auto-record",
+        ),
+        c(
+            Layer::Detail,
+            KeyPattern::plain(Char('t')),
+            KeyAction::ToggleTranscode,
+            "toggle transcode mode",
+        ),
+        c(
+            Layer::Detail,
+            KeyPattern::plain(Char('y')),
+            KeyAction::CopyToClipboard,
+            "copy channel URL",
+        ),
     ];
 
     static REC_NAV: [Chord; 12] = nav_rows(Layer::RecordingList);
     static REC_LOCAL: &[Chord] = &[
-        c(Layer::RecordingList, KeyPattern::plain(Char('s')), KeyAction::StopRecording,           "stop recording"),
-        c(Layer::RecordingList, KeyPattern::plain(Char('p')), KeyAction::PlayRecording,           "play"),
-        c(Layer::RecordingList, KeyPattern::plain(Char('i')), KeyAction::ShowRecordingProperties, "properties"),
-        c(Layer::RecordingList, KeyPattern::plain(Char('v')), KeyAction::ToggleRecordingSelect,   "toggle select"),
-        c(Layer::RecordingList, KeyPattern { code: Char('V'), modifiers: M::SHIFT }, KeyAction::VisualModeToggle, "visual mode"),
-        c(Layer::RecordingList, KeyPattern::ctrl('v'), KeyAction::ClearRecordingSelections, "clear selections"),
-        c(Layer::RecordingList, KeyPattern { code: Char('D'), modifiers: M::SHIFT }, KeyAction::TrashSelectedRecordings,  "delete to trash"),
-        c(Layer::RecordingList, KeyPattern { code: Char('R'), modifiers: M::SHIFT }, KeyAction::RenameRecording,          "rename"),
-        c(Layer::RecordingList, KeyPattern { code: Char('M'), modifiers: M::SHIFT }, KeyAction::MoveRecording,            "move"),
-        c(Layer::RecordingList, KeyPattern::plain(Char('y')), KeyAction::CopyToClipboard,                                 "copy path"),
-        c(Layer::RecordingList, KeyPattern::plain(Tab),       KeyAction::ToggleRecordingListView,                        "toggle list/grid"),
-        c(Layer::RecordingList, KeyPattern { code: Char('O'), modifiers: M::SHIFT }, KeyAction::OpenInFolder,             "open folder"),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char('s')),
+            KeyAction::StopRecording,
+            "stop recording",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char('p')),
+            KeyAction::PlayRecording,
+            "play",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char('i')),
+            KeyAction::ShowRecordingProperties,
+            "properties",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char('v')),
+            KeyAction::ToggleRecordingSelect,
+            "toggle select",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern {
+                code: Char('V'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::VisualModeToggle,
+            "visual mode",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::ctrl('v'),
+            KeyAction::ClearRecordingSelections,
+            "clear selections",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern {
+                code: Char('D'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::TrashSelectedRecordings,
+            "delete to trash",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern {
+                code: Char('R'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::RenameRecording,
+            "rename",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern {
+                code: Char('M'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::MoveRecording,
+            "move",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char('y')),
+            KeyAction::CopyToClipboard,
+            "copy path",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Tab),
+            KeyAction::ToggleRecordingListView,
+            "toggle list/grid",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern {
+                code: Char('O'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::OpenInFolder,
+            "open folder",
+        ),
         // Playback overlay keys (active only while playback.is_some()).
-        c(Layer::RecordingList, KeyPattern::plain(Char(' ')), KeyAction::PlaybackTogglePause, "play/pause"),
-        c(Layer::RecordingList, KeyPattern::plain(Char(']')), KeyAction::PlaybackSeekForward, "seek +10s"),
-        c(Layer::RecordingList, KeyPattern::plain(Char('[')), KeyAction::PlaybackSeekBack,    "seek -10s"),
-        c(Layer::RecordingList, KeyPattern::plain(Char('.')), KeyAction::PlaybackSpeedUp,     "speed +0.25x"),
-        c(Layer::RecordingList, KeyPattern::plain(Char(',')), KeyAction::PlaybackSpeedDown,   "speed -0.25x"),
-        c(Layer::RecordingList, KeyPattern::plain(Char('+')), KeyAction::PlaybackVolumeUp,    "volume +5"),
-        c(Layer::RecordingList, KeyPattern::plain(Char('-')), KeyAction::PlaybackVolumeDown,  "volume -5"),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char(' ')),
+            KeyAction::PlaybackTogglePause,
+            "play/pause",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char(']')),
+            KeyAction::PlaybackSeekForward,
+            "seek +10s",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char('[')),
+            KeyAction::PlaybackSeekBack,
+            "seek -10s",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char('.')),
+            KeyAction::PlaybackSpeedUp,
+            "speed +0.25x",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char(',')),
+            KeyAction::PlaybackSpeedDown,
+            "speed -0.25x",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char('+')),
+            KeyAction::PlaybackVolumeUp,
+            "volume +5",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char('-')),
+            KeyAction::PlaybackVolumeDown,
+            "volume -5",
+        ),
     ];
 
     static SCHEDULE_NAV: [Chord; 12] = nav_rows(Layer::Schedule);
     static SCHEDULE_LOCAL: &[Chord] = &[
-        c(Layer::Schedule, KeyPattern::plain(Char('a')), KeyAction::ScheduleAdd,          "add schedule"),
-        c(Layer::Schedule, KeyPattern::plain(Char('e')), KeyAction::ScheduleEditCron,     "edit cron"),
-        c(Layer::Schedule, KeyPattern::plain(Char('d')), KeyAction::ScheduleEditDuration, "edit duration"),
-        c(Layer::Schedule, KeyPattern { code: Char('D'), modifiers: M::SHIFT }, KeyAction::ScheduleDelete, "delete row"),
+        c(
+            Layer::Schedule,
+            KeyPattern::plain(Char('a')),
+            KeyAction::ScheduleAdd,
+            "add schedule",
+        ),
+        c(
+            Layer::Schedule,
+            KeyPattern::plain(Char('e')),
+            KeyAction::ScheduleEditCron,
+            "edit cron",
+        ),
+        c(
+            Layer::Schedule,
+            KeyPattern::plain(Char('d')),
+            KeyAction::ScheduleEditDuration,
+            "edit duration",
+        ),
+        c(
+            Layer::Schedule,
+            KeyPattern {
+                code: Char('D'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::ScheduleDelete,
+            "delete row",
+        ),
     ];
 
     static LOG_NAV: [Chord; 12] = nav_rows(Layer::Log);
     static LOG_LOCAL: &[Chord] = &[
-        c(Layer::Log, KeyPattern::plain(PageDown), KeyAction::LogScrollPageDown, "page down"),
-        c(Layer::Log, KeyPattern::plain(PageUp),   KeyAction::LogScrollPageUp,   "page up"),
-        c(Layer::Log, KeyPattern::plain(Char('c')), KeyAction::LogClear,         "clear log"),
+        c(
+            Layer::Log,
+            KeyPattern::plain(PageDown),
+            KeyAction::LogScrollPageDown,
+            "page down",
+        ),
+        c(
+            Layer::Log,
+            KeyPattern::plain(PageUp),
+            KeyAction::LogScrollPageUp,
+            "page up",
+        ),
+        c(
+            Layer::Log,
+            KeyPattern::plain(Char('c')),
+            KeyAction::LogClear,
+            "clear log",
+        ),
     ];
 
     static SETTINGS_NAV: [Chord; 12] = nav_rows(Layer::Settings);
@@ -784,8 +1114,14 @@ mod tests {
         // Some platforms send SHIFT for uppercase char; others don't.
         let with_shift = KeyEvent::new(KeyCode::Char('E'), KeyModifiers::SHIFT);
         let without_shift = KeyEvent::new(KeyCode::Char('E'), KeyModifiers::NONE);
-        assert_eq!(lookup(Layer::Global, &with_shift), Some(KeyAction::EventLogToggle));
-        assert_eq!(lookup(Layer::Global, &without_shift), Some(KeyAction::EventLogToggle));
+        assert_eq!(
+            lookup(Layer::Global, &with_shift),
+            Some(KeyAction::EventLogToggle)
+        );
+        assert_eq!(
+            lookup(Layer::Global, &without_shift),
+            Some(KeyAction::EventLogToggle)
+        );
     }
 
     #[test]

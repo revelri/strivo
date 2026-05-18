@@ -1,9 +1,12 @@
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap},
+    widgets::{
+        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
+    },
+    Frame,
 };
 
 use crate::app::{ActivePane, AppState};
@@ -46,9 +49,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
         .title_bottom(keybinds);
 
     if app.log_lines.is_empty() {
-        let placeholder = Paragraph::new("  No log entries yet. Log file will appear here as events occur.")
-            .style(Style::new().fg(Theme::muted()))
-            .block(block);
+        let placeholder =
+            Paragraph::new("  No log entries yet. Log file will appear here as events occur.")
+                .style(Style::new().fg(Theme::muted()))
+                .block(block);
         frame.render_widget(placeholder, area);
         return;
     }
@@ -83,8 +87,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
             width: 1,
             height: area.height.saturating_sub(2),
         };
-        let mut scrollbar_state = ScrollbarState::new(total.saturating_sub(inner_height))
-            .position(start);
+        let mut scrollbar_state =
+            ScrollbarState::new(total.saturating_sub(inner_height)).position(start);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .thumb_style(Style::new().fg(Theme::primary()))
             .track_style(Style::new().fg(Theme::dim()));

@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::AppState;
@@ -55,11 +55,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, kind: PlatformKind)
     };
 
     let status_label = if connected {
-        Span::styled("  Connected", Style::new().fg(Theme::green()).add_modifier(Modifier::BOLD))
+        Span::styled(
+            "  Connected",
+            Style::new().fg(Theme::green()).add_modifier(Modifier::BOLD),
+        )
     } else if config_present {
-        Span::styled("  Not Connected", Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD))
+        Span::styled(
+            "  Not Connected",
+            Style::new()
+                .fg(Theme::secondary())
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
-        Span::styled("  Not Configured", Style::new().fg(Theme::red()).add_modifier(Modifier::BOLD))
+        Span::styled(
+            "  Not Configured",
+            Style::new().fg(Theme::red()).add_modifier(Modifier::BOLD),
+        )
     };
 
     lines.push(Line::from(vec![
@@ -78,7 +89,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, kind: PlatformKind)
         }
         PlatformKind::YouTube => {
             if config_present {
-                let has_cookies = app.config.youtube.as_ref()
+                let has_cookies = app
+                    .config
+                    .youtube
+                    .as_ref()
                     .and_then(|y| y.cookies_path.as_ref())
                     .is_some();
                 if has_cookies {
@@ -134,8 +148,5 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, kind: PlatformKind)
         Span::raw(" Close"),
     ]));
 
-    frame.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }),
-        inner,
-    );
+    frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
 }

@@ -110,7 +110,10 @@ red = "#FF5555"
 "##;
     let cfg: AppConfig = toml::from_str(src).expect("parse rich form");
     assert_eq!(cfg.theme.name(), "neon");
-    assert_eq!(cfg.theme.colors().get("primary"), Some(&"#00FF00".to_string()));
+    assert_eq!(
+        cfg.theme.colors().get("primary"),
+        Some(&"#00FF00".to_string())
+    );
     assert_eq!(cfg.theme.ansi().get("red"), Some(&"#FF5555".to_string()));
 }
 

@@ -11,7 +11,11 @@ use std::time::Duration;
 /// forms. Returns `None` if the header is absent or unparseable; the
 /// caller decides on a default backoff.
 pub fn parse_retry_after(resp: &reqwest::Response) -> Option<Duration> {
-    if let Some(v) = resp.headers().get("Retry-After").and_then(|h| h.to_str().ok()) {
+    if let Some(v) = resp
+        .headers()
+        .get("Retry-After")
+        .and_then(|h| h.to_str().ok())
+    {
         if let Ok(secs) = v.trim().parse::<u64>() {
             return Some(Duration::from_secs(secs.min(300)));
         }
@@ -23,7 +27,11 @@ pub fn parse_retry_after(resp: &reqwest::Response) -> Option<Duration> {
             }
         }
     }
-    if let Some(v) = resp.headers().get("Ratelimit-Reset").and_then(|h| h.to_str().ok()) {
+    if let Some(v) = resp
+        .headers()
+        .get("Ratelimit-Reset")
+        .and_then(|h| h.to_str().ok())
+    {
         if let Ok(epoch) = v.trim().parse::<i64>() {
             let now = chrono::Utc::now().timestamp();
             let delta = epoch.saturating_sub(now);

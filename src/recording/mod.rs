@@ -1,12 +1,12 @@
 pub mod catalog;
 pub mod chapters;
 pub mod ffmpeg;
-pub mod segments;
-pub mod thumbnail;
 pub mod job;
 pub mod persist;
 pub mod scan;
 pub mod schedule;
+pub mod segments;
+pub mod thumbnail;
 pub mod trash;
 pub mod ytdlp;
 
@@ -27,7 +27,11 @@ use crate::stream::resolver;
 
 /// Resolve the format/quality settings for a recording, walking
 /// per-channel override → global → built-in defaults.
-pub fn resolve_format(config: &AppConfig, channel_id: &str, platform: PlatformKind) -> ResolvedFormat {
+pub fn resolve_format(
+    config: &AppConfig,
+    channel_id: &str,
+    platform: PlatformKind,
+) -> ResolvedFormat {
     let platform_str = platform.to_string();
     let channel_override: Option<&RecordingFormat> = config
         .auto_record_channels
@@ -475,11 +479,21 @@ pub fn build_output_path(
     let title = stream_title.unwrap_or("stream");
     let safe_title: String = title
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .trim()
         .to_string();
-    let safe_title = if safe_title.is_empty() { "stream".to_string() } else { safe_title };
+    let safe_title = if safe_title.is_empty() {
+        "stream".to_string()
+    } else {
+        safe_title
+    };
     // Truncate to avoid excessively long filenames
     let safe_title: String = safe_title.chars().take(80).collect();
 
@@ -525,11 +539,21 @@ pub fn episode_dir(
 pub fn sanitize_path_component(s: &str) -> String {
     let cleaned: String = s
         .chars()
-        .map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.') { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let trimmed = cleaned.trim().trim_matches('.');
     let truncated: String = trimmed.chars().take(80).collect();
-    if truncated.is_empty() { "untitled".to_string() } else { truncated }
+    if truncated.is_empty() {
+        "untitled".to_string()
+    } else {
+        truncated
+    }
 }
 
 /// Per-episode metadata sidecar. Written next to `video.mkv` after a catalog-pull
@@ -603,10 +627,18 @@ mod tests {
         let date = chrono::DateTime::parse_from_rfc3339("2026-04-12T15:30:00Z")
             .unwrap()
             .with_timezone(&chrono::Utc);
-        let dir = episode_dir(&root, PlatformKind::Patreon, "Some Creator", date, "Episode 1: Hello!");
+        let dir = episode_dir(
+            &root,
+            PlatformKind::Patreon,
+            "Some Creator",
+            date,
+            "Episode 1: Hello!",
+        );
         assert_eq!(
             dir,
-            std::path::PathBuf::from("/tmp/strivo/patreon/Some Creator/2026-04-12_Episode 1_ Hello_")
+            std::path::PathBuf::from(
+                "/tmp/strivo/patreon/Some Creator/2026-04-12_Episode 1_ Hello_"
+            )
         );
     }
 
@@ -632,9 +664,7 @@ fn disambiguate_path(path: PathBuf) -> PathBuf {
         .file_stem()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let ext = path
-        .extension()
-        .map(|s| s.to_string_lossy().into_owned());
+    let ext = path.extension().map(|s| s.to_string_lossy().into_owned());
     for n in 1u32.. {
         let candidate_name = match &ext {
             Some(e) => format!("{stem}_{n}.{e}"),

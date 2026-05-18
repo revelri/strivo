@@ -190,8 +190,12 @@ fn default_archive_dir() -> PathBuf {
         .map(|d| d.home_dir().join("Videos/StriVo/Archives"))
         .unwrap_or_else(|| PathBuf::from("./archives"))
 }
-fn default_archive_format() -> String { "best".to_string() }
-fn default_concurrent_fragments() -> u32 { 4 }
+fn default_archive_format() -> String {
+    "best".to_string()
+}
+fn default_concurrent_fragments() -> u32 {
+    4
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TwitchConfig {
@@ -274,12 +278,14 @@ impl RecordingFormat {
     /// Result has every field populated.
     pub fn resolved(channel: Option<&Self>, global: &Self) -> ResolvedFormat {
         let pick = |c: fn(&Self) -> Option<&str>| -> String {
-            channel.and_then(|x| c(x))
+            channel
+                .and_then(|x| c(x))
                 .or_else(|| c(global))
                 .map(String::from)
                 .unwrap_or_default()
         };
-        let format = if let Some(s) = channel.and_then(|x| x.format.as_deref())
+        let format = if let Some(s) = channel
+            .and_then(|x| x.format.as_deref())
             .or(global.format.as_deref())
         {
             s.to_string()
@@ -287,13 +293,31 @@ impl RecordingFormat {
             "best".to_string()
         };
         let container = pick(|x| x.container.as_deref());
-        let container = if container.is_empty() { "mkv".into() } else { container };
+        let container = if container.is_empty() {
+            "mkv".into()
+        } else {
+            container
+        };
         let video_codec = pick(|x| x.video_codec.as_deref());
-        let video_codec = if video_codec.is_empty() { "copy".into() } else { video_codec };
+        let video_codec = if video_codec.is_empty() {
+            "copy".into()
+        } else {
+            video_codec
+        };
         let audio_codec = pick(|x| x.audio_codec.as_deref());
-        let audio_codec = if audio_codec.is_empty() { "copy".into() } else { audio_codec };
+        let audio_codec = if audio_codec.is_empty() {
+            "copy".into()
+        } else {
+            audio_codec
+        };
         let bitrate_kbps = channel.and_then(|x| x.bitrate_kbps).or(global.bitrate_kbps);
-        ResolvedFormat { format, bitrate_kbps, container, video_codec, audio_codec }
+        ResolvedFormat {
+            format,
+            bitrate_kbps,
+            container,
+            video_codec,
+            audio_codec,
+        }
     }
 }
 
@@ -478,11 +502,7 @@ impl AppConfig {
 
     pub fn state_dir() -> PathBuf {
         directories::ProjectDirs::from("", "", "strivo")
-            .map(|d| {
-                d.state_dir()
-                    .unwrap_or(d.data_dir())
-                    .to_path_buf()
-            })
+            .map(|d| d.state_dir().unwrap_or(d.data_dir()).to_path_buf())
             .unwrap_or_else(|| PathBuf::from(".state"))
     }
 
@@ -560,8 +580,9 @@ impl AppConfig {
             .unwrap_or_else(Self::config_path);
 
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create config directory {}", parent.display()))?;
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create config directory {}", parent.display())
+            })?;
         }
 
         // Rotate the prior live file into `.backup` before overwriting so
@@ -571,8 +592,7 @@ impl AppConfig {
             let _ = std::fs::copy(&path, &backup);
         }
 
-        let contents = toml::to_string_pretty(self)
-            .context("Failed to serialize config")?;
+        let contents = toml::to_string_pretty(self).context("Failed to serialize config")?;
         std::fs::write(&path, contents)
             .with_context(|| format!("Failed to write config to {}", path.display()))?;
         Ok(())

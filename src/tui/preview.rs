@@ -68,7 +68,10 @@ mod tests {
         let t1 = lock.start("a");
         assert!(!t1.is_cancelled());
         let _t2 = lock.start("b");
-        assert!(t1.is_cancelled(), "starting a new preview must cancel the old one");
+        assert!(
+            t1.is_cancelled(),
+            "starting a new preview must cancel the old one"
+        );
         assert!(lock.is_current("b"));
         assert!(!lock.is_current("a"));
     }

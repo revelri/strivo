@@ -18,12 +18,7 @@ use crate::search::fuzzy_match;
 /// - `hl`: style applied to characters at the FuzzyMatch span indices.
 ///
 /// Allocates one `Span` per highlight run + one per non-highlight run.
-pub fn highlight_spans(
-    label: &str,
-    needle: &str,
-    base: Style,
-    hl: Style,
-) -> Vec<Span<'static>> {
+pub fn highlight_spans(label: &str, needle: &str, base: Style, hl: Style) -> Vec<Span<'static>> {
     if needle.is_empty() {
         return vec![Span::styled(label.to_string(), base)];
     }

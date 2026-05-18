@@ -108,7 +108,7 @@ impl ThemeData {
             name: "neon".to_string(),
             author: Some("StriVo".into()),
             description: Some("Cyan + amber on deep blue-black — the signature StriVo look".into()),
-            bg: Color::Rgb(26, 27, 38),         // #1A1B26
+            bg: Color::Rgb(26, 27, 38),          // #1A1B26
             fg: Color::Rgb(232, 232, 226),       // #E8E8E2
             surface: Color::Rgb(36, 37, 58),     // #24253A
             overlay: Color::Rgb(59, 61, 86),     // #3B3D56
@@ -117,10 +117,10 @@ impl ThemeData {
             dim: Color::Rgb(86, 91, 126),        // #565B7E
             muted: Color::Rgb(169, 174, 207),    // #A9AECF
             ansi_black: Color::Rgb(26, 27, 38),
-            ansi_red: Color::Rgb(255, 68, 68),   // #FF4444
+            ansi_red: Color::Rgb(255, 68, 68),    // #FF4444
             ansi_green: Color::Rgb(57, 255, 127), // #39FF7F
             ansi_yellow: Color::Rgb(255, 176, 32),
-            ansi_blue: Color::Rgb(0, 180, 216),  // #00B4D8
+            ansi_blue: Color::Rgb(0, 180, 216),      // #00B4D8
             ansi_magenta: Color::Rgb(255, 121, 198), // #FF79C6
             ansi_cyan: Color::Rgb(0, 229, 255),
             ansi_white: Color::Rgb(232, 232, 226),
@@ -137,7 +137,7 @@ impl ThemeData {
             fg: Color::Rgb(220, 220, 220),
             surface: Color::Rgb(36, 36, 36),
             overlay: Color::Rgb(56, 56, 56),
-            primary: Color::Rgb(200, 200, 200),   // white-ish accent
+            primary: Color::Rgb(200, 200, 200), // white-ish accent
             secondary: Color::Rgb(160, 160, 160),
             dim: Color::Rgb(80, 80, 80),
             muted: Color::Rgb(140, 140, 140),
@@ -158,21 +158,21 @@ impl ThemeData {
             name: "catppuccin-mocha".to_string(),
             author: Some("Catppuccin".into()),
             description: Some("Soothing pastels — the Mocha variant".into()),
-            bg: Color::Rgb(30, 30, 46),          // #1E1E2E
+            bg: Color::Rgb(30, 30, 46),           // #1E1E2E
             fg: Color::Rgb(205, 214, 244),        // #CDD6F4
             surface: Color::Rgb(49, 50, 68),      // #313244
             overlay: Color::Rgb(69, 71, 90),      // #45475A
             primary: Color::Rgb(137, 180, 250),   // #89B4FA (blue)
             secondary: Color::Rgb(249, 226, 175), // #F9E2AF (yellow)
             dim: Color::Rgb(69, 71, 90),
-            muted: Color::Rgb(108, 112, 134),     // #6C7086
+            muted: Color::Rgb(108, 112, 134), // #6C7086
             ansi_black: Color::Rgb(30, 30, 46),
-            ansi_red: Color::Rgb(243, 139, 168),  // #F38BA8
+            ansi_red: Color::Rgb(243, 139, 168),   // #F38BA8
             ansi_green: Color::Rgb(166, 227, 161), // #A6E3A1
             ansi_yellow: Color::Rgb(249, 226, 175),
             ansi_blue: Color::Rgb(137, 180, 250),
             ansi_magenta: Color::Rgb(245, 194, 231), // #F5C2E7
-            ansi_cyan: Color::Rgb(148, 226, 213),  // #94E2D5
+            ansi_cyan: Color::Rgb(148, 226, 213),    // #94E2D5
             ansi_white: Color::Rgb(205, 214, 244),
         }
     }
@@ -190,9 +190,9 @@ impl ThemeData {
             primary: Color::Rgb(125, 207, 255),   // #7DCFFF (cyan)
             secondary: Color::Rgb(224, 175, 104), // #E0AF68 (amber)
             dim: Color::Rgb(52, 59, 88),
-            muted: Color::Rgb(86, 95, 137),       // #565F89
+            muted: Color::Rgb(86, 95, 137), // #565F89
             ansi_black: Color::Rgb(26, 27, 38),
-            ansi_red: Color::Rgb(247, 118, 142),  // #F7768E
+            ansi_red: Color::Rgb(247, 118, 142),   // #F7768E
             ansi_green: Color::Rgb(158, 206, 106), // #9ECE6A
             ansi_yellow: Color::Rgb(224, 175, 104),
             ansi_blue: Color::Rgb(125, 207, 255),
@@ -208,21 +208,21 @@ impl ThemeData {
             name: "solarized-dark".to_string(),
             author: Some("Ethan Schoonover".into()),
             description: Some("Precision palette tuned for readability".into()),
-            bg: Color::Rgb(0, 43, 54),            // #002B36
-            fg: Color::Rgb(131, 148, 150),         // #839496
-            surface: Color::Rgb(7, 54, 66),        // #073642
-            overlay: Color::Rgb(88, 110, 117),     // #586E75
-            primary: Color::Rgb(38, 139, 210),    // #268BD2 (blue)
-            secondary: Color::Rgb(181, 137, 0),   // #B58900 (yellow)
+            bg: Color::Rgb(0, 43, 54),          // #002B36
+            fg: Color::Rgb(131, 148, 150),      // #839496
+            surface: Color::Rgb(7, 54, 66),     // #073642
+            overlay: Color::Rgb(88, 110, 117),  // #586E75
+            primary: Color::Rgb(38, 139, 210),  // #268BD2 (blue)
+            secondary: Color::Rgb(181, 137, 0), // #B58900 (yellow)
             dim: Color::Rgb(88, 110, 117),
-            muted: Color::Rgb(101, 123, 131),      // #657B83
+            muted: Color::Rgb(101, 123, 131), // #657B83
             ansi_black: Color::Rgb(0, 43, 54),
-            ansi_red: Color::Rgb(220, 50, 47),    // #DC322F
-            ansi_green: Color::Rgb(133, 153, 0),  // #859900
+            ansi_red: Color::Rgb(220, 50, 47),   // #DC322F
+            ansi_green: Color::Rgb(133, 153, 0), // #859900
             ansi_yellow: Color::Rgb(181, 137, 0),
             ansi_blue: Color::Rgb(38, 139, 210),
             ansi_magenta: Color::Rgb(211, 54, 130), // #D33682
-            ansi_cyan: Color::Rgb(42, 161, 152),   // #2AA198
+            ansi_cyan: Color::Rgb(42, 161, 152),    // #2AA198
             ansi_white: Color::Rgb(238, 232, 213),  // #EEE8D5
         }
     }
@@ -649,29 +649,63 @@ impl Theme {
     }
 
     // ── Base surfaces ───────────────────────────────────────────────────
-    pub fn bg() -> Color { Self::cached().bg }
-    pub fn fg() -> Color { Self::cached().fg }
-    pub fn surface() -> Color { Self::cached().surface }
-    pub fn overlay() -> Color { Self::cached().overlay }
+    pub fn bg() -> Color {
+        Self::cached().bg
+    }
+    pub fn fg() -> Color {
+        Self::cached().fg
+    }
+    pub fn surface() -> Color {
+        Self::cached().surface
+    }
+    pub fn overlay() -> Color {
+        Self::cached().overlay
+    }
 
     // ── Semantic accents ────────────────────────────────────────────────
-    pub fn primary() -> Color { Self::cached().primary }
-    pub fn secondary() -> Color { Self::cached().secondary }
-    pub fn dim() -> Color { Self::cached().dim }
-    pub fn muted() -> Color { Self::cached().muted }
+    pub fn primary() -> Color {
+        Self::cached().primary
+    }
+    pub fn secondary() -> Color {
+        Self::cached().secondary
+    }
+    pub fn dim() -> Color {
+        Self::cached().dim
+    }
+    pub fn muted() -> Color {
+        Self::cached().muted
+    }
 
     // ── ANSI slots ──────────────────────────────────────────────────────
-    pub fn red() -> Color { Self::cached().ansi_red }
-    pub fn green() -> Color { Self::cached().ansi_green }
-    pub fn yellow() -> Color { Self::cached().ansi_yellow }
-    pub fn blue() -> Color { Self::cached().ansi_blue }
-    pub fn magenta() -> Color { Self::cached().ansi_magenta }
-    pub fn cyan() -> Color { Self::cached().ansi_cyan }
+    pub fn red() -> Color {
+        Self::cached().ansi_red
+    }
+    pub fn green() -> Color {
+        Self::cached().ansi_green
+    }
+    pub fn yellow() -> Color {
+        Self::cached().ansi_yellow
+    }
+    pub fn blue() -> Color {
+        Self::cached().ansi_blue
+    }
+    pub fn magenta() -> Color {
+        Self::cached().ansi_magenta
+    }
+    pub fn cyan() -> Color {
+        Self::cached().ansi_cyan
+    }
 
     // ── Platform colors (fixed constants, NOT themeable) ────────────────
-    pub fn twitch() -> Color { TWITCH_COLOR }
-    pub fn youtube() -> Color { YOUTUBE_COLOR }
-    pub fn patreon() -> Color { PATREON_COLOR }
+    pub fn twitch() -> Color {
+        TWITCH_COLOR
+    }
+    pub fn youtube() -> Color {
+        YOUTUBE_COLOR
+    }
+    pub fn patreon() -> Color {
+        PATREON_COLOR
+    }
 
     // ── Derived: hotkey bar background ──────────────────────────────────
     fn hotkey_bg() -> Color {
@@ -687,7 +721,9 @@ impl Theme {
 
     // ── Style helpers ───────────────────────────────────────────────────
     pub fn title() -> Style {
-        Style::new().fg(Self::primary()).add_modifier(Modifier::BOLD)
+        Style::new()
+            .fg(Self::primary())
+            .add_modifier(Modifier::BOLD)
     }
 
     pub fn selected() -> Style {
@@ -751,16 +787,36 @@ impl Theme {
 
     /// Semantic helpers per DESIGN-TODOS D-section so widgets stop reaching
     /// for raw `Color::` names.
-    pub fn log_error() -> Style { Style::new().fg(Self::red()) }
-    pub fn log_warn() -> Style { Style::new().fg(Self::secondary()) }
-    pub fn log_info() -> Style { Style::new().fg(Self::fg()) }
-    pub fn log_debug() -> Style { Style::new().fg(Self::muted()) }
-    pub fn log_trace() -> Style { Style::new().fg(Self::dim()) }
-    pub fn scrollbar_thumb() -> Style { Style::new().fg(Self::primary()) }
-    pub fn scrollbar_track() -> Style { Style::new().fg(Self::dim()) }
-    pub fn indicator_active() -> Style { Style::new().fg(Self::green()) }
-    pub fn indicator_idle() -> Style { Style::new().fg(Self::muted()) }
-    pub fn status_paused() -> Style { Style::new().fg(Self::secondary()) }
+    pub fn log_error() -> Style {
+        Style::new().fg(Self::red())
+    }
+    pub fn log_warn() -> Style {
+        Style::new().fg(Self::secondary())
+    }
+    pub fn log_info() -> Style {
+        Style::new().fg(Self::fg())
+    }
+    pub fn log_debug() -> Style {
+        Style::new().fg(Self::muted())
+    }
+    pub fn log_trace() -> Style {
+        Style::new().fg(Self::dim())
+    }
+    pub fn scrollbar_thumb() -> Style {
+        Style::new().fg(Self::primary())
+    }
+    pub fn scrollbar_track() -> Style {
+        Style::new().fg(Self::dim())
+    }
+    pub fn indicator_active() -> Style {
+        Style::new().fg(Self::green())
+    }
+    pub fn indicator_idle() -> Style {
+        Style::new().fg(Self::muted())
+    }
+    pub fn status_paused() -> Style {
+        Style::new().fg(Self::secondary())
+    }
 
     /// Linear RGB blend of two theme colors by `t ∈ [0, 1]`. Non-RGB colors
     /// snap at the halfway point — they don't interpolate meaningfully.

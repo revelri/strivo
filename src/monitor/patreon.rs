@@ -89,24 +89,25 @@ impl PatreonMonitor {
 
         for creator in &creators {
             let since = self.last_checked.get(&creator.campaign_id).copied();
-            let posts = self.client.fetch_posts(&creator.campaign_id, since.as_ref()).await?;
+            let posts = self
+                .client
+                .fetch_posts(&creator.campaign_id, since.as_ref())
+                .await?;
 
             for post in &posts {
                 let Some(ref embed_url) = post.embed_url else {
                     continue;
                 };
 
-                tracing::info!(
-                    "Patreon new video post: {} - {}",
-                    creator.name,
-                    post.title
-                );
+                tracing::info!("Patreon new video post: {} - {}", creator.name, post.title);
 
                 // Send notification
-                let _ = self.event_tx.send(AppEvent::Daemon(DaemonEvent::PatreonPostFound {
-                    creator_name: creator.name.clone(),
-                    post_title: post.title.clone(),
-                }));
+                let _ = self
+                    .event_tx
+                    .send(AppEvent::Daemon(DaemonEvent::PatreonPostFound {
+                        creator_name: creator.name.clone(),
+                        post_title: post.title.clone(),
+                    }));
                 let _ = self.event_tx.send(AppEvent::notification(
                     format!("Patreon: {}", creator.name),
                     post.title.clone(),
@@ -130,7 +131,8 @@ impl PatreonMonitor {
             }
 
             // Update last_checked
-            self.last_checked.insert(creator.campaign_id.clone(), Utc::now());
+            self.last_checked
+                .insert(creator.campaign_id.clone(), Utc::now());
         }
 
         // Persist state

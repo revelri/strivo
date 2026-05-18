@@ -1,4 +1,4 @@
-use anyhow::{Result, bail, Context};
+use anyhow::{bail, Context, Result};
 use std::path::Path;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
@@ -133,15 +133,14 @@ impl MpvController {
 
     /// Seek relative (seconds, can be negative)
     pub async fn seek(&self, seconds: f64) -> Result<()> {
-        self.send_command(&["seek", &seconds.to_string(), "relative"]).await?;
+        self.send_command(&["seek", &seconds.to_string(), "relative"])
+            .await?;
         Ok(())
     }
 
     /// Get current playback position
     pub async fn get_position(&self) -> Result<f64> {
-        let resp = self
-            .send_command(&["get_property", "time-pos"])
-            .await?;
+        let resp = self.send_command(&["get_property", "time-pos"]).await?;
         let parsed: serde_json::Value = serde_json::from_str(&resp)?;
         parsed["data"]
             .as_f64()
@@ -171,12 +170,7 @@ impl MpvController {
 
         if let Some(ref mut child) = self.child {
             // Wait briefly for clean exit
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(3),
-                child.wait(),
-            )
-            .await
-            {
+            match tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await {
                 Ok(_) => {}
                 Err(_) => {
                     child.kill().await.ok();

@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState},
+    Frame,
 };
 
 use crate::app::{ActivePane, AppState};
@@ -16,7 +16,7 @@ use crate::tui::theme::Theme;
 enum SidebarEntry {
     Header,
     Separator,
-    Channel(usize),    // index into app.channels
+    Channel(usize),     // index into app.channels
     StreamTitle(usize), // index into app.channels (sub-line, not selectable)
 }
 
@@ -38,7 +38,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
         .border_style(border_style)
         .title(title)
         .title_style(if app.search_active || !app.search_query.is_empty() {
-            Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD)
+            Style::new()
+                .fg(Theme::secondary())
+                .add_modifier(Modifier::BOLD)
         } else {
             Theme::title()
         });
@@ -78,9 +80,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
 
     // Helper to add a platform group
     let add_group = |platform: PlatformKind,
-                         indices: &[usize],
-                         items: &mut Vec<ListItem>,
-                         entries: &mut Vec<SidebarEntry>| {
+                     indices: &[usize],
+                     items: &mut Vec<ListItem>,
+                     entries: &mut Vec<SidebarEntry>| {
         if indices.is_empty() {
             return;
         }
@@ -93,8 +95,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
 
         // Platform header with Nerd Font icon
         let (label, icon, color) = match platform {
-            PlatformKind::Twitch => ("Twitch", " \u{F1E8}", Theme::twitch()),   //
-            PlatformKind::YouTube => ("YouTube", " 󰗃", Theme::youtube()), // 󰗃
+            PlatformKind::Twitch => ("Twitch", " \u{F1E8}", Theme::twitch()), //
+            PlatformKind::YouTube => ("YouTube", " 󰗃", Theme::youtube()),     // 󰗃
             PlatformKind::Patreon => ("Patreon", " ", Theme::patreon()),
         };
         // Pad to fill width: name left, icon right
@@ -104,10 +106,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
                 format!(" {header_text}"),
                 Style::new().fg(color).add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                icon,
-                Style::new().fg(color).add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(icon, Style::new().fg(color).add_modifier(Modifier::BOLD)),
         ])));
         entries.push(SidebarEntry::Header);
 
@@ -154,15 +153,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
 
             // Build the line: " ChannelName              indicators"
             let name = &ch.display_name;
-            let right_text: String = right_parts.iter().map(|s| s.content.as_ref()).collect::<Vec<&str>>().join("");
+            let right_text: String = right_parts
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect::<Vec<&str>>()
+                .join("");
             let right_display_len = right_text.chars().count();
             let name_max = inner_width.saturating_sub(2 + right_display_len + 1); // " " prefix + gap
             let display_name: String = if name.chars().count() > name_max {
-                name.chars().take(name_max.saturating_sub(1)).collect::<String>() + "…"
+                name.chars()
+                    .take(name_max.saturating_sub(1))
+                    .collect::<String>()
+                    + "…"
             } else {
                 name.to_string()
             };
-            let pad = inner_width.saturating_sub(1 + display_name.chars().count() + right_display_len + 1);
+            let pad = inner_width
+                .saturating_sub(1 + display_name.chars().count() + right_display_len + 1);
 
             let mut spans = vec![Span::raw(" ")];
             // Fuzzy-highlight characters matching the active search
@@ -194,9 +201,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
                         let padded = format!("{title}   {title}"); // wrap around
                         let total_len = padded.chars().count();
                         let start = offset % total_len;
-                        padded.chars().skip(start).take(max_title_width).collect::<String>()
+                        padded
+                            .chars()
+                            .skip(start)
+                            .take(max_title_width)
+                            .collect::<String>()
                     } else if title.chars().count() > max_title_width {
-                        title.chars().take(max_title_width.saturating_sub(1)).collect::<String>() + "…"
+                        title
+                            .chars()
+                            .take(max_title_width.saturating_sub(1))
+                            .collect::<String>()
+                            + "…"
                     } else {
                         title.clone()
                     };
@@ -211,9 +226,24 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
         }
     };
 
-    add_group(PlatformKind::Twitch, &twitch_indices, &mut items, &mut entries);
-    add_group(PlatformKind::YouTube, &youtube_indices, &mut items, &mut entries);
-    add_group(PlatformKind::Patreon, &patreon_indices, &mut items, &mut entries);
+    add_group(
+        PlatformKind::Twitch,
+        &twitch_indices,
+        &mut items,
+        &mut entries,
+    );
+    add_group(
+        PlatformKind::YouTube,
+        &youtube_indices,
+        &mut items,
+        &mut entries,
+    );
+    add_group(
+        PlatformKind::Patreon,
+        &patreon_indices,
+        &mut items,
+        &mut entries,
+    );
 
     // Find the list index for the selected channel
     let mut state = ListState::default();

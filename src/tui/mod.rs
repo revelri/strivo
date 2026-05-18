@@ -8,7 +8,7 @@ pub mod preview;
 pub mod theme;
 pub mod widgets;
 
-use crate::app::{AppAction, AppEvent, AppState, ActivePane, process_plugin_actions};
+use crate::app::{process_plugin_actions, ActivePane, AppAction, AppEvent, AppState};
 use crate::config::AppConfig;
 use crate::playback::MpvController;
 use crate::plugin::registry::PluginRegistry;
@@ -36,8 +36,15 @@ pub async fn run(
     let mut terminal = ratatui::init();
     let mut mpv = MpvController::new();
 
-    let result =
-        run_loop(&mut terminal, &mut app, &mut registry, &mut event_rx, &recording_tx, &mut mpv).await;
+    let result = run_loop(
+        &mut terminal,
+        &mut app,
+        &mut registry,
+        &mut event_rx,
+        &recording_tx,
+        &mut mpv,
+    )
+    .await;
 
     // Cleanup
     registry.shutdown_all();
@@ -70,8 +77,7 @@ async fn run_loop(
                 let tx = internal_tx.clone();
                 let picker = picker.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = extract_and_decode_recording_thumb(id, path, picker, tx).await
-                    {
+                    if let Err(e) = extract_and_decode_recording_thumb(id, path, picker, tx).await {
                         tracing::debug!("recording thumbnail failed for {id}: {e}");
                     }
                 });
@@ -157,7 +163,8 @@ async fn run_loop(
 
         for event in batch.drain(..) {
             // Check for channels updated to trigger thumbnail downloads
-            if let AppEvent::Daemon(crate::app::DaemonEvent::ChannelsUpdated(ref channels)) = event {
+            if let AppEvent::Daemon(crate::app::DaemonEvent::ChannelsUpdated(ref channels)) = event
+            {
                 spawn_thumbnail_downloads(channels, app, &internal_tx);
             }
 
@@ -169,7 +176,11 @@ async fn run_loop(
             };
 
             // Handle PluginEvent directly (no longer goes through app.handle_event)
-            if let AppEvent::PluginEvent { plugin_name, event: pe } = event {
+            if let AppEvent::PluginEvent {
+                plugin_name,
+                event: pe,
+            } = event
+            {
                 let actions = registry.dispatch_plugin_event(plugin_name, pe);
                 if let Some(action) = process_plugin_actions(actions, app, registry) {
                     handle_action(action, app, recording_tx, mpv, &internal_tx).await;
@@ -193,7 +204,11 @@ async fn run_loop(
         // Drain internal async results
         while let Ok(event) = internal_rx.try_recv() {
             // Handle PluginEvent from internal channel too
-            if let AppEvent::PluginEvent { plugin_name, event: pe } = event {
+            if let AppEvent::PluginEvent {
+                plugin_name,
+                event: pe,
+            } = event
+            {
                 let actions = registry.dispatch_plugin_event(plugin_name, pe);
                 if let Some(action) = process_plugin_actions(actions, app, registry) {
                     handle_action(action, app, recording_tx, mpv, &internal_tx).await;
@@ -269,11 +284,13 @@ async fn extract_and_decode_recording_thumb(
         // the placeholder.
         return Ok(());
     };
-    let protocol = tokio::task::spawn_blocking(move || -> Result<ratatui_image::protocol::StatefulProtocol> {
-        let img = image::load_from_memory(&bytes)?;
-        let proto = picker.new_resize_protocol(img);
-        Ok(proto)
-    })
+    let protocol = tokio::task::spawn_blocking(
+        move || -> Result<ratatui_image::protocol::StatefulProtocol> {
+            let img = image::load_from_memory(&bytes)?;
+            let proto = picker.new_resize_protocol(img);
+            Ok(proto)
+        },
+    )
     .await??;
     let _ = tx.send(AppEvent::RecordingThumbnailDecoded { id, protocol });
     Ok(())
@@ -326,18 +343,21 @@ async fn download_thumbnail(
 
     let channel_id_owned = channel_id.to_string();
     let cache_path_clone = cache_path.clone();
-    let decode_result = tokio::task::spawn_blocking(move || -> Result<Option<ratatui_image::protocol::StatefulProtocol>> {
-        let img = image::load_from_memory(&bytes)?;
-        let resized = img.resize(440, 248, image::imageops::FilterType::Triangle);
-        resized.save(&cache_path_clone)?;
+    let decode_result = tokio::task::spawn_blocking(
+        move || -> Result<Option<ratatui_image::protocol::StatefulProtocol>> {
+            let img = image::load_from_memory(&bytes)?;
+            let resized = img.resize(440, 248, image::imageops::FilterType::Triangle);
+            resized.save(&cache_path_clone)?;
 
-        if let Some(picker) = picker {
-            let proto = picker.new_resize_protocol(resized.into());
-            Ok(Some(proto))
-        } else {
-            Ok(None)
-        }
-    }).await??;
+            if let Some(picker) = picker {
+                let proto = picker.new_resize_protocol(resized.into());
+                Ok(Some(proto))
+            } else {
+                Ok(None)
+            }
+        },
+    )
+    .await??;
 
     let _ = tx.send(AppEvent::ThumbnailReady {
         channel_id: channel_id.to_string(),
@@ -382,7 +402,10 @@ fn handle_plugin_action(
             app.active_pane = ActivePane::Sidebar;
             registry.set_active_pane(None);
         }
-        crate::plugin::PluginAction::SpawnTask { plugin_name, future } => {
+        crate::plugin::PluginAction::SpawnTask {
+            plugin_name,
+            future,
+        } => {
             let tx = tx.clone();
             tokio::spawn(async move {
                 let result = future.await;
@@ -398,7 +421,10 @@ fn handle_plugin_action(
         crate::plugin::PluginAction::PlayFileAt(_path, _start) => {
             // Same path: AppAction translation lives in process_plugin_actions.
         }
-        crate::plugin::PluginAction::UpdateConfig { plugin_name, config_update } => {
+        crate::plugin::PluginAction::UpdateConfig {
+            plugin_name,
+            config_update,
+        } => {
             match plugin_name {
                 "crunchr" => {
                     if let Ok(cfg) = config_update.downcast::<crate::config::CrunchrConfig>() {
@@ -503,17 +529,15 @@ async fn handle_action(
                 }
             });
         }
-        AppAction::LaunchMpv { channel_name, url } => {
-            match mpv.play(&url).await {
-                Ok(()) => {
-                    app.status_message = format!("Playing {channel_name} in mpv");
-                }
-                Err(e) => {
-                    app.status_message = format!("mpv error: {e}");
-                    app.watching_channel = None;
-                }
+        AppAction::LaunchMpv { channel_name, url } => match mpv.play(&url).await {
+            Ok(()) => {
+                app.status_message = format!("Playing {channel_name} in mpv");
             }
-        }
+            Err(e) => {
+                app.status_message = format!("mpv error: {e}");
+                app.watching_channel = None;
+            }
+        },
         AppAction::PlayFile { path } => match mpv.play_file(&path).await {
             Ok(()) => seed_playback(app, &path, 0.0),
             Err(e) => app.status_message = format!("mpv error: {e}"),
@@ -554,7 +578,10 @@ async fn handle_action(
                     .show();
             });
         }
-        AppAction::SpawnPluginTask { plugin_name, future } => {
+        AppAction::SpawnPluginTask {
+            plugin_name,
+            future,
+        } => {
             let tx = watch_tx.clone();
             tokio::spawn(async move {
                 let result = future.await;

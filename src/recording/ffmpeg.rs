@@ -48,11 +48,7 @@ impl FfmpegBuilder {
 
         // Resolve codecs: explicit format overrides the legacy `transcode` toggle.
         let (vcodec, acodec, bitrate_kbps) = match (self.format.as_ref(), self.transcode) {
-            (Some(f), _) => (
-                f.video_codec.clone(),
-                f.audio_codec.clone(),
-                f.bitrate_kbps,
-            ),
+            (Some(f), _) => (f.video_codec.clone(), f.audio_codec.clone(), f.bitrate_kbps),
             (None, true) => ("h264_nvenc".to_string(), "aac".to_string(), None),
             (None, false) => ("copy".to_string(), "copy".to_string(), None),
         };
@@ -109,11 +105,8 @@ impl FfmpegProcess {
                     libc::kill(pid as i32, libc::SIGINT);
                 }
                 // Wait for ffmpeg to finish writing
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(10),
-                    self.child.wait(),
-                )
-                .await
+                match tokio::time::timeout(std::time::Duration::from_secs(10), self.child.wait())
+                    .await
                 {
                     Ok(Ok(_)) => return Ok(()),
                     Ok(Err(e)) => {

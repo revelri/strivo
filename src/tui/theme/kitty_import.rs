@@ -58,7 +58,10 @@ pub fn parse(name: &str, contents: &str) -> Result<ThemeData, String> {
             continue;
         }
         let Some(color) = parse_hex_color(value) else {
-            tracing::trace!("kitty_import {name}:{}: unparseable value '{value}' for '{key}'", lineno + 1);
+            tracing::trace!(
+                "kitty_import {name}:{}: unparseable value '{value}' for '{key}'",
+                lineno + 1
+            );
             continue;
         };
         match key {

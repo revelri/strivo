@@ -1,8 +1,8 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
-use tokio::sync::RwLock;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::app::AppEvent;
 use crate::config::credentials;
@@ -218,8 +218,8 @@ impl TwitchPlatform {
 
         // Step 2: Poll for token
         let interval = std::time::Duration::from_secs(resp.interval.max(5));
-        let deadline = tokio::time::Instant::now()
-            + std::time::Duration::from_secs(resp.expires_in);
+        let deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_secs(resp.expires_in);
 
         loop {
             tokio::time::sleep(interval).await;
@@ -361,9 +361,7 @@ impl Platform for TwitchPlatform {
         let mut cursor: Option<String> = None;
 
         loop {
-            let mut url = format!(
-                "{TWITCH_API_URL}/channels/followed?user_id={user_id}&first=100"
-            );
+            let mut url = format!("{TWITCH_API_URL}/channels/followed?user_id={user_id}&first=100");
             if let Some(ref c) = cursor {
                 url.push_str(&format!("&after={c}"));
             }
@@ -416,19 +414,16 @@ impl Platform for TwitchPlatform {
                         .map(|dt| dt.with_timezone(&chrono::Utc))
                 });
 
-                let thumbnail = stream.thumbnail_url.map(|url| {
-                    url.replace("{width}", "440").replace("{height}", "248")
-                });
+                let thumbnail = stream
+                    .thumbnail_url
+                    .map(|url| url.replace("{width}", "440").replace("{height}", "248"));
 
                 live_channels.push(ChannelEntry {
                     id: stream.user_id,
                     platform: PlatformKind::Twitch,
                     name: stream.user_login,
                     display_name: stream.user_name,
-                    is_live: stream
-                        .stream_type
-                        .as_deref()
-                        .map_or(true, |t| t == "live"),
+                    is_live: stream.stream_type.as_deref().map_or(true, |t| t == "live"),
                     stream_title: stream.title,
                     game_or_category: stream.game_name,
                     viewer_count: stream.viewer_count,
@@ -460,34 +455,56 @@ impl Platform for TwitchPlatform {
         let mut cursor: Option<String> = None;
 
         loop {
-            let mut url = format!(
-                "{TWITCH_API_URL}/videos?user_id={channel_id}&type=archive&first=100"
-            );
+            let mut url =
+                format!("{TWITCH_API_URL}/videos?user_id={channel_id}&type=archive&first=100");
             if let Some(ref c) = cursor {
                 url.push_str(&format!("&after={c}"));
             }
 
             let resp: serde_json::Value = self.api_get(&url).await?;
-            let items = resp.get("data").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let items = resp
+                .get("data")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
             if items.is_empty() {
                 break;
             }
 
             for item in &items {
-                let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let id = item
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if id.is_empty() {
                     continue;
                 }
-                let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled").to_string();
-                let url_str = item.get("url").and_then(|v| v.as_str())
+                let title = item
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Untitled")
+                    .to_string();
+                let url_str = item
+                    .get("url")
+                    .and_then(|v| v.as_str())
                     .map(String::from)
                     .unwrap_or_else(|| format!("https://www.twitch.tv/videos/{id}"));
-                let published_at = item.get("published_at").and_then(|v| v.as_str())
-                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s)
-                        .ok().map(|dt| dt.with_timezone(&chrono::Utc)));
-                let duration = item.get("duration").and_then(|v| v.as_str())
+                let published_at =
+                    item.get("published_at")
+                        .and_then(|v| v.as_str())
+                        .and_then(|s| {
+                            chrono::DateTime::parse_from_rfc3339(s)
+                                .ok()
+                                .map(|dt| dt.with_timezone(&chrono::Utc))
+                        });
+                let duration = item
+                    .get("duration")
+                    .and_then(|v| v.as_str())
                     .and_then(parse_twitch_duration);
-                let thumbnail = item.get("thumbnail_url").and_then(|v| v.as_str())
+                let thumbnail = item
+                    .get("thumbnail_url")
+                    .and_then(|v| v.as_str())
                     .map(|u| u.replace("%{width}", "440").replace("%{height}", "248"));
 
                 if let (Some(after), Some(pub_at)) = (since, published_at) {
@@ -514,7 +531,8 @@ impl Platform for TwitchPlatform {
                 }
             }
 
-            cursor = resp.get("pagination")
+            cursor = resp
+                .get("pagination")
                 .and_then(|p| p.get("cursor"))
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty())
@@ -535,9 +553,18 @@ fn parse_twitch_duration(s: &str) -> Option<std::time::Duration> {
     for ch in s.chars() {
         match ch {
             '0'..='9' => acc = acc * 10 + (ch as u64 - '0' as u64),
-            'h' => { total += acc * 3600; acc = 0; }
-            'm' => { total += acc * 60; acc = 0; }
-            's' => { total += acc; acc = 0; }
+            'h' => {
+                total += acc * 3600;
+                acc = 0;
+            }
+            'm' => {
+                total += acc * 60;
+                acc = 0;
+            }
+            's' => {
+                total += acc;
+                acc = 0;
+            }
             _ => return None,
         }
     }

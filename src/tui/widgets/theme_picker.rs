@@ -7,11 +7,11 @@
 //! right pane always reflects what would be committed on Enter.
 
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::AppState;
@@ -57,11 +57,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
     let inner = block.inner(center);
     frame.render_widget(block, center);
 
-    let [list_area, preview_area] = Layout::horizontal([
-        Constraint::Length(28),
-        Constraint::Fill(1),
-    ])
-    .areas(inner);
+    let [list_area, preview_area] =
+        Layout::horizontal([Constraint::Length(28), Constraint::Fill(1)]).areas(inner);
 
     render_theme_list(frame, list_area, state);
     render_preview(frame, preview_area, state);
@@ -123,7 +120,11 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &crate::app::ThemePicker
     ])
     .areas(area);
 
-    let name = state.themes.get(state.selected).cloned().unwrap_or_default();
+    let name = state
+        .themes
+        .get(state.selected)
+        .cloned()
+        .unwrap_or_default();
     let head_line = Paragraph::new(Line::from(vec![
         Span::styled("  Preview: ", Style::new().fg(Theme::muted())),
         Span::styled(name, Theme::title()),
@@ -146,8 +147,7 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &crate::app::ThemePicker
         ("blue", Theme::blue()),
     ];
 
-    let cols = Layout::horizontal(vec![Constraint::Fill(1); slots.len()])
-        .split(swatch);
+    let cols = Layout::horizontal(vec![Constraint::Fill(1); slots.len()]).split(swatch);
     for (i, (label, color)) in slots.iter().enumerate() {
         let cell = cols[i];
         let block = Paragraph::new(vec![
@@ -174,20 +174,32 @@ fn render_preview(frame: &mut Frame, area: Rect, state: &crate::app::ThemePicker
             Span::styled("  ", Style::new()),
             Span::styled(
                 " LIVE ",
-                Style::new().fg(Theme::bg()).bg(live_bg).add_modifier(Modifier::BOLD),
+                Style::new()
+                    .fg(Theme::bg())
+                    .bg(live_bg)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
             Span::styled(
                 " REC ",
-                Style::new().fg(Theme::bg()).bg(rec_bg).add_modifier(Modifier::BOLD),
+                Style::new()
+                    .fg(Theme::bg())
+                    .bg(rec_bg)
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw("  "),
-            Span::styled("stream title here", Style::new().fg(Theme::fg()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "stream title here",
+                Style::new().fg(Theme::fg()).add_modifier(Modifier::BOLD),
+            ),
         ]),
         Line::from(vec![
             Span::raw("  "),
             Span::styled("█ ", Style::new().fg(Theme::primary())),
-            Span::styled("Selected row", Style::new().fg(Theme::fg()).bg(Theme::surface())),
+            Span::styled(
+                "Selected row",
+                Style::new().fg(Theme::fg()).bg(Theme::surface()),
+            ),
         ]),
         Line::from(vec![
             Span::raw("  "),
@@ -222,11 +234,7 @@ fn hex(c: ratatui::style::Color) -> String {
 }
 
 /// Linear blend between two RGB colors — used for the border fade-in.
-fn blend(
-    a: ratatui::style::Color,
-    b: ratatui::style::Color,
-    t: f32,
-) -> ratatui::style::Color {
+fn blend(a: ratatui::style::Color, b: ratatui::style::Color, t: f32) -> ratatui::style::Color {
     use ratatui::style::Color;
     match (a, b) {
         (Color::Rgb(ar, ag, ab), Color::Rgb(br, bg, bb)) => Color::Rgb(

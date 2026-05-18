@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::{ActivePane, AppState};
@@ -122,18 +122,25 @@ pub fn render_help(
     let settings_owned = layer_rows(crate::tui::keymap::Layer::Settings);
     let log_owned = layer_rows(crate::tui::keymap::Layer::Log);
 
-    let sidebar_keys: Vec<(&str, &str)> =
-        sidebar_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
+    let sidebar_keys: Vec<(&str, &str)> = sidebar_owned
+        .iter()
+        .map(|(k, d)| (k.as_str(), *d))
+        .collect();
     let detail_keys: Vec<(&str, &str)> =
         detail_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
-    let recording_keys: Vec<(&str, &str)> =
-        recording_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
-    let schedule_keys: Vec<(&str, &str)> =
-        schedule_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
-    let settings_keys: Vec<(&str, &str)> =
-        settings_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
-    let log_keys: Vec<(&str, &str)> =
-        log_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
+    let recording_keys: Vec<(&str, &str)> = recording_owned
+        .iter()
+        .map(|(k, d)| (k.as_str(), *d))
+        .collect();
+    let schedule_keys: Vec<(&str, &str)> = schedule_owned
+        .iter()
+        .map(|(k, d)| (k.as_str(), *d))
+        .collect();
+    let settings_keys: Vec<(&str, &str)> = settings_owned
+        .iter()
+        .map(|(k, d)| (k.as_str(), *d))
+        .collect();
+    let log_keys: Vec<(&str, &str)> = log_owned.iter().map(|(k, d)| (k.as_str(), *d)).collect();
 
     // Wizard stays hardcoded — its keys aren't in the table because they
     // intentionally diverge from universal navigation (tab-style auth
@@ -224,15 +231,21 @@ pub fn render_help(
         lines.push(Line::raw(""));
         lines.push(Line::styled(
             "  Plugins",
-            Style::new().fg(Theme::primary()).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(Theme::primary())
+                .add_modifier(Modifier::BOLD),
         ));
         for (_plugin_name, cmd) in &plugin_cmds {
-            let key_label = format!("{:?}", cmd.key).replace("Char('", "").replace("')", "");
+            let key_label = format!("{:?}", cmd.key)
+                .replace("Char('", "")
+                .replace("')", "");
             lines.push(Line::from(vec![
                 Span::raw("  "),
                 Span::styled(
                     format!("{key_label:>10}"),
-                    Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD),
+                    Style::new()
+                        .fg(Theme::secondary())
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("  "),
                 Span::styled(cmd.description, Style::new().fg(Theme::fg())),
@@ -278,10 +291,7 @@ pub fn render_stopping(frame: &mut Frame, area: Rect, app: &AppState) {
             )
         })
         .map(|j| {
-            let done = matches!(
-                j.state,
-                RecordingState::Finished | RecordingState::Failed
-            );
+            let done = matches!(j.state, RecordingState::Finished | RecordingState::Failed);
             (done, j.channel_name.clone())
         })
         .collect();
@@ -312,11 +322,7 @@ pub fn render_stopping(frame: &mut Frame, area: Rect, app: &AppState) {
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(Theme::blend_for(Theme::dim(), Theme::red(), enter_progress)))
         .title(" Stopping Recordings ")
-        .title_style(
-            Style::new()
-                .fg(Theme::red())
-                .add_modifier(Modifier::BOLD),
-        );
+        .title_style(Style::new().fg(Theme::red()).add_modifier(Modifier::BOLD));
 
     let inner = block.inner(center);
     frame.render_widget(block, center);
@@ -341,9 +347,7 @@ pub fn render_stopping(frame: &mut Frame, area: Rect, app: &AppState) {
         let (glyph, style) = if *done {
             (
                 "✓",
-                Style::new()
-                    .fg(Theme::green())
-                    .add_modifier(Modifier::BOLD),
+                Style::new().fg(Theme::green()).add_modifier(Modifier::BOLD),
             )
         } else {
             ("●", Style::new().fg(Theme::red()))
@@ -390,17 +394,18 @@ pub fn render_confirm(frame: &mut Frame, area: Rect, message: &str, enter_progre
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(border_color))
         .title(" Confirm ")
-        .title_style(Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::new()
+                .fg(Theme::secondary())
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = block.inner(center);
     frame.render_widget(block, center);
 
     let lines = vec![
         Line::raw(""),
-        Line::styled(
-            format!("  {message}"),
-            Style::new().fg(Theme::fg()),
-        ),
+        Line::styled(format!("  {message}"), Style::new().fg(Theme::fg())),
         Line::raw(""),
         Line::from(vec![
             Span::raw("  "),

@@ -29,10 +29,7 @@ pub fn scan_existing_recordings(config: &AppConfig) -> Vec<RecordingJob> {
             continue;
         }
 
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         if !extensions.contains(&ext) {
             continue;
         }
@@ -62,17 +59,15 @@ pub fn scan_existing_recordings(config: &AppConfig) -> Vec<RecordingJob> {
             })
             .unwrap_or(PlatformKind::Twitch);
 
-        let job = RecordingJob::from_file(
-            path,
-            channel_name,
-            platform,
-            parsed.title,
-            started_at,
-        );
+        let job = RecordingJob::from_file(path, channel_name, platform, parsed.title, started_at);
         jobs.push(job);
     }
 
-    tracing::info!("Scanned {} existing recordings from {}", jobs.len(), dir.display());
+    tracing::info!(
+        "Scanned {} existing recordings from {}",
+        jobs.len(),
+        dir.display()
+    );
     jobs
 }
 
@@ -183,4 +178,3 @@ fn try_template_parse(template: &str, filename: &str) -> ParsedFilename {
 
     result
 }
-

@@ -6,7 +6,7 @@
 //! and the lock is short-lived.
 
 use anyhow::{Context, Result};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -64,15 +64,17 @@ pub struct PersistDb {
 impl PersistDb {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create data dir {}", parent.display())
-            })?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create data dir {}", parent.display()))?;
         }
         let conn = Connection::open(path)
             .with_context(|| format!("failed to open jobs.db at {}", path.display()))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")?;
         conn.execute_batch(SCHEMA)?;
-        Ok(Self { inner: Arc::new(Mutex::new(conn)), path: path.to_path_buf() })
+        Ok(Self {
+            inner: Arc::new(Mutex::new(conn)),
+            path: path.to_path_buf(),
+        })
     }
 
     /// Returns `true` if this VOD is already recorded (present in `catalog`
@@ -237,8 +239,7 @@ impl PersistDb {
         let mut out = Vec::new();
         for r in rows {
             let (payload, state, err) = r?;
-            let Ok(mut job) =
-                serde_json::from_str::<crate::recording::job::RecordingJob>(&payload)
+            let Ok(mut job) = serde_json::from_str::<crate::recording::job::RecordingJob>(&payload)
             else {
                 continue;
             };
@@ -388,11 +389,27 @@ mod tests {
             url: "https://example.com/abc".into(),
             thumbnail_url: None,
         };
-        assert!(!db.is_vod_recorded(PlatformKind::YouTube, "UC123", "abc").await.unwrap());
+        assert!(!db
+            .is_vod_recorded(PlatformKind::YouTube, "UC123", "abc")
+            .await
+            .unwrap());
         db.upsert_catalog_entry(&vod).await.unwrap();
-        assert!(!db.is_vod_recorded(PlatformKind::YouTube, "UC123", "abc").await.unwrap());
-        db.mark_vod_recorded(PlatformKind::YouTube, "UC123", "abc", std::path::Path::new("/tmp/ep")).await.unwrap();
-        assert!(db.is_vod_recorded(PlatformKind::YouTube, "UC123", "abc").await.unwrap());
+        assert!(!db
+            .is_vod_recorded(PlatformKind::YouTube, "UC123", "abc")
+            .await
+            .unwrap());
+        db.mark_vod_recorded(
+            PlatformKind::YouTube,
+            "UC123",
+            "abc",
+            std::path::Path::new("/tmp/ep"),
+        )
+        .await
+        .unwrap();
+        assert!(db
+            .is_vod_recorded(PlatformKind::YouTube, "UC123", "abc")
+            .await
+            .unwrap());
     }
 
     #[tokio::test]

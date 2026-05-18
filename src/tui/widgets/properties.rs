@@ -1,9 +1,9 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
 
 use crate::app::AppState;
@@ -11,8 +11,12 @@ use crate::plugin::registry::PluginRegistry;
 use crate::tui::theme::Theme;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRegistry) {
-    let Some(job_id) = app.show_properties else { return };
-    let Some(rec) = app.recordings.get(&job_id) else { return };
+    let Some(job_id) = app.show_properties else {
+        return;
+    };
+    let Some(rec) = app.recordings.get(&job_id) else {
+        return;
+    };
 
     let [_, center_v, _] = Layout::vertical([
         Constraint::Percentage(10),
@@ -36,7 +40,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Theme::border_ramp(app.overlay_enter(crate::app::OverlayKey::Properties, 0.18)))
+        .border_style(Theme::border_ramp(
+            app.overlay_enter(crate::app::OverlayKey::Properties, 0.18),
+        ))
         .title(format!(" {title_display} "))
         .title_style(Theme::title());
 
@@ -48,13 +54,18 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
     // --- File Info ---
     lines.push(Line::styled(
         "  File Info",
-        Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD),
+        Style::new()
+            .fg(Theme::secondary())
+            .add_modifier(Modifier::BOLD),
     ));
 
     let path_display: String = rec.output_path.display().to_string();
     let max_path = inner.width.saturating_sub(12) as usize;
     let path_truncated: String = if path_display.len() > max_path {
-        format!("...{}", &path_display[path_display.len().saturating_sub(max_path)..])
+        format!(
+            "...{}",
+            &path_display[path_display.len().saturating_sub(max_path)..]
+        )
     } else {
         path_display
     };
@@ -70,7 +81,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
 
     lines.push(Line::from(vec![
         Span::styled("  Date:     ", Style::new().fg(Theme::dim())),
-        Span::styled(rec.started_at.format("%Y-%m-%d %H:%M").to_string(), Style::new().fg(Theme::fg())),
+        Span::styled(
+            rec.started_at.format("%Y-%m-%d %H:%M").to_string(),
+            Style::new().fg(Theme::fg()),
+        ),
     ]));
 
     lines.push(Line::from(vec![
@@ -81,25 +95,35 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
     lines.push(Line::from(vec![
         Span::styled("  Channel:  ", Style::new().fg(Theme::dim())),
         Span::styled(&rec.channel_name, Style::new().fg(Theme::fg())),
-        Span::styled(format!(" ({})", rec.platform), Style::new().fg(Theme::dim())),
+        Span::styled(
+            format!(" ({})", rec.platform),
+            Style::new().fg(Theme::dim()),
+        ),
     ]));
 
     // --- Media Info (from ffprobe cache) ---
     lines.push(Line::raw(""));
     lines.push(Line::styled(
         "  Media Info",
-        Style::new().fg(Theme::secondary()).add_modifier(Modifier::BOLD),
+        Style::new()
+            .fg(Theme::secondary())
+            .add_modifier(Modifier::BOLD),
     ));
 
     if let Some(info) = app.media_info_cache.get(&job_id) {
         if let Some(ref codec) = info.video_codec {
             lines.push(Line::from(vec![
                 Span::styled("  Video:    ", Style::new().fg(Theme::dim())),
-                Span::styled(format!("{codec} {}", info.resolution_str()), Style::new().fg(Theme::fg())),
+                Span::styled(
+                    format!("{codec} {}", info.resolution_str()),
+                    Style::new().fg(Theme::fg()),
+                ),
             ]));
         }
         if let Some(ref codec) = info.audio_codec {
-            let sr = info.audio_sample_rate.map_or(String::new(), |r| format!(" {r}Hz"));
+            let sr = info
+                .audio_sample_rate
+                .map_or(String::new(), |r| format!(" {r}Hz"));
             lines.push(Line::from(vec![
                 Span::styled("  Audio:    ", Style::new().fg(Theme::dim())),
                 Span::styled(format!("{codec}{sr}"), Style::new().fg(Theme::fg())),

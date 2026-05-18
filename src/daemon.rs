@@ -47,20 +47,32 @@ impl DaemonState {
             DaemonEvent::RecordingStarted { job } => {
                 self.recordings.insert(job.id, job.clone());
             }
-            DaemonEvent::RecordingProgress { job_id, bytes_written, duration_secs } => {
+            DaemonEvent::RecordingProgress {
+                job_id,
+                bytes_written,
+                duration_secs,
+            } => {
                 if let Some(job) = self.recordings.get_mut(job_id) {
                     job.bytes_written = *bytes_written;
                     job.duration_secs = *duration_secs;
                     job.state = crate::recording::job::RecordingState::Recording;
                 }
             }
-            DaemonEvent::RecordingFinished { job_id, final_state, error } => {
+            DaemonEvent::RecordingFinished {
+                job_id,
+                final_state,
+                error,
+            } => {
                 if let Some(job) = self.recordings.get_mut(job_id) {
                     job.state = *final_state;
                     job.error = error.clone();
                 }
             }
-            DaemonEvent::DeviceCodeRequired { kind, verification_uri, user_code } => {
+            DaemonEvent::DeviceCodeRequired {
+                kind,
+                verification_uri,
+                user_code,
+            } => {
                 let entry = (*kind, verification_uri.clone(), user_code.clone());
                 if matches!(&self.pending_auth, Some((p, _, _)) if *p == entry.0) {
                     self.pending_auth = Some(entry);
@@ -127,20 +139,23 @@ pub async fn run() -> Result<()> {
     // intentionally minimal: we mark orphans as 'interrupted' so the audit log
     // is honest. Catalog-pull resumption is automatic — the catalog dedupe
     // index in §5 already skips already-recorded VODs on the next pull.
-    let persist_db = match crate::recording::persist::PersistDb::open(&AppConfig::data_dir().join("jobs.db")) {
-        Ok(db) => {
-            match db.recover_orphaned_running().await {
-                Ok(n) if n > 0 => tracing::info!("daemon: marked {n} orphan job(s) as interrupted"),
-                Ok(_) => {}
-                Err(e) => tracing::warn!("daemon: persist recover failed: {e}"),
+    let persist_db =
+        match crate::recording::persist::PersistDb::open(&AppConfig::data_dir().join("jobs.db")) {
+            Ok(db) => {
+                match db.recover_orphaned_running().await {
+                    Ok(n) if n > 0 => {
+                        tracing::info!("daemon: marked {n} orphan job(s) as interrupted")
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("daemon: persist recover failed: {e}"),
+                }
+                Some(Arc::new(db))
             }
-            Some(Arc::new(db))
-        }
-        Err(e) => {
-            tracing::warn!("daemon: failed to open jobs.db: {e} — durability disabled");
-            None
-        }
-    };
+            Err(e) => {
+                tracing::warn!("daemon: failed to open jobs.db: {e} — durability disabled");
+                None
+            }
+        };
 
     let cancel = CancellationToken::new();
 
@@ -537,21 +552,22 @@ async fn persist_event(
     event: &DaemonEvent,
     recordings: &HashMap<Uuid, RecordingJob>,
 ) {
-    use crate::recording::persist::PersistedJob;
     use crate::recording::job::RecordingState;
+    use crate::recording::persist::PersistedJob;
 
-    let snapshot = |job_id: &Uuid, state: RecordingState, error: Option<String>| -> Option<PersistedJob> {
-        let job = recordings.get(job_id)?;
-        Some(PersistedJob {
-            id: job.id.to_string(),
-            kind: "Recording".to_string(),
-            payload: serde_json::to_string(job).unwrap_or_default(),
-            state: format!("{state:?}").to_lowercase(),
-            attempts: 0,
-            last_error: error,
-            episode_dir: job.output_path.parent().map(|p| p.to_path_buf()),
-        })
-    };
+    let snapshot =
+        |job_id: &Uuid, state: RecordingState, error: Option<String>| -> Option<PersistedJob> {
+            let job = recordings.get(job_id)?;
+            Some(PersistedJob {
+                id: job.id.to_string(),
+                kind: "Recording".to_string(),
+                payload: serde_json::to_string(job).unwrap_or_default(),
+                state: format!("{state:?}").to_lowercase(),
+                attempts: 0,
+                last_error: error,
+                episode_dir: job.output_path.parent().map(|p| p.to_path_buf()),
+            })
+        };
 
     let result = match event {
         DaemonEvent::RecordingStarted { job } => {
@@ -566,7 +582,11 @@ async fn persist_event(
             };
             db.upsert_job(&pj).await
         }
-        DaemonEvent::RecordingFinished { job_id, final_state, error } => {
+        DaemonEvent::RecordingFinished {
+            job_id,
+            final_state,
+            error,
+        } => {
             let Some(pj) = snapshot(job_id, *final_state, error.clone()) else {
                 return;
             };

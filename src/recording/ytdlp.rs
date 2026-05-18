@@ -61,10 +61,7 @@ impl YtDlpProcess {
 
         let child = cmd.spawn()?;
 
-        Ok(Self {
-            child,
-            output_path,
-        })
+        Ok(Self { child, output_path })
     }
 
     /// Gracefully stop by sending SIGINT, then wait
@@ -75,11 +72,8 @@ impl YtDlpProcess {
                 unsafe {
                     libc::kill(pid as i32, libc::SIGINT);
                 }
-                match tokio::time::timeout(
-                    std::time::Duration::from_secs(15),
-                    self.child.wait(),
-                )
-                .await
+                match tokio::time::timeout(std::time::Duration::from_secs(15), self.child.wait())
+                    .await
                 {
                     Ok(Ok(_)) => return Ok(()),
                     Ok(Err(e)) => {

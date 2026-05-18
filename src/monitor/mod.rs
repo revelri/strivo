@@ -60,8 +60,7 @@ impl ChannelMonitor {
     }
 
     pub async fn run(mut self) {
-        let poll_interval =
-            std::time::Duration::from_secs(self.config.poll_interval_secs.max(15));
+        let poll_interval = std::time::Duration::from_secs(self.config.poll_interval_secs.max(15));
 
         // Wait for first platform auth or timeout before initial poll.
         // If the timeout fires before any platform has authenticated we
@@ -94,7 +93,9 @@ impl ChannelMonitor {
         // Immediate first poll
         if let Err(e) = self.poll_all().await {
             tracing::error!("Initial poll error: {e}");
-            let _ = self.event_tx.send(AppEvent::error(format!("Poll error: {e}")));
+            let _ = self
+                .event_tx
+                .send(AppEvent::error(format!("Poll error: {e}")));
         }
 
         let mut interval = tokio::time::interval(poll_interval);
@@ -177,8 +178,7 @@ impl ChannelMonitor {
                                 // Check auto-record from the channel data directly
                                 // (reflects fresh config state from TUI saves)
                                 ch.auto_record = self.config.auto_record_channels.iter().any(|a| {
-                                    a.channel_id == ch.id
-                                        && a.platform == kind.to_string()
+                                    a.channel_id == ch.id && a.platform == kind.to_string()
                                 });
                             }
                         }
@@ -194,7 +194,9 @@ impl ChannelMonitor {
                             let _ = self.event_tx.send(AppEvent::channel_went_live(ch.clone()));
 
                             // Auto-record trigger: use ch.auto_record from fresh data
-                            if ch.auto_record && !self.auto_recorded.get(&ch.id).copied().unwrap_or(false) {
+                            if ch.auto_record
+                                && !self.auto_recorded.get(&ch.id).copied().unwrap_or(false)
+                            {
                                 self.auto_recorded.insert(ch.id.clone(), true);
                                 let cookies_path = self.get_cookies_path(ch.platform);
                                 let _ = self.recording_tx.send(RecordingCommand::Start {
@@ -209,7 +211,9 @@ impl ChannelMonitor {
                                 });
                             }
                         } else if !ch.is_live && was_live {
-                            let _ = self.event_tx.send(AppEvent::channel_went_offline(ch.clone()));
+                            let _ = self
+                                .event_tx
+                                .send(AppEvent::channel_went_offline(ch.clone()));
                             self.auto_recorded.remove(&ch.id);
                         }
                         self.prev_live.insert(ch.id.clone(), ch.is_live);
@@ -229,7 +233,11 @@ impl ChannelMonitor {
                 .to_string()
                 .cmp(&b.platform.to_string())
                 .then(b.is_live.cmp(&a.is_live))
-                .then(a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()))
+                .then(
+                    a.display_name
+                        .to_lowercase()
+                        .cmp(&b.display_name.to_lowercase()),
+                )
         });
 
         let _ = self.event_tx.send(AppEvent::channels_updated(all_channels));
@@ -239,12 +247,10 @@ impl ChannelMonitor {
 
     fn get_cookies_path(&self, platform: PlatformKind) -> Option<PathBuf> {
         // Reload config to get fresh auto_record and cookies settings
-        let cfg = AppConfig::load(self.config.config_path.as_deref()).unwrap_or(self.config.clone());
+        let cfg =
+            AppConfig::load(self.config.config_path.as_deref()).unwrap_or(self.config.clone());
         match platform {
-            PlatformKind::YouTube => cfg
-                .youtube
-                .as_ref()
-                .and_then(|y| y.cookies_path.clone()),
+            PlatformKind::YouTube => cfg.youtube.as_ref().and_then(|y| y.cookies_path.clone()),
             PlatformKind::Twitch | PlatformKind::Patreon => None,
         }
     }

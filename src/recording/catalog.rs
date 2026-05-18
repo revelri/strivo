@@ -45,10 +45,23 @@ pub type ProgressTx = mpsc::UnboundedSender<CatalogProgress>;
 #[derive(Debug, Clone)]
 pub enum CatalogProgress {
     Discovered(usize),
-    Skipped { vod_id: String, title: String },
-    Starting { vod_id: String, title: String, episode_dir: PathBuf },
-    Finished { vod_id: String, episode_dir: PathBuf },
-    Failed { vod_id: String, error: String },
+    Skipped {
+        vod_id: String,
+        title: String,
+    },
+    Starting {
+        vod_id: String,
+        title: String,
+        episode_dir: PathBuf,
+    },
+    Finished {
+        vod_id: String,
+        episode_dir: PathBuf,
+    },
+    Failed {
+        vod_id: String,
+        error: String,
+    },
 }
 
 /// Run a catalog pull serially: download one episode at a time, recording each
@@ -64,7 +77,9 @@ pub async fn run_pull(
         discovered: vods.len(),
         ..Default::default()
     };
-    let _ = progress.as_ref().map(|p| p.send(CatalogProgress::Discovered(report.discovered)));
+    let _ = progress
+        .as_ref()
+        .map(|p| p.send(CatalogProgress::Discovered(report.discovered)));
 
     for vod in vods {
         // Always record discovery — lets future re-runs see the title even if
@@ -74,13 +89,18 @@ pub async fn run_pull(
         }
 
         if !opts.force {
-            match db.is_vod_recorded(vod.platform, &vod.channel_id, &vod.id).await {
+            match db
+                .is_vod_recorded(vod.platform, &vod.channel_id, &vod.id)
+                .await
+            {
                 Ok(true) => {
                     report.skipped_existing += 1;
-                    let _ = progress.as_ref().map(|p| p.send(CatalogProgress::Skipped {
-                        vod_id: vod.id.clone(),
-                        title: vod.title.clone(),
-                    }));
+                    let _ = progress.as_ref().map(|p| {
+                        p.send(CatalogProgress::Skipped {
+                            vod_id: vod.id.clone(),
+                            title: vod.title.clone(),
+                        })
+                    });
                     continue;
                 }
                 Ok(false) => {}
@@ -89,14 +109,22 @@ pub async fn run_pull(
         }
 
         let date = vod.published_at.unwrap_or_else(Utc::now);
-        let ep_dir = episode_dir(&opts.root, vod.platform, &opts.channel_name, date, &vod.title);
+        let ep_dir = episode_dir(
+            &opts.root,
+            vod.platform,
+            &opts.channel_name,
+            date,
+            &vod.title,
+        );
         let video_path = ep_dir.join(video_filename(vod.platform, &opts.format));
 
-        let _ = progress.as_ref().map(|p| p.send(CatalogProgress::Starting {
-            vod_id: vod.id.clone(),
-            title: vod.title.clone(),
-            episode_dir: ep_dir.clone(),
-        }));
+        let _ = progress.as_ref().map(|p| {
+            p.send(CatalogProgress::Starting {
+                vod_id: vod.id.clone(),
+                title: vod.title.clone(),
+                episode_dir: ep_dir.clone(),
+            })
+        });
 
         match download_one(&vod, &video_path, opts).await {
             Ok(bytes) => {
@@ -124,22 +152,29 @@ pub async fn run_pull(
                     // Marker the Crunchr plugin can grep for in lieu of tandem config.
                     let _ = std::fs::write(ep_dir.join(".crunchr-auto"), b"");
                 }
-                if let Err(e) = db.mark_vod_recorded(vod.platform, &vod.channel_id, &vod.id, &ep_dir).await {
+                if let Err(e) = db
+                    .mark_vod_recorded(vod.platform, &vod.channel_id, &vod.id, &ep_dir)
+                    .await
+                {
                     tracing::warn!("catalog: mark_vod_recorded failed: {e}");
                 }
                 report.downloaded += 1;
-                let _ = progress.as_ref().map(|p| p.send(CatalogProgress::Finished {
-                    vod_id: vod.id.clone(),
-                    episode_dir: ep_dir.clone(),
-                }));
+                let _ = progress.as_ref().map(|p| {
+                    p.send(CatalogProgress::Finished {
+                        vod_id: vod.id.clone(),
+                        episode_dir: ep_dir.clone(),
+                    })
+                });
             }
             Err(e) => {
                 let msg = format!("{e:#}");
                 report.failed.push((vod.id.clone(), msg.clone()));
-                let _ = progress.as_ref().map(|p| p.send(CatalogProgress::Failed {
-                    vod_id: vod.id.clone(),
-                    error: msg,
-                }));
+                let _ = progress.as_ref().map(|p| {
+                    p.send(CatalogProgress::Failed {
+                        vod_id: vod.id.clone(),
+                        error: msg,
+                    })
+                });
             }
         }
     }

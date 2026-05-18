@@ -6,8 +6,8 @@
 
 mod cli;
 
-use strivo_core::{app, config, daemon, ipc, platform, plugin, recording, tui};
 use strivo_core::check_external_tools;
+use strivo_core::{app, config, daemon, ipc, platform, plugin, recording, tui};
 
 use std::sync::Arc;
 
@@ -17,11 +17,11 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
-use strivo_core::app::AppEvent;
 use crate::cli::{Command, ConfigAction, LogAction, ThemeAction};
-use strivo_core::tui::theme::Theme;
+use strivo_core::app::AppEvent;
 use strivo_core::monitor::ChannelMonitor;
 use strivo_core::platform::Platform;
+use strivo_core::tui::theme::Theme;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -77,8 +77,24 @@ async fn handle_command(cmd: &Command, config_path: Option<&std::path::Path>) ->
         Command::Thumbnail { file, seek } => handle_thumbnail(file, *seek).await,
         Command::Completions { shell } => handle_completions(*shell),
         Command::Man => handle_man(),
-        Command::Pull { target, format, since, max, force, no_transcribe } => {
-            handle_pull(target, format.as_deref(), since.as_deref(), *max, *force, *no_transcribe, config_path).await
+        Command::Pull {
+            target,
+            format,
+            since,
+            max,
+            force,
+            no_transcribe,
+        } => {
+            handle_pull(
+                target,
+                format.as_deref(),
+                since.as_deref(),
+                *max,
+                *force,
+                *no_transcribe,
+                config_path,
+            )
+            .await
         }
     }
 }
@@ -88,7 +104,9 @@ fn parse_since(s: &str) -> Result<chrono::DateTime<chrono::Utc>> {
         return Ok(dt.with_timezone(&chrono::Utc));
     }
     let (num_part, unit) = s.split_at(s.len().saturating_sub(1));
-    let n: i64 = num_part.parse().with_context(|| format!("bad --since duration: {s}"))?;
+    let n: i64 = num_part
+        .parse()
+        .with_context(|| format!("bad --since duration: {s}"))?;
     let dur = match unit {
         "h" => chrono::Duration::hours(n),
         "d" => chrono::Duration::days(n),
@@ -152,23 +170,39 @@ async fn handle_pull(
     println!("Enumerating {platform} catalog for {channel_id}…");
     let vods: Vec<VodEntry> = match platform {
         PlatformKind::YouTube => {
-            let yt_cfg = config.youtube.clone().context("youtube section missing in config")?;
+            let yt_cfg = config
+                .youtube
+                .clone()
+                .context("youtube section missing in config")?;
             let yt = strivo_core::platform::youtube::YouTubePlatform::new(
-                yt_cfg.client_id, yt_cfg.client_secret, yt_cfg.cookies_path.clone());
+                yt_cfg.client_id,
+                yt_cfg.client_secret,
+                yt_cfg.cookies_path.clone(),
+            );
             yt.load_stored_tokens().await.context("youtube auth")?;
             yt.fetch_channel_vods(channel_id, since, max).await?
         }
         PlatformKind::Twitch => {
-            let tw_cfg = config.twitch.clone().context("twitch section missing in config")?;
+            let tw_cfg = config
+                .twitch
+                .clone()
+                .context("twitch section missing in config")?;
             let tw = strivo_core::platform::twitch::TwitchPlatform::new(
-                tw_cfg.client_id, tw_cfg.client_secret);
+                tw_cfg.client_id,
+                tw_cfg.client_secret,
+            );
             tw.load_stored_tokens().await.context("twitch auth")?;
             tw.fetch_channel_vods(channel_id, since, max).await?
         }
         PlatformKind::Patreon => {
-            let pt_cfg = config.patreon.clone().context("patreon section missing in config")?;
+            let pt_cfg = config
+                .patreon
+                .clone()
+                .context("patreon section missing in config")?;
             let pt = strivo_core::platform::patreon::PatreonClient::new(
-                pt_cfg.client_id, pt_cfg.client_secret);
+                pt_cfg.client_id,
+                pt_cfg.client_secret,
+            );
             pt.load_stored_tokens().await.context("patreon auth")?;
             pt.fetch_channel_vods(channel_id, since, max).await?
         }
@@ -192,7 +226,10 @@ async fn handle_pull(
     let report = catalog::run_pull(&db, vods, &opts, None).await?;
     println!(
         "Done. discovered={} skipped={} downloaded={} failed={}",
-        report.discovered, report.skipped_existing, report.downloaded, report.failed.len()
+        report.discovered,
+        report.skipped_existing,
+        report.downloaded,
+        report.failed.len()
     );
     for (id, err) in &report.failed {
         eprintln!("  failed: {id} — {err}");
@@ -222,12 +259,18 @@ fn handle_theme_command(action: &ThemeAction) -> Result<()> {
                 .map(|c| c.theme.name().to_string())
                 .unwrap_or_else(|_| "neon".to_string());
             let names = theme::available_themes();
-            let builtins: std::collections::HashSet<String> =
-                theme::builtin_themes().into_iter().map(|t| t.name).collect();
+            let builtins: std::collections::HashSet<String> = theme::builtin_themes()
+                .into_iter()
+                .map(|t| t.name)
+                .collect();
             println!("Themes ({} total)", names.len());
             for n in &names {
                 let marker = if *n == current { "*" } else { " " };
-                let source = if builtins.contains(n) { "built-in" } else { "user" };
+                let source = if builtins.contains(n) {
+                    "built-in"
+                } else {
+                    "user"
+                };
                 println!("  {marker} {n}  [{source}]");
             }
             Ok(())
@@ -235,7 +278,10 @@ fn handle_theme_command(action: &ThemeAction) -> Result<()> {
         ThemeAction::Import { path, name } => {
             let contents = std::fs::read_to_string(path)
                 .with_context(|| format!("read {}", path.display()))?;
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("imported");
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("imported");
             let theme_name = name.clone().unwrap_or_else(|| stem.to_string());
             let theme = theme::kitty_import::parse(&theme_name, &contents)
                 .map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))?;
@@ -244,8 +290,7 @@ fn handle_theme_command(action: &ThemeAction) -> Result<()> {
             std::fs::create_dir_all(&dest_dir)
                 .with_context(|| format!("create {}", dest_dir.display()))?;
             let dest = dest_dir.join(format!("{theme_name}.toml"));
-            let serialized = toml::to_string_pretty(&theme)
-                .context("serialize imported theme")?;
+            let serialized = toml::to_string_pretty(&theme).context("serialize imported theme")?;
             std::fs::write(&dest, serialized)
                 .with_context(|| format!("write {}", dest.display()))?;
             println!("Imported '{theme_name}' → {}", dest.display());
@@ -255,16 +300,11 @@ fn handle_theme_command(action: &ThemeAction) -> Result<()> {
     }
 }
 
-fn handle_import(
-    source: &cli::ImportSource,
-    config_path: Option<&std::path::Path>,
-) -> Result<()> {
+fn handle_import(source: &cli::ImportSource, config_path: Option<&std::path::Path>) -> Result<()> {
     use strivo_core::config::import::{parse_obs_export, parse_streamlink_lines, Candidate};
 
     let (candidates, apply, source_path) = match source {
-        cli::ImportSource::Obs { file, apply } => {
-            (parse_obs_export(file)?, *apply, file.clone())
-        }
+        cli::ImportSource::Obs { file, apply } => (parse_obs_export(file)?, *apply, file.clone()),
         cli::ImportSource::Streamlink { file, apply } => {
             (parse_streamlink_lines(file)?, *apply, file.clone())
         }
@@ -290,14 +330,16 @@ fn handle_import(
     let mut added = 0usize;
     let mut skipped = 0usize;
     for c in candidates {
-        let exists = cfg.auto_record_channels.iter().any(|a| {
-            a.platform == c.platform && a.channel_id == c.channel_id
-        });
+        let exists = cfg
+            .auto_record_channels
+            .iter()
+            .any(|a| a.platform == c.platform && a.channel_id == c.channel_id);
         if exists {
             skipped += 1;
             continue;
         }
-        cfg.auto_record_channels.push(Candidate::into_auto_record(c));
+        cfg.auto_record_channels
+            .push(Candidate::into_auto_record(c));
         added += 1;
     }
     cfg.save(config_path).context("save config")?;
@@ -329,7 +371,9 @@ async fn handle_thumbnail(file: &std::path::Path, seek: f64) -> Result<()> {
         println!("cached: {}", cached.display());
         return Ok(());
     }
-    let path = thumbnail::extract(file, seek).await.context("extract thumbnail")?;
+    let path = thumbnail::extract(file, seek)
+        .await
+        .context("extract thumbnail")?;
     println!("wrote: {}", path.display());
     Ok(())
 }
@@ -587,7 +631,10 @@ fn dirs_home() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("~"))
 }
 
-fn handle_config_command(action: &ConfigAction, config_path: Option<&std::path::Path>) -> Result<()> {
+fn handle_config_command(
+    action: &ConfigAction,
+    config_path: Option<&std::path::Path>,
+) -> Result<()> {
     match action {
         ConfigAction::Path => {
             let path = config_path
@@ -600,7 +647,10 @@ fn handle_config_command(action: &ConfigAction, config_path: Option<&std::path::
             println!("recording_dir = {:?}", cfg.recording_dir.display());
             println!("poll_interval_secs = {}", cfg.poll_interval_secs);
             println!("recording.transcode = {}", cfg.recording.transcode);
-            println!("recording.filename_template = {:?}", cfg.recording.filename_template);
+            println!(
+                "recording.filename_template = {:?}",
+                cfg.recording.filename_template
+            );
             println!("theme = {:?}", cfg.theme.name());
             if let Some(ref tw) = cfg.twitch {
                 println!("twitch.client_id = {:?}", tw.client_id);
@@ -628,14 +678,20 @@ fn handle_config_command(action: &ConfigAction, config_path: Option<&std::path::
                 println!();
                 println!("auto_record_channels:");
                 for entry in &cfg.auto_record_channels {
-                    println!("  {} / {} ({})", entry.platform, entry.channel_name, entry.channel_id);
+                    println!(
+                        "  {} / {} ({})",
+                        entry.platform, entry.channel_name, entry.channel_id
+                    );
                 }
             }
             if !cfg.schedule.is_empty() {
                 println!();
                 println!("schedule:");
                 for entry in &cfg.schedule {
-                    println!("  {} | cron: {} | duration: {}", entry.channel, entry.cron, entry.duration);
+                    println!(
+                        "  {} | cron: {} | duration: {}",
+                        entry.channel, entry.cron, entry.duration
+                    );
                 }
             }
         }
@@ -968,7 +1024,11 @@ fn handle_search(query: &str, config_path: Option<&std::path::Path>) -> Result<(
                 } else {
                     // Try Levenshtein against individual words
                     let words: Vec<&str> = haystack.split_whitespace().collect();
-                    let best = words.iter().map(|w| levenshtein(part, w)).min().unwrap_or(usize::MAX);
+                    let best = words
+                        .iter()
+                        .map(|w| levenshtein(part, w))
+                        .min()
+                        .unwrap_or(usize::MAX);
                     let threshold = (part.len() / 3).max(1); // allow ~33% edits
                     if best <= threshold {
                         total_score += best;
@@ -1001,10 +1061,7 @@ fn handle_search(query: &str, config_path: Option<&std::path::Path>) -> Result<(
             .with_timezone(&chrono::Local)
             .format("%Y-%m-%d")
             .to_string();
-        let title = rec
-            .stream_title
-            .as_deref()
-            .unwrap_or("(untitled)");
+        let title = rec.stream_title.as_deref().unwrap_or("(untitled)");
         let title_display: String = title.chars().take(40).collect();
         println!(
             "{:<20} {:<10} {:<12} {:<10} {}",
@@ -1029,7 +1086,6 @@ fn truncate_str(s: &str, max: usize) -> String {
         s.to_string()
     }
 }
-
 
 /// Do one connect+hello+snapshot handshake. Returns `(reader, writer, snapshot)`.
 async fn daemon_connect_once(
@@ -1252,9 +1308,7 @@ async fn run_client(args: cli::Args) -> Result<()> {
     let mut registry = plugin::registry::PluginRegistry::new();
     registry.register(Box::new(strivo_plugins::crunchr::CrunchrPlugin::new()));
     registry.register(Box::new(strivo_plugins::archiver::ArchiverPlugin::new()));
-    let manifests = strivo_core::plugin::scan_user_plugins(
-        &strivo_core::plugin::user_plugin_dir(),
-    );
+    let manifests = strivo_core::plugin::scan_user_plugins(&strivo_core::plugin::user_plugin_dir());
     let n = registry.load_dylibs_from_manifests(&manifests);
     if n > 0 {
         tracing::info!("loaded {n} dynamic plugin(s)");
@@ -1280,8 +1334,8 @@ async fn run_tui(args: cli::Args) -> Result<()> {
 
     // File-tail layer + in-memory bridge to AppState.event_ring.
     use tracing_subscriber::prelude::*;
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(&args.log_level));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&args.log_level));
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_writer(log_file)
         .with_ansi(false);
@@ -1310,8 +1364,10 @@ async fn run_tui(args: cli::Args) -> Result<()> {
     let mut platforms: Vec<Arc<RwLock<dyn Platform>>> = Vec::new();
 
     if let Some(ref twitch_config) = config.twitch {
-        let mut twitch =
-            platform::twitch::TwitchPlatform::new(twitch_config.client_id.clone(), twitch_config.client_secret.clone());
+        let mut twitch = platform::twitch::TwitchPlatform::new(
+            twitch_config.client_id.clone(),
+            twitch_config.client_secret.clone(),
+        );
         twitch.set_event_tx(event_tx.clone());
         let twitch = Arc::new(RwLock::new(twitch));
         platforms.push(twitch.clone() as Arc<RwLock<dyn Platform>>);
@@ -1323,7 +1379,9 @@ async fn run_tui(args: cli::Args) -> Result<()> {
             match platform.authenticate().await {
                 Ok(()) => {
                     tracing::info!("Twitch authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(strivo_core::platform::PlatformKind::Twitch));
+                    let _ = tx.send(AppEvent::platform_authenticated(
+                        strivo_core::platform::PlatformKind::Twitch,
+                    ));
                     notify.notify_one();
                 }
                 Err(e) => {
@@ -1351,7 +1409,9 @@ async fn run_tui(args: cli::Args) -> Result<()> {
             match platform.authenticate().await {
                 Ok(()) => {
                     tracing::info!("YouTube authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(strivo_core::platform::PlatformKind::YouTube));
+                    let _ = tx.send(AppEvent::platform_authenticated(
+                        strivo_core::platform::PlatformKind::YouTube,
+                    ));
                     notify.notify_one();
                 }
                 Err(e) => {
@@ -1378,7 +1438,9 @@ async fn run_tui(args: cli::Args) -> Result<()> {
             match patreon_client.authorize().await {
                 Ok(()) => {
                     tracing::info!("Patreon authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(strivo_core::platform::PlatformKind::Patreon));
+                    let _ = tx.send(AppEvent::platform_authenticated(
+                        strivo_core::platform::PlatformKind::Patreon,
+                    ));
 
                     let monitor = strivo_core::monitor::patreon::PatreonMonitor::new(
                         patreon_client,

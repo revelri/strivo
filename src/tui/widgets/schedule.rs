@@ -2,11 +2,11 @@ use std::str::FromStr;
 
 use cron::Schedule;
 use ratatui::{
-    Frame,
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, ListState},
+    Frame,
 };
 
 use crate::app::AppState;
@@ -75,7 +75,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
             Span::raw("  "),
             Span::styled(
                 format!("{:<24}", entry.channel),
-                Style::new().fg(Theme::primary()).add_modifier(Modifier::BOLD),
+                Style::new()
+                    .fg(Theme::primary())
+                    .add_modifier(Modifier::BOLD),
             ),
             Span::raw(" "),
             Span::styled(

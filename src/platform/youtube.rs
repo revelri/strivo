@@ -1,8 +1,8 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
-use tokio::sync::RwLock;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 use crate::app::AppEvent;
 use crate::config::credentials;
@@ -214,8 +214,8 @@ impl YouTubePlatform {
         );
 
         let interval = std::time::Duration::from_secs(resp.interval.max(5));
-        let deadline = tokio::time::Instant::now()
-            + std::time::Duration::from_secs(resp.expires_in);
+        let deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_secs(resp.expires_in);
 
         loop {
             tokio::time::sleep(interval).await;
@@ -323,9 +323,7 @@ impl YouTubePlatform {
 
     /// Check RSS feed for recent videos from a channel (free, no quota)
     async fn check_rss_for_live(&self, channel_id: &str) -> Result<Vec<String>> {
-        let url = format!(
-            "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-        );
+        let url = format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}");
         let resp = self.client.get(&url).send().await?;
         let body = resp.text().await?;
 
@@ -333,7 +331,11 @@ impl YouTubePlatform {
         let mut video_ids = Vec::new();
         for segment in body.split("<yt:videoId>") {
             if let Some(id) = segment.split("</yt:videoId>").next() {
-                if id.len() == 11 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+                if id.len() == 11
+                    && id
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+                {
                     video_ids.push(id.to_string());
                 }
             }
@@ -351,9 +353,7 @@ impl YouTubePlatform {
         }
 
         let ids = video_ids.join(",");
-        let url = format!(
-            "{YOUTUBE_API_URL}/videos?part=snippet,liveStreamingDetails&id={ids}"
-        );
+        let url = format!("{YOUTUBE_API_URL}/videos?part=snippet,liveStreamingDetails&id={ids}");
         let resp: VideoListResponse = self.api_get(&url).await?;
 
         let mut live_channels = Vec::new();
@@ -440,7 +440,11 @@ impl YouTubePlatform {
             }
 
             let resp: serde_json::Value = self.api_get(&url).await?;
-            let items = resp.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let items = resp
+                .get("items")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
 
             for item in items {
                 let snippet = item.get("snippet");
@@ -464,7 +468,11 @@ impl YouTubePlatform {
                 let published_at = content_details
                     .and_then(|c| c.get("videoPublishedAt"))
                     .and_then(|v| v.as_str())
-                    .or_else(|| snippet.and_then(|s| s.get("publishedAt")).and_then(|v| v.as_str()))
+                    .or_else(|| {
+                        snippet
+                            .and_then(|s| s.get("publishedAt"))
+                            .and_then(|v| v.as_str())
+                    })
                     .and_then(|s| {
                         chrono::DateTime::parse_from_rfc3339(s)
                             .ok()
@@ -547,9 +555,8 @@ impl Platform for YouTubePlatform {
         let mut page_token: Option<String> = None;
 
         loop {
-            let mut url = format!(
-                "{YOUTUBE_API_URL}/subscriptions?part=snippet&mine=true&maxResults=50"
-            );
+            let mut url =
+                format!("{YOUTUBE_API_URL}/subscriptions?part=snippet&mine=true&maxResults=50");
             if let Some(ref token) = page_token {
                 url.push_str(&format!("&pageToken={token}"));
             }
@@ -605,7 +612,9 @@ impl Platform for YouTubePlatform {
                     match self.check_videos_live(&video_ids).await {
                         Ok(mut live) => all_live.append(&mut live),
                         Err(e) => {
-                            tracing::warn!("Failed to check video live status for {channel_id}: {e}");
+                            tracing::warn!(
+                                "Failed to check video live status for {channel_id}: {e}"
+                            );
                         }
                     }
                 }
