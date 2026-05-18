@@ -14,7 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 strivo-core = { path = "../.." }
-strivo-plugins = { path = "../../strivo-plugins" }
+strivo-plugins = { git = "https://github.com/Chorosyne/strivo-plugins", branch = "main" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"

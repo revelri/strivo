@@ -2,6 +2,11 @@
 members = [".", "crates/strivo-bin"]
 resolver = "2"
 
+# strivo-plugins git-deps strivo-core; route that back to the workspace
+# copy so in-tree builds use one strivo-core (no trait-identity drift).
+[patch."https://github.com/Chorosyne/strivo"]
+strivo-core = { path = "." }
+
 [package]
 name = "strivo-core"
 version = "0.3.0"
