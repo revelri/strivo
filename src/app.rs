@@ -1930,7 +1930,10 @@ impl AppState {
                 self.toggle_auto_record_on_selected();
                 None
             }
-            A::StartRecording => self.start_recording_on_selected(false),
+            // Default action records from the start of the stream:
+            // YouTube via yt-dlp --live-from-start, Twitch via ffmpeg
+            // -live_start_index 0 (~5min DVR window).
+            A::StartRecording => self.start_recording_on_selected(true),
             A::StartRecordingFromStart => self.start_recording_on_selected(true),
             A::WatchStream => self.watch_selected_stream(),
             A::ToggleTranscode => {
@@ -2730,10 +2733,6 @@ impl AppState {
         }
         if self.is_channel_recording(&ch.id) {
             self.status_message = format!("Already recording {}", ch.display_name);
-            return None;
-        }
-        if from_start && ch.platform != PlatformKind::YouTube {
-            self.status_message = "Record from start is only supported for YouTube".to_string();
             return None;
         }
         let ch = ch.clone();

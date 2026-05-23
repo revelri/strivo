@@ -206,7 +206,7 @@ impl ChannelMonitor {
                                     transcode: self.config.recording.transcode,
                                     cookies_path,
                                     stream_title: ch.stream_title.clone(),
-                                    from_start: false,
+                                    from_start: true,
                                     job_id: None,
                                 });
                             }
