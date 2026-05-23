@@ -15,6 +15,37 @@ use crate::config::AppConfig;
 /// Unique identifier for a plugin-contributed pane.
 pub type PaneId = &'static str;
 
+/// Item types the actions popup knows about. Plugins use this to
+/// scope verbs to "act on a selected recording" / "act on a transcript
+/// row" etc. (D5+X5.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemKind {
+    Recording,
+    Transcript,
+    Clip,
+}
+
+/// Where a plugin command applies. (D5+X5.)
+///
+/// - `Global` is the historical default — a global keybinding the
+///   plugin owns. Kept for back-compat with existing Crunchr / Archiver
+///   commands.
+/// - `Pane` scopes the command to a specific plugin pane.
+/// - `Item` registers the command as a *verb* in the actions popup,
+///   so pressing `a` on the focused item type surfaces it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PluginCommandScope {
+    Global,
+    Pane(PaneId),
+    Item(ItemKind),
+}
+
+impl Default for PluginCommandScope {
+    fn default() -> Self {
+        Self::Global
+    }
+}
+
 /// A command that a plugin registers (for global keybinding + help overlay).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -23,6 +54,50 @@ pub struct PluginCommand {
     pub description: &'static str,
     pub key: KeyCode,
     pub modifiers: KeyModifiers,
+    /// Where the command applies. Defaults to `Global` for source
+    /// compatibility — existing PluginCommand struct literals don't
+    /// need to add a field, they pick up the default via
+    /// `..Default::default()` or via the `pub const fn new_global`
+    /// constructor.
+    #[doc(hidden)]
+    pub scope: PluginCommandScope,
+}
+
+impl PluginCommand {
+    /// Historical constructor that defaults the scope to `Global`.
+    /// Plugins migrating to item-scoped verbs use [`Self::item`].
+    pub const fn new(
+        name: &'static str,
+        description: &'static str,
+        key: KeyCode,
+        modifiers: KeyModifiers,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            key,
+            modifiers,
+            scope: PluginCommandScope::Global,
+        }
+    }
+
+    /// Register a verb against an item type. The key/modifiers are
+    /// only consulted when the host has a "press X in the actions
+    /// popup to invoke this verb" shortcut layer; for the MVP, the
+    /// popup just displays the verb by name.
+    pub const fn item(
+        name: &'static str,
+        description: &'static str,
+        kind: ItemKind,
+    ) -> Self {
+        Self {
+            name,
+            description,
+            key: KeyCode::Null,
+            modifiers: KeyModifiers::empty(),
+            scope: PluginCommandScope::Item(kind),
+        }
+    }
 }
 
 /// Actions a plugin can request the host to perform.
