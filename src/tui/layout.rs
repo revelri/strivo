@@ -6,8 +6,8 @@ use ratatui::{
 use crate::app::{ActivePane, AppState};
 use crate::plugin::registry::PluginRegistry;
 use crate::tui::widgets::{
-    channel_detail, dialog, log_viewer, platform_debug, properties, recording_list, schedule,
-    settings, sidebar, status_bar, theme_picker, wizard,
+    channel_detail, dialog, log_viewer, platform_debug, properties, recording_list,
+    recording_preview, schedule, settings, sidebar, status_bar, theme_picker, wizard,
 };
 
 pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) {
@@ -23,7 +23,19 @@ pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) 
     // Sidebar (always visible)
     sidebar::render(frame, sidebar_area, app);
 
-    // Main panel depends on active pane
+    // Main panel depends on active pane.
+    //
+    // Yazi-style Miller-column when RecordingList is active and the
+    // terminal is wide enough: list on the left, docked preview on the
+    // right. Below 120 cells the preview folds away so the list keeps
+    // its readable filename column. The preview reads `selected_recording_id`
+    // so it tracks the cursor automatically.
+    let renders_recording_list = matches!(
+        app.active_pane,
+        ActivePane::RecordingList | ActivePane::Sidebar | ActivePane::StatusBar
+    );
+    let three_col = renders_recording_list && detail_area.width >= 120;
+
     match app.active_pane {
         ActivePane::Detail => channel_detail::render(frame, detail_area, app),
         ActivePane::Settings => settings::render(frame, detail_area, app),
@@ -39,7 +51,19 @@ pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) 
         }
         ActivePane::Schedule => schedule::render(frame, detail_area, app),
         // Default: show recording list (Sidebar, RecordingList, or anything else)
-        _ => recording_list::render(frame, detail_area, app),
+        _ => {
+            if three_col {
+                let [list_area, preview_area] = Layout::horizontal([
+                    Constraint::Fill(1),
+                    Constraint::Length(46),
+                ])
+                .areas(detail_area);
+                recording_list::render(frame, list_area, app);
+                recording_preview::render(frame, preview_area, app);
+            } else {
+                recording_list::render(frame, detail_area, app);
+            }
+        }
     }
 
     // Status bar
