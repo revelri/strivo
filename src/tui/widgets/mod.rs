@@ -5,6 +5,7 @@ pub mod event_log;
 pub mod highlight;
 pub mod log_viewer;
 pub mod platform_debug;
+pub mod actions_popup;
 pub mod palette;
 pub mod pipeline_dag;
 pub mod plugin_browser;

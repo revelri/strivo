@@ -136,6 +136,15 @@ pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) 
         );
     }
 
+    if app.actions_popup.is_some() {
+        crate::tui::widgets::actions_popup::render(
+            frame,
+            frame.area(),
+            app,
+            app.overlay_enter(crate::app::OverlayKey::ActionsPopup, 0.18),
+        );
+    }
+
     if app.text_input.is_some() {
         crate::tui::widgets::text_input::render(
             frame,

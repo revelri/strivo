@@ -569,6 +569,10 @@ pub struct AppState {
     pub palette: Option<PaletteState>,
     /// When the palette opened — drives the enter ramp.
     pub palette_opened_at: Option<std::time::Instant>,
+    /// Actions popup state (D5). `Some` iff the overlay is visible.
+    pub actions_popup: Option<ActionsPopupState>,
+    /// When the actions popup opened.
+    pub actions_popup_opened_at: Option<std::time::Instant>,
     /// Replayable session command log — every successfully-dispatched
     /// [`crate::tui::keymap::KeyAction`] is appended here so `/save-preset`
     /// can snapshot the user's recent verbs (X3, plan §6). Capped at 256
@@ -608,6 +612,15 @@ pub enum OverlayKey {
     PluginBrowser,
     /// Command palette (D4). Same ramp shape as the other overlays.
     Palette,
+    /// Actions popup (D5).
+    ActionsPopup,
+}
+
+/// Actions-popup overlay state. (D5.)
+#[derive(Debug, Clone)]
+pub struct ActionsPopupState {
+    pub entries: Vec<crate::tui::widgets::actions_popup::ActionEntry>,
+    pub selected: usize,
 }
 
 /// Command-palette overlay state. The filter list is rebuilt on each
@@ -815,6 +828,8 @@ impl AppState {
             palette: None,
             palette_opened_at: None,
             command_log: Vec::new(),
+            actions_popup: None,
+            actions_popup_opened_at: None,
             event_log_scroll: 0,
             last_hotkey: None,
             last_hotkey_at: None,
@@ -838,6 +853,7 @@ impl AppState {
             OverlayKey::TextInput => self.text_input_opened_at,
             OverlayKey::PluginBrowser => self.plugin_browser_opened_at,
             OverlayKey::Palette => self.palette_opened_at,
+            OverlayKey::ActionsPopup => self.actions_popup_opened_at,
         };
         let Some(at) = at else {
             return 1.0;
@@ -876,6 +892,10 @@ impl AppState {
             self.show_plugin_browser,
         );
         sync_open(&mut self.palette_opened_at, self.palette.is_some());
+        sync_open(
+            &mut self.actions_popup_opened_at,
+            self.actions_popup.is_some(),
+        );
         // Drop terminal tasks 2 seconds after they enter the Done/Failed
         // state — long enough for the user to read the result, short
         // enough to keep the tail clean.
@@ -1924,6 +1944,20 @@ impl AppState {
                 self.palette = Some(PaletteState::default());
                 None
             }
+            A::ActionsPopupOpen => {
+                // D5 — open the verb menu scoped to the focused item.
+                // Today we only register entries for the RecordingList
+                // pane; once `PluginCommand::Scope::Item` lands the
+                // entry list grows per active context.
+                if matches!(self.active_pane, ActivePane::RecordingList) {
+                    let entries = crate::tui::widgets::actions_popup::entries_for_recording_list();
+                    self.actions_popup = Some(ActionsPopupState {
+                        entries,
+                        selected: 0,
+                    });
+                }
+                None
+            }
             A::MarkSetPrompt => {
                 self.open_text_input(
                     crate::tui::widgets::text_input::TextInputPurpose::SetMark,
@@ -2380,6 +2414,11 @@ impl AppState {
         // characters extends the query, Enter dispatches, Esc closes.
         if self.palette.is_some() {
             return self.handle_palette_key(key);
+        }
+
+        // Actions popup — similar pattern, much smaller surface.
+        if self.actions_popup.is_some() {
+            return self.handle_actions_popup_key(key);
         }
 
         // Event-log overlay swallows its scroll keys before the table.
@@ -3181,6 +3220,50 @@ impl AppState {
         // RecordingList bindings (nav, s/p/i/v/V/D, Shift+R/M, playback
         // overlay) all live in src/tui/keymap.rs.
         None
+    }
+
+    /// Actions popup key handler. (D5.)
+    fn handle_actions_popup_key(
+        &mut self,
+        key: crossterm::event::KeyEvent,
+    ) -> Option<AppAction> {
+        use crossterm::event::KeyCode;
+        let Some(popup) = self.actions_popup.as_mut() else {
+            return None;
+        };
+        match key.code {
+            KeyCode::Esc => {
+                self.actions_popup = None;
+                None
+            }
+            KeyCode::Up => {
+                popup.selected = popup.selected.saturating_sub(1);
+                None
+            }
+            KeyCode::Down => {
+                if popup.selected + 1 < popup.entries.len() {
+                    popup.selected += 1;
+                }
+                None
+            }
+            KeyCode::Home => {
+                popup.selected = 0;
+                None
+            }
+            KeyCode::End => {
+                popup.selected = popup.entries.len().saturating_sub(1);
+                None
+            }
+            KeyCode::Enter => {
+                let action = popup.entries.get(popup.selected).map(|e| e.action);
+                self.actions_popup = None;
+                if let Some(a) = action {
+                    return self.apply_key_action(a);
+                }
+                None
+            }
+            _ => None,
+        }
     }
 
     /// Palette overlay key handler. Owns up/down/Esc/Enter/Tab and

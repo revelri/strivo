@@ -147,6 +147,9 @@ pub enum KeyAction {
     /// Open the command palette (yazi audit §3). Typed names hit
     /// KeyAction::from_name and dispatch through apply_key_action.
     CommandPaletteOpen,
+    /// Open the actions popup for the focused item (D5). The handler
+    /// reads the selection set first and falls back to the cursor item.
+    ActionsPopupOpen,
     /// Channel marks (yazi audit §11). MarkSetPrompt opens the modal
     /// to bind the current row to a char; MarkJumpPrompt opens it to
     /// jump.
@@ -210,6 +213,7 @@ impl KeyAction {
             Self::MoveRecording => "move recording",
             Self::VisualModeToggle => "visual mode (multi-select)",
             Self::CommandPaletteOpen => "command palette",
+            Self::ActionsPopupOpen => "actions popup",
             Self::MarkSetPrompt => "set mark",
             Self::MarkJumpPrompt => "jump to mark",
             Self::CopyToClipboard => "copy to clipboard",
@@ -273,6 +277,7 @@ impl KeyAction {
             Self::MoveRecording => "MoveRecording",
             Self::VisualModeToggle => "VisualModeToggle",
             Self::CommandPaletteOpen => "CommandPaletteOpen",
+            Self::ActionsPopupOpen => "ActionsPopupOpen",
             Self::MarkSetPrompt => "MarkSetPrompt",
             Self::MarkJumpPrompt => "MarkJumpPrompt",
             Self::CopyToClipboard => "CopyToClipboard",
@@ -338,6 +343,7 @@ impl KeyAction {
             "MoveRecording" => Self::MoveRecording,
             "VisualModeToggle" => Self::VisualModeToggle,
             "CommandPaletteOpen" => Self::CommandPaletteOpen,
+            "ActionsPopupOpen" => Self::ActionsPopupOpen,
             "MarkSetPrompt" => Self::MarkSetPrompt,
             "MarkJumpPrompt" => Self::MarkJumpPrompt,
             "CopyToClipboard" => Self::CopyToClipboard,
@@ -892,6 +898,12 @@ fn table() -> &'static [Chord] {
             KeyPattern::plain(Char('v')),
             KeyAction::ToggleRecordingSelect,
             "toggle select",
+        ),
+        c(
+            Layer::RecordingList,
+            KeyPattern::plain(Char('a')),
+            KeyAction::ActionsPopupOpen,
+            "actions popup",
         ),
         c(
             Layer::RecordingList,
