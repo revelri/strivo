@@ -575,6 +575,24 @@ async fn handle_client(
                 cancel.cancel();
                 break;
             }
+            ClientMessage::PluginRpc {
+                plugin,
+                verb,
+                selection,
+                payload: _,
+            } => {
+                // W2 — IPC + HTTP path exist; plugin loading inside
+                // the daemon process is the phase-2 follow-up. Log
+                // verbosely so the webui's error surface stays
+                // actionable.
+                tracing::warn!(
+                    plugin = %plugin,
+                    verb = %verb,
+                    selection_count = selection.len(),
+                    "PluginRpc received in daemon mode; plugins are not yet loaded inside the daemon — \
+                     re-issue from the TUI or wait for the W2-phase-2 daemon plugin host"
+                );
+            }
         }
     }
 

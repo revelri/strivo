@@ -358,6 +358,56 @@ async fn put_auto_record(
         .into_response()
 }
 
+// ── W2: plugin RPC ───────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Default)]
+struct PluginRpcPayload {
+    #[serde(default)]
+    selection: Vec<Uuid>,
+    #[serde(default)]
+    payload: serde_json::Value,
+}
+
+/// `POST /api/v1/plugins/<plugin>/<verb>` — dispatch an actions-popup
+/// verb to a plugin. Body is `{ selection: [uuid…], payload: any }`.
+/// In daemon mode the plugin registry isn't loaded inside the daemon
+/// process yet (W2 phase 2 follow-up); today the call lands in the
+/// daemon's log so the webui can surface the "not loaded" affordance.
+async fn plugin_rpc(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path((plugin, verb)): Path<(String, String)>,
+    body: Option<Json<PluginRpcPayload>>,
+) -> impl IntoResponse {
+    if let Err(code) = check_key(&headers, &state) {
+        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    }
+    let Json(body) = body.unwrap_or(Json(PluginRpcPayload::default()));
+    let cmd = ClientMessage::PluginRpc {
+        plugin: plugin.clone(),
+        verb: verb.clone(),
+        selection: body.selection,
+        payload: body.payload,
+    };
+    match state.ipc.send_command(cmd).await {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(json!({
+                "status": "queued",
+                "plugin": plugin,
+                "verb": verb,
+                "note": "daemon plugin host is the W2-phase-2 follow-up; the dispatch is currently logged only"
+            })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/health", get(health))
@@ -375,4 +425,5 @@ pub fn router() -> Router<AppState> {
             "/api/v1/channels/{channel_key}/auto_record",
             put(put_auto_record),
         )
+        .route("/api/v1/plugins/{plugin}/{verb}", post(plugin_rpc))
 }

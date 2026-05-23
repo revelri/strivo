@@ -41,5 +41,10 @@ async-stream = "0.3"
 tokio-util = { version = "0.7", features = ["io"] }
 cron = "0.15"
 
+# W3: cookie session HMAC
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

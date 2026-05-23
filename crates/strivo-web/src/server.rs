@@ -14,6 +14,10 @@ use crate::routes;
 pub struct AppState {
     pub ipc: Arc<IpcClient>,
     pub api_key: ApiKey,
+    /// HMAC secret for browser-session cookies (W3). Loaded from
+    /// `WebConfig.session_secret`; `None` until the first /login
+    /// generates and persists one.
+    pub session_secret: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -33,9 +37,15 @@ impl Default for ServeConfig {
 
 pub async fn serve(cfg: ServeConfig) -> Result<()> {
     let ipc = Arc::new(IpcClient::connect_or_err()?);
+    // Read session_secret from config if present; W3's /login will
+    // generate one lazily on first sign-in if it's absent.
+    let session_secret = strivo_core::config::AppConfig::load(None)
+        .ok()
+        .and_then(|c| c.web.session_secret.clone());
     let state = AppState {
         ipc,
         api_key: cfg.api_key,
+        session_secret,
     };
 
     let app = Router::new()
@@ -48,6 +58,7 @@ pub async fn serve(cfg: ServeConfig) -> Result<()> {
         .merge(routes::system::router())
         .merge(routes::events::router())
         .merge(routes::api::router())
+        .merge(routes::login::router())
         .merge(routes::assets::router())
         .layer(middleware::from_fn(csrf::csrf_guard))
         .layer(TraceLayer::new_for_http())

@@ -1,5 +1,6 @@
 pub mod api;
 pub mod assets;
+pub mod login;
 pub mod channels;
 pub mod dashboard;
 pub mod events;

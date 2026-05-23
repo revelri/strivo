@@ -19,6 +19,20 @@ pub enum ClientMessage {
     PollNow,
     /// Graceful daemon shutdown
     Shutdown,
+    /// Dispatch an actions-popup verb to a plugin via the host
+    /// `PluginRegistry::dispatch_verb`. (Part 11 W2.)
+    PluginRpc {
+        plugin: String,
+        verb: String,
+        /// Recording UUIDs the verb should act on (selection set in
+        /// the TUI; cursor row in single-select).
+        #[serde(default)]
+        selection: Vec<Uuid>,
+        /// Optional JSON payload for plugin-specific args. The
+        /// plugin parses or ignores; the host doesn't inspect it.
+        #[serde(default)]
+        payload: serde_json::Value,
+    },
 }
 
 /// Messages sent from daemon to TUI client.
