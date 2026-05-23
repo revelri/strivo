@@ -410,6 +410,12 @@ pub struct AppState {
     /// Recording-lifecycle DaemonEvents auto-populate; other workers
     /// migrate to the registry in M4 follow-ups.
     pub tasks: crate::tasks::TaskRegistry,
+    /// Host-side pipeline registry (C1 phase 2). Plugins emit
+    /// `PluginAction::SubmitPipeline` / `UpdateStage` to mirror their
+    /// internal state machines here; the DAG overlay (Shift+D),
+    /// `:batches` palette scope, and retry/skip/cancel verbs all
+    /// read from this registry.
+    pub pipelines: crate::pipeline::PipelineRegistry,
 
     /// Lazy preview lock (M4.3 — yazi audit §6). RecordingList row
     /// selection spawns a probe job through this; navigating to a
@@ -573,6 +579,9 @@ pub struct AppState {
     pub actions_popup: Option<ActionsPopupState>,
     /// When the actions popup opened.
     pub actions_popup_opened_at: Option<std::time::Instant>,
+    /// DAG overlay visibility (X6 + C1 phase 2 wiring).
+    pub show_dag_overlay: bool,
+    pub dag_overlay_opened_at: Option<std::time::Instant>,
     /// Replayable session command log — every successfully-dispatched
     /// [`crate::tui::keymap::KeyAction`] is appended here so `/save-preset`
     /// can snapshot the user's recent verbs (X3, plan §6). Capped at 256
@@ -614,6 +623,8 @@ pub enum OverlayKey {
     Palette,
     /// Actions popup (D5).
     ActionsPopup,
+    /// DAG overlay (X6).
+    DagOverlay,
 }
 
 /// Actions-popup overlay state. (D5.)
@@ -780,6 +791,7 @@ impl AppState {
             text_input_opened_at: None,
             input_mode: InputMode::Normal,
             tasks: crate::tasks::TaskRegistry::new(),
+            pipelines: crate::pipeline::PipelineRegistry::new(),
             task_by_recording: std::collections::HashMap::new(),
             preview: crate::tui::preview::PreviewLock::default(),
             user_plugin_manifests: crate::plugin::scan_user_plugins(
@@ -861,6 +873,8 @@ impl AppState {
             command_log: Vec::new(),
             actions_popup: None,
             actions_popup_opened_at: None,
+            show_dag_overlay: false,
+            dag_overlay_opened_at: None,
             event_log_scroll: 0,
             last_hotkey: None,
             last_hotkey_at: None,
@@ -885,6 +899,7 @@ impl AppState {
             OverlayKey::PluginBrowser => self.plugin_browser_opened_at,
             OverlayKey::Palette => self.palette_opened_at,
             OverlayKey::ActionsPopup => self.actions_popup_opened_at,
+            OverlayKey::DagOverlay => self.dag_overlay_opened_at,
         };
         let Some(at) = at else {
             return 1.0;
@@ -927,6 +942,7 @@ impl AppState {
             &mut self.actions_popup_opened_at,
             self.actions_popup.is_some(),
         );
+        sync_open(&mut self.dag_overlay_opened_at, self.show_dag_overlay);
         // Drop terminal tasks 2 seconds after they enter the Done/Failed
         // state — long enough for the user to read the result, short
         // enough to keep the tail clean.
@@ -1975,6 +1991,13 @@ impl AppState {
                 self.palette = Some(PaletteState::default());
                 None
             }
+            A::DagOverlayToggle => {
+                self.show_dag_overlay = !self.show_dag_overlay;
+                if !self.show_dag_overlay {
+                    self.dag_overlay_opened_at = None;
+                }
+                None
+            }
             A::ActionsPopupOpen => {
                 // D5 — open the verb menu scoped to the focused item.
                 // Today we only register entries for the RecordingList
@@ -2441,6 +2464,11 @@ impl AppState {
         }
         if self.show_plugin_browser && matches!(key.code, KeyCode::Esc) {
             self.show_plugin_browser = false;
+            return None;
+        }
+
+        if self.show_dag_overlay && matches!(key.code, KeyCode::Esc) {
+            self.show_dag_overlay = false;
             return None;
         }
 
@@ -4029,6 +4057,49 @@ pub fn process_plugin_actions(
             }
             crate::plugin::PluginAction::PlayFileAt(path, start_secs) => {
                 result = Some(AppAction::PlayFileAt { path, start_secs });
+            }
+            crate::plugin::PluginAction::SubmitPipeline(pipeline) => {
+                match app.pipelines.submit(pipeline) {
+                    Ok(pid) => {
+                        tracing::info!(
+                            pipeline_id = %pid,
+                            "plugin pipeline submitted to host registry"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!("pipeline submit rejected: {e}");
+                        app.status_message = format!("pipeline rejected: {e}");
+                    }
+                }
+            }
+            crate::plugin::PluginAction::UpdateStage {
+                stage_id,
+                new_state,
+            } => {
+                use crate::plugin::PipelineStageUpdate as U;
+                match new_state {
+                    U::Done => {
+                        app.pipelines.mark_stage_done(stage_id);
+                    }
+                    U::Failed(err) => {
+                        app.pipelines.mark_stage_failed(stage_id, err);
+                    }
+                    U::Cancelled => {
+                        // No first-class single-stage cancel API on the
+                        // registry today; treat as a permanent failure
+                        // with a clear marker.
+                        app.pipelines.mark_stage_failed(stage_id, "cancelled".into());
+                    }
+                    U::Skipped => {
+                        app.pipelines.skip_stage(stage_id);
+                    }
+                    U::Running => {
+                        // Running stamp lives with the executor; the
+                        // host doesn't override it from plugin events
+                        // yet — defer until the executor takes over
+                        // the actual work.
+                    }
+                }
             }
             crate::plugin::PluginAction::UpdateConfig {
                 plugin_name,

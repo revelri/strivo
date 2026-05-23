@@ -150,6 +150,10 @@ pub enum KeyAction {
     /// Open the actions popup for the focused item (D5). The handler
     /// reads the selection set first and falls back to the cursor item.
     ActionsPopupOpen,
+    /// Toggle the host DAG overlay (X6 + C1 phase 2). Shows every
+    /// Pipeline plugins have submitted, with per-stage glyphs +
+    /// retry counts + costs.
+    DagOverlayToggle,
     /// Channel marks (yazi audit §11). MarkSetPrompt opens the modal
     /// to bind the current row to a char; MarkJumpPrompt opens it to
     /// jump.
@@ -214,6 +218,7 @@ impl KeyAction {
             Self::VisualModeToggle => "visual mode (multi-select)",
             Self::CommandPaletteOpen => "command palette",
             Self::ActionsPopupOpen => "actions popup",
+            Self::DagOverlayToggle => "pipelines DAG",
             Self::MarkSetPrompt => "set mark",
             Self::MarkJumpPrompt => "jump to mark",
             Self::CopyToClipboard => "copy to clipboard",
@@ -278,6 +283,7 @@ impl KeyAction {
             Self::VisualModeToggle => "VisualModeToggle",
             Self::CommandPaletteOpen => "CommandPaletteOpen",
             Self::ActionsPopupOpen => "ActionsPopupOpen",
+            Self::DagOverlayToggle => "DagOverlayToggle",
             Self::MarkSetPrompt => "MarkSetPrompt",
             Self::MarkJumpPrompt => "MarkJumpPrompt",
             Self::CopyToClipboard => "CopyToClipboard",
@@ -344,6 +350,7 @@ impl KeyAction {
             "VisualModeToggle" => Self::VisualModeToggle,
             "CommandPaletteOpen" => Self::CommandPaletteOpen,
             "ActionsPopupOpen" => Self::ActionsPopupOpen,
+            "DagOverlayToggle" => Self::DagOverlayToggle,
             "MarkSetPrompt" => Self::MarkSetPrompt,
             "MarkJumpPrompt" => Self::MarkJumpPrompt,
             "CopyToClipboard" => Self::CopyToClipboard,
@@ -733,6 +740,12 @@ fn table() -> &'static [Chord] {
             },
             KeyAction::PluginBrowserToggle,
             "plugins",
+        ),
+        c(
+            Layer::Global,
+            KeyPattern::ctrl('g'),
+            KeyAction::DagOverlayToggle,
+            "pipelines DAG",
         ),
         c(
             Layer::Global,

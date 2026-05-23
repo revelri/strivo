@@ -127,6 +127,32 @@ pub enum PluginAction {
         plugin_name: &'static str,
         config_update: Box<dyn Any + Send>,
     },
+    /// Submit a Pipeline to the host registry. The host applies
+    /// `PipelineRegistry::submit` so the DAG overlay (Shift+D),
+    /// `:batches` palette scope, and retry/skip/cancel verbs see the
+    /// plugin's work. (C1 phase 2.)
+    SubmitPipeline(crate::pipeline::Pipeline),
+    /// Mirror a stage state change into the host registry. Plugins
+    /// call this on their internal state machine's transitions so
+    /// the DAG overlay tracks their in-flight work. (C1 phase 2.)
+    UpdateStage {
+        stage_id: crate::pipeline::StageId,
+        new_state: PipelineStageUpdate,
+    },
+}
+
+/// Subset of [`crate::pipeline::StageState`] transitions a plugin can
+/// drive. Restricted vs the full state enum so plugins can't put a
+/// stage into states only the host executor should own (e.g.
+/// `Running { started_at_ms }` — the host stamps that).
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub enum PipelineStageUpdate {
+    Running,
+    Done,
+    Failed(String),
+    Cancelled,
+    Skipped,
 }
 
 /// Context provided to plugins during initialization.

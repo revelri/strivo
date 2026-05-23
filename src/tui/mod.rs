@@ -445,6 +445,47 @@ fn handle_plugin_action(
                 app.status_message = format!("Config save failed: {e}");
             }
         }
+        crate::plugin::PluginAction::SubmitPipeline(pipeline) => {
+            // C1 phase 2 — host pipeline registry mirror. The DAG
+            // overlay + :batches scope + retry/skip/cancel verbs all
+            // read from `app.pipelines` once a pipeline lands here.
+            match app.pipelines.submit(pipeline) {
+                Ok(pid) => {
+                    tracing::info!(pipeline_id = %pid, "plugin pipeline submitted");
+                }
+                Err(e) => {
+                    tracing::warn!("pipeline submit rejected: {e}");
+                    app.status_message = format!("pipeline rejected: {e}");
+                }
+            }
+        }
+        crate::plugin::PluginAction::UpdateStage {
+            stage_id,
+            new_state,
+        } => {
+            use crate::plugin::PipelineStageUpdate as U;
+            match new_state {
+                U::Done => {
+                    app.pipelines.mark_stage_done(stage_id);
+                }
+                U::Failed(err) => {
+                    app.pipelines.mark_stage_failed(stage_id, err);
+                }
+                U::Cancelled => {
+                    app.pipelines
+                        .mark_stage_failed(stage_id, "cancelled".into());
+                }
+                U::Skipped => {
+                    app.pipelines.skip_stage(stage_id);
+                }
+                U::Running => {
+                    // Running timestamp is owned by the executor; the
+                    // host doesn't override it from a plugin event
+                    // (yet — when the executor takes over the actual
+                    // dispatch this becomes meaningful).
+                }
+            }
+        }
     }
 }
 
