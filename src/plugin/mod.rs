@@ -278,6 +278,20 @@ impl DaemonEventKind {
 
 /// The core Plugin trait. All plugins implement this.
 #[allow(dead_code, unused)]
+/// Where a plugin's `status_line` is rendered. See [`Plugin::status_slot`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusSlot {
+    /// Right-aligned `[chip]` next to platform indicators. Capped at 3
+    /// concurrent chips; overflow collapses into `[+N]`.
+    Tray,
+    /// Transient one-row banner above the hotkey strip. Reserved for the
+    /// telemetry strip work in M4; currently treated as `Tray`.
+    Banner,
+    /// Do not render this plugin's `status_line`. Useful when the line is
+    /// only consumed by other systems (logs, properties modal).
+    None,
+}
+
 pub trait Plugin: Send {
     /// Unique name for this plugin (e.g., "crunchr").
     fn name(&self) -> &'static str;
@@ -330,6 +344,17 @@ pub trait Plugin: Send {
     /// Optional: contribute a segment to the status bar.
     fn status_line(&self, _app: &AppState) -> Option<String> {
         None
+    }
+
+    /// Where a plugin's `status_line` lives. [`StatusSlot::Tray`] is the
+    /// default — right-aligned `[chip]` next to the platform indicators.
+    /// [`StatusSlot::Banner`] reserves a transient one-row banner above
+    /// the hotkey strip (currently routed back to Tray; banner support
+    /// lands with the telemetry strip in M4). [`StatusSlot::None`]
+    /// suppresses display, e.g. when the plugin emits status_line for
+    /// telemetry/log only.
+    fn status_slot(&self) -> StatusSlot {
+        StatusSlot::Tray
     }
 
     /// Optional: contribute lines to the recording properties panel

@@ -202,10 +202,15 @@ impl PluginRegistry {
         cmds
     }
 
-    /// Collect status line contributions from all plugins.
+    /// Collect status line contributions from all plugins whose
+    /// [`StatusSlot`] is `Tray` or `Banner` (banner falls back to tray
+    /// until the M4 telemetry strip lands). Plugins that return
+    /// `StatusSlot::None` are skipped even if `status_line` returned
+    /// `Some`.
     pub fn status_lines(&self, app: &AppState) -> Vec<String> {
         self.plugins
             .iter()
+            .filter(|p| !matches!(p.status_slot(), crate::plugin::StatusSlot::None))
             .filter_map(|p| p.status_line(app))
             .collect()
     }

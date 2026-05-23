@@ -418,26 +418,48 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
 
     // Plugin status indicators
     let plugin_statuses = registry.status_lines(app);
+    const TRAY_CAP: usize = 3;
     // `│ ` separator (2 cells) only added when plugin segment is non-empty.
     let plugin_sep_width = if plugin_statuses.is_empty() { 0 } else { 2 };
-    let plugin_width: usize =
-        plugin_statuses.iter().map(|s| s.len() + 2).sum::<usize>() + plugin_sep_width;
+    let overflow_count = plugin_statuses.len().saturating_sub(TRAY_CAP);
+    let overflow_width = if overflow_count > 0 {
+        // `[+N] ` — N is up to ~3 digits for realistic plugin counts.
+        let digits = overflow_count.to_string().len();
+        3 + digits + 1
+    } else {
+        0
+    };
+    let plugin_width: usize = plugin_statuses
+        .iter()
+        .take(TRAY_CAP)
+        .map(|s| s.len() + 2)
+        .sum::<usize>()
+        + plugin_sep_width
+        + overflow_width;
 
     let pad = total_width.saturating_sub(used + ind_width + plugin_width);
     spans.push(Span::styled(" ".repeat(pad), bar_style));
 
     // [Plugin] segment — separator only when plugins actually contribute
     // something, otherwise the right side flows straight into the platform
-    // indicators.
+    // indicators. Cap at 3 visible chips; overflow collapses into `[+N]`
+    // so a noisy plugin set can't push the platform indicators offscreen.
     if !plugin_statuses.is_empty() {
         spans.push(Span::styled(
             "│ ",
             Style::new().fg(Theme::dim()).bg(bar_bg),
         ));
-        for status in &plugin_statuses {
+        const TRAY_CAP: usize = 3;
+        for status in plugin_statuses.iter().take(TRAY_CAP) {
             spans.push(Span::styled(
                 format!("[{status}] "),
                 Style::new().fg(Theme::secondary()).bg(bar_bg),
+            ));
+        }
+        if plugin_statuses.len() > TRAY_CAP {
+            spans.push(Span::styled(
+                format!("[+{}] ", plugin_statuses.len() - TRAY_CAP),
+                Style::new().fg(Theme::muted()).bg(bar_bg),
             ));
         }
     }
