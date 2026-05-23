@@ -59,6 +59,10 @@ pub enum TextInputPurpose {
     /// Channel marks (M4.2.b). Single-char value sets / jumps a mark.
     SetMark,
     JumpMark,
+    /// Palette → save-preset prompt (X3). Value is a preset name; the
+    /// submit handler calls `edl::recorder::save` with the current
+    /// session command_log.
+    PaletteSavePreset,
 }
 
 /// Live state for an open text-input modal.

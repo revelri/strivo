@@ -62,6 +62,39 @@ pub enum PaletteDispatch {
     PluginPane(crate::plugin::PaneId),
     /// Resource scopes (X4) — switch the palette into a scoped list.
     SwitchScope(PaletteScope),
+    /// Palette-local action — recorder helpers (save-preset, clear-log)
+    /// and similar metacommands that don't fit the KeyAction enum.
+    LocalAction(PaletteLocal),
+}
+
+/// Palette-local meta-commands. (X3 + UX polish.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteLocal {
+    /// Prompt for a name, then snapshot the current command_log to
+    /// `~/.local/share/strivo/command-logs/<name>.json`.
+    SavePreset,
+    /// Clear the in-memory command log without saving.
+    ClearLog,
+    /// Open the preset list (read-only for now — replay is M5).
+    ListPresets,
+}
+
+impl PaletteLocal {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::SavePreset => "palette:save-preset",
+            Self::ClearLog => "palette:clear-log",
+            Self::ListPresets => "palette:list-presets",
+        }
+    }
+
+    pub fn desc(&self) -> &'static str {
+        match self {
+            Self::SavePreset => "snapshot session command log to a preset file",
+            Self::ClearLog => "clear the in-memory command log",
+            Self::ListPresets => "list saved command-log presets",
+        }
+    }
 }
 
 /// Build the filtered, ranked row list from the current query.
@@ -74,6 +107,13 @@ pub fn build_rows(
     let Some(state) = app.palette.as_ref() else {
         return Vec::new();
     };
+
+    // X4 — scoped resource listings. When a scope is active the
+    // palette stops looking at the global action list and instead
+    // renders rows drawn from that scope's resource registry.
+    if let Some(scope) = state.scope {
+        return build_scoped_rows(scope, state.query.trim(), app);
+    }
 
     // Distinguish resource-switch queries (typed as `:scope`) from
     // ordinary action search.
@@ -125,6 +165,23 @@ pub fn build_rows(
         }
     }
 
+    // Palette-local meta-commands (X3). Always offered alongside the
+    // keymap actions so the user can fuzzy-find them like anything else.
+    for local in [
+        PaletteLocal::SavePreset,
+        PaletteLocal::ClearLog,
+        PaletteLocal::ListPresets,
+    ] {
+        if let Some(r) = score_row(
+            needle,
+            local.label(),
+            local.desc(),
+            PaletteDispatch::LocalAction(local),
+        ) {
+            out.push(r);
+        }
+    }
+
     // Plugin commands. PluginCommand.name is the action label;
     // PluginCommand.description is the help line. Plugin commands
     // currently route by activating the plugin's first pane — the
@@ -153,6 +210,134 @@ fn plugin_pane_for(
 ) -> Option<crate::plugin::PaneId> {
     let plugin = registry.plugin_ref(plugin_name)?;
     plugin.panes().into_iter().next()
+}
+
+/// X4 — per-scope row builders. Each scope returns the rows for its
+/// resource family; selection dispatches a KeyAction (when one applies)
+/// or [`PaletteDispatch::LocalAction`] for descriptive entries.
+fn build_scoped_rows(
+    scope: PaletteScope,
+    query: &str,
+    _app: &AppState,
+) -> Vec<PaletteRow> {
+    let mut out: Vec<PaletteRow> = Vec::new();
+    match scope {
+        PaletteScope::Presets => {
+            // Crunchr preset names lookup. We don't have access to the
+            // plugin from here without registering a list-fn upfront,
+            // so we walk both built-in names + on-disk files. Selecting
+            // a preset clears the scope and surfaces the name in the
+            // status bar — the user then activates the Crunchr pane
+            // and runs the preset there. Full plumbing waits on C1
+            // phase 2.
+            let mut presets: Vec<String> = vec![
+                "fast-cheap".into(),
+                "quality-local".into(),
+                "quality-api".into(),
+            ];
+            // On-disk presets via the well-known directory pattern.
+            if let Some(base) = directories::BaseDirs::new() {
+                let dir = base
+                    .config_dir()
+                    .join("strivo")
+                    .join("crunchr")
+                    .join("presets");
+                if let Ok(entries) = std::fs::read_dir(dir) {
+                    for entry in entries.flatten() {
+                        if let Some(name) = entry.path().file_stem().and_then(|s| s.to_str()) {
+                            if !presets.iter().any(|p| p == name) {
+                                presets.push(name.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            for name in presets {
+                if let Some(r) = score_row_meta(
+                    query,
+                    &name,
+                    "crunchr preset (select to copy name to status)",
+                    PaletteDispatch::LocalAction(PaletteLocal::ListPresets),
+                ) {
+                    out.push(r);
+                }
+            }
+        }
+        PaletteScope::Edls => {
+            // List EDL JSON files in the host's edls/ dir.
+            let dir = directories::BaseDirs::new()
+                .map(|b| b.data_local_dir().join("strivo").join("edls"))
+                .unwrap_or_default();
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension().and_then(|s| s.to_str()) != Some("json") {
+                        continue;
+                    }
+                    if let Some(name) = p.file_stem().and_then(|s| s.to_str()) {
+                        if let Some(r) = score_row_meta(
+                            query,
+                            name,
+                            "edl on disk",
+                            PaletteDispatch::LocalAction(PaletteLocal::ListPresets),
+                        ) {
+                            out.push(r);
+                        }
+                    }
+                }
+            }
+            if out.is_empty() {
+                out.push(PaletteRow {
+                    label: "(no EDLs)".into(),
+                    desc: "Editor saves clip lists here; none yet.".into(),
+                    dispatch: PaletteDispatch::LocalAction(PaletteLocal::ListPresets),
+                    score: 0,
+                });
+            }
+        }
+        PaletteScope::Batches => {
+            out.push(PaletteRow {
+                label: "(host pipeline registry)".into(),
+                desc: "submitted pipelines — DAG overlay shows full state".into(),
+                dispatch: PaletteDispatch::LocalAction(PaletteLocal::ListPresets),
+                score: 0,
+            });
+        }
+        PaletteScope::Transcripts => {
+            out.push(PaletteRow {
+                label: "(see Crunchr Search)".into(),
+                desc: "Crunchr pane lists finished transcripts; use its own search".into(),
+                dispatch: PaletteDispatch::LocalAction(PaletteLocal::ListPresets),
+                score: 0,
+            });
+        }
+        PaletteScope::Clips => {
+            // Clip-EDLs live as `<recording>.edl.json` sidecars; the
+            // canonical list lives with the Editor pane. Surfacing
+            // them here pre-Editor-rewrite would mean walking the
+            // recordings directory; that's a future commit.
+            out.push(PaletteRow {
+                label: "(see Editor pane)".into(),
+                desc: "clip EDLs live as recording sidecars".into(),
+                dispatch: PaletteDispatch::LocalAction(PaletteLocal::ListPresets),
+                score: 0,
+            });
+        }
+    }
+    out.sort_by(|a, b| b.score.cmp(&a.score));
+    out
+}
+
+/// Variant of score_row that takes ownership of `label`+`desc` as
+/// `&str` — used by scoped builders where the strings already live in
+/// the caller.
+fn score_row_meta(
+    needle: &str,
+    label: &str,
+    desc: &str,
+    dispatch: PaletteDispatch,
+) -> Option<PaletteRow> {
+    score_row(needle, label, desc, dispatch)
 }
 
 fn score_row(

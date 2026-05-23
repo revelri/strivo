@@ -1743,6 +1743,25 @@ impl AppState {
                     self.status_message = format!("mark '{c}' points at a stale channel");
                 }
             }
+            P::PaletteSavePreset => {
+                let name = value.trim();
+                if name.is_empty() {
+                    self.status_message = "preset name required".into();
+                    return;
+                }
+                match crate::edl::recorder::save(name, &self.command_log) {
+                    Ok(path) => {
+                        self.status_message = format!(
+                            "saved preset '{name}' ({} actions) → {}",
+                            self.command_log.len(),
+                            path.display()
+                        );
+                    }
+                    Err(e) => {
+                        self.status_message = format!("save-preset failed: {e}");
+                    }
+                }
+            }
         }
     }
 
@@ -3292,6 +3311,47 @@ impl AppState {
                         // Refine when D4 + plugin namespace land
                         // together.
                         self.palette = None;
+                    }
+                    PaletteDispatch::LocalAction(local) => {
+                        use crate::tui::widgets::palette::PaletteLocal;
+                        let local = *local;
+                        self.palette = None;
+                        match local {
+                            PaletteLocal::SavePreset => {
+                                // Defer the actual save until the user
+                                // supplies a name. Open a text input
+                                // with the SavePreset purpose; the
+                                // submit handler calls recorder::save.
+                                self.open_text_input(
+                                    crate::tui::widgets::text_input::TextInputPurpose::PaletteSavePreset,
+                                    "Save preset as",
+                                    "",
+                                );
+                            }
+                            PaletteLocal::ClearLog => {
+                                let n = self.command_log.len();
+                                self.command_log.clear();
+                                self.status_message =
+                                    format!("command log cleared ({n} entries)");
+                            }
+                            PaletteLocal::ListPresets => {
+                                let presets = crate::edl::recorder::list();
+                                self.status_message = if presets.is_empty() {
+                                    "no presets saved (palette:save-preset to make one)"
+                                        .to_string()
+                                } else {
+                                    format!(
+                                        "{} preset(s): {}",
+                                        presets.len(),
+                                        presets
+                                            .iter()
+                                            .map(|p| p.name.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    )
+                                };
+                            }
+                        }
                     }
                 }
             } else {

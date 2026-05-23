@@ -12,6 +12,7 @@
 //!
 //! See plan Part 6 X2.
 
+pub mod recorder;
 pub mod render;
 pub mod schema;
 
