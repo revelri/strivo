@@ -1,6 +1,32 @@
 # Build
 /target
 Cargo.lock.backup
+**/*.rs.bk
+
+# Coverage / profiling
+*.profraw
+*.profdata
+tarpaulin-report.*
+cobertura.xml
+lcov.info
+flamegraph.svg
+perf.data
+perf.data.old
+
+# Packaging / release artifacts
+/dist/
+/release-out/
+*.deb
+*.rpm
+
+# Python tooling caches (scripts/, packaging/)
+__pycache__/
+*.pyc
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.venv/
+venv/
 
 # Secrets / local env
 .env
