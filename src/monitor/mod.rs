@@ -118,6 +118,19 @@ impl ChannelMonitor {
                     }
                     interval.reset();
                 }
+                _ = self.auth_notify.notified() => {
+                    // A platform finished authenticating after the first
+                    // poll. Re-poll immediately so the new platform's
+                    // channels appear without waiting for the next 60s
+                    // tick — the original cause of "Twitch missing from
+                    // the sidebar for the first minute" symptom.
+                    tracing::info!("Platform auth event, re-polling");
+                    if let Err(e) = self.poll_all().await {
+                        tracing::error!("Monitor poll error: {e}");
+                        let _ = self.event_tx.send(AppEvent::error(format!("Poll error: {e}")));
+                    }
+                    interval.reset();
+                }
                 _ = self.cancel.cancelled() => {
                     tracing::info!("Monitor shutting down");
                     break;
