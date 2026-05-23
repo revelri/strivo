@@ -67,14 +67,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut AppState) {
         if !items.is_empty() {
             items.push(ListItem::new(Line::raw("")));
         }
-        items.push(ListItem::new(Line::from(vec![
-            Span::raw(" "),
-            Span::styled(day_label, Theme::day_header()),
-            Span::raw(" "),
-            Span::styled("━", Style::new().fg(Theme::dim())),
-            Span::styled("━━━", Style::new().fg(Theme::muted())),
-            Span::styled("━", Style::new().fg(Theme::dim())),
-        ])));
+        items.push(ListItem::new(Line::from(Theme::section_rule_spans(
+            day_label,
+        ))));
 
         for rec in recs {
             // Apply search filter

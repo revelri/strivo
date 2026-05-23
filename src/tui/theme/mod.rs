@@ -872,6 +872,26 @@ impl Theme {
             .fg(Self::muted())
             .add_modifier(Modifier::ITALIC)
     }
+
+    /// Section rule — a labeled horizontal divider with a 5-cell gradient
+    /// trailing the label (dim → muted → dim). Used by RecordingList's
+    /// day headers; plugin panes (Crunchr transcript days, Archiver pull
+    /// batches) should call this helper so the visual rhythm is the same
+    /// across the app.
+    ///
+    /// Returns the spans for the entire line, ready to drop into a
+    /// `Line::from()`.
+    pub fn section_rule_spans(label: &str) -> Vec<ratatui::text::Span<'_>> {
+        use ratatui::text::Span;
+        vec![
+            Span::raw(" "),
+            Span::styled(label.to_string(), Self::day_header()),
+            Span::raw(" "),
+            Span::styled("━", Style::new().fg(Self::dim())),
+            Span::styled("━━━", Style::new().fg(Self::muted())),
+            Span::styled("━", Style::new().fg(Self::dim())),
+        ]
+    }
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────
