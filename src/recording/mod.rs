@@ -48,6 +48,12 @@ pub enum RecordingCommand {
     Start {
         channel_id: String,
         channel_name: String,
+        /// Human-readable channel name for filename slugs (YT-1). The
+        /// recording manager prefers this over `channel_name` when
+        /// building the output path. Falls back to `channel_name` for
+        /// older callers (e.g. schedule-fired starts).
+        #[serde(default)]
+        display_name: Option<String>,
         platform: PlatformKind,
         transcode: bool,
         cookies_path: Option<PathBuf>,
@@ -137,7 +143,7 @@ pub async fn run_manager(
         tokio::select! {
             Some(cmd) = cmd_rx.recv() => {
                 match cmd {
-                    RecordingCommand::Start { channel_id, channel_name, platform, transcode, cookies_path, stream_title, from_start, job_id: requested_id } => {
+                    RecordingCommand::Start { channel_id, channel_name, display_name, platform, transcode, cookies_path, stream_title, from_start, job_id: requested_id } => {
                         // Check if already recording this channel
                         let already = active.values().any(|r| {
                             r.job.channel_id == channel_id
@@ -150,7 +156,14 @@ pub async fn run_manager(
                             continue;
                         }
 
-                        let output_path = build_output_path(&config, &channel_name, platform, stream_title.as_deref());
+                        // YT-1 — human-readable channel slug for the
+                        // filename. For YouTube the channel_name is
+                        // a UC… ID; display_name is the @handle the
+                        // user actually recognises. Falls back when
+                        // older callers (schedule fires) don't supply.
+                        let filename_channel =
+                            display_name.as_deref().unwrap_or(&channel_name);
+                        let output_path = build_output_path(&config, filename_channel, platform, stream_title.as_deref());
                         let mut job = RecordingJob::new(
                             channel_id.clone(),
                             channel_name.clone(),
@@ -178,15 +191,55 @@ pub async fn run_manager(
                         // YouTube + from_start: use yt-dlp directly (no URL resolution needed)
                         if platform == PlatformKind::YouTube && from_start {
                             let rtx = resolve_tx.clone();
-                            let url = if channel_name.starts_with("UC") && channel_name.len() == 24 {
+                            // YT-2 — resolve the channel /live alias
+                            // to /watch?v=<id> first. yt-dlp's
+                            // --live-from-start works most reliably
+                            // against a stable video URL; the channel
+                            // alias path was observed to land at the
+                            // join-time slice instead of t=0.
+                            let alias_url = if channel_name.starts_with("UC")
+                                && channel_name.len() == 24
+                            {
                                 format!("https://www.youtube.com/channel/{channel_name}/live")
                             } else {
                                 format!("https://www.youtube.com/@{channel_name}/live")
                             };
                             let cookies = cookies_path.clone();
                             let fmt = resolved_format.clone();
+                            let log_channel = channel_name.clone();
                             tokio::spawn(async move {
-                                match YtDlpProcess::with_options(&url, output_path, cookies.as_deref(), Some(&fmt), true) {
+                                let watch_url = match ytdlp::resolve_live_video_id(
+                                    &alias_url,
+                                    cookies.as_deref(),
+                                )
+                                .await
+                                {
+                                    Ok(id) => {
+                                        let url =
+                                            format!("https://www.youtube.com/watch?v={id}");
+                                        tracing::info!(
+                                            channel = %log_channel,
+                                            video_id = %id,
+                                            "yt-dlp: resolved /live → /watch?v= for live-from-start"
+                                        );
+                                        url
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            channel = %log_channel,
+                                            error = %e,
+                                            "yt-dlp: live-id resolve failed; falling back to /live alias"
+                                        );
+                                        alias_url
+                                    }
+                                };
+                                match YtDlpProcess::with_options(
+                                    &watch_url,
+                                    output_path,
+                                    cookies.as_deref(),
+                                    Some(&fmt),
+                                    true,
+                                ) {
                                     Ok(process) => {
                                         let _ = rtx.send((job_id, Ok(RecorderProcess::YtDlp(process))));
                                     }

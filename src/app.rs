@@ -2979,6 +2979,7 @@ impl AppState {
         Some(AppAction::StartRecording {
             channel_id: ch.id,
             channel_name: ch.name,
+            display_name: Some(ch.display_name),
             platform: ch.platform,
             transcode: self.transcode_mode,
             from_start,
@@ -3997,7 +3998,15 @@ fn shellexpand(s: &str) -> String {
 pub enum AppAction {
     StartRecording {
         channel_id: String,
+        /// Stable channel identifier — what we feed URL builders
+        /// (`youtube.com/channel/<UC...>`, `twitch.tv/<login>`).
+        /// For YouTube this is the UC channel ID, NOT a human-readable
+        /// name; pass `display_name` for filename slugs. (YT-1.)
         channel_name: String,
+        /// Human-readable channel name for the filename. Falls back to
+        /// `channel_name` when None — keeps Twitch (login already
+        /// human-readable) and existing callsites compiling.
+        display_name: Option<String>,
         platform: PlatformKind,
         transcode: bool,
         from_start: bool,

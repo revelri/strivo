@@ -520,6 +520,7 @@ async fn handle_action(
         AppAction::StartRecording {
             channel_id,
             channel_name,
+            display_name,
             platform,
             transcode,
             from_start,
@@ -542,6 +543,7 @@ async fn handle_action(
             let _ = recording_tx.send(RecordingCommand::Start {
                 channel_id,
                 channel_name,
+                display_name,
                 platform,
                 transcode,
                 cookies_path,

@@ -215,6 +215,7 @@ impl ChannelMonitor {
                                 let _ = self.recording_tx.send(RecordingCommand::Start {
                                     channel_id: ch.id.clone(),
                                     channel_name: ch.name.clone(),
+                                    display_name: Some(ch.display_name.clone()),
                                     platform: ch.platform,
                                     transcode: self.config.recording.transcode,
                                     cookies_path,

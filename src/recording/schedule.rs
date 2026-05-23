@@ -265,6 +265,7 @@ pub async fn run_schedule_manager(
                             let _ = recording_tx.send(RecordingCommand::Start {
                                 channel_id: sched.channel_name.clone(),
                                 channel_name: sched.channel_name.clone(),
+                                display_name: None, // schedules don't have a separate display name yet
                                 platform: sched.platform,
                                 transcode: false,
                                 cookies_path: None,

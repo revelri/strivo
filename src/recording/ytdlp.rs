@@ -1,5 +1,6 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
@@ -7,6 +8,82 @@ use tokio::process::{Child, Command};
 use crate::config::ResolvedFormat;
 
 const STDERR_TAIL_LINES: usize = 40;
+
+/// YT-2 — resolve a YouTube `/live` channel URL to the underlying
+/// `/watch?v=<id>` URL of the active broadcast.
+///
+/// Why: `yt-dlp --live-from-start` against `/channel/UC.../live` or
+/// `/@handle/live` works only when yt-dlp's extractor follows the
+/// redirect cleanly. In practice we've observed the live stream
+/// starting at the join-time slice when the URL form is the channel
+/// alias — the extractor races the redirect and falls back to the
+/// stream's live-edge cursor. Resolving to `/watch?v=<id>` first gives
+/// `--live-from-start` a stable video URL it can replay against.
+///
+/// Implementation: shell out to `yt-dlp --print id --no-warnings
+/// --no-download --no-playlist <url>` with a short timeout. Returns
+/// the resolved video ID; caller composes the watch URL.
+pub async fn resolve_live_video_id(
+    channel_live_url: &str,
+    cookies_path: Option<&std::path::Path>,
+) -> Result<String> {
+    let mut cmd = Command::new("yt-dlp");
+    cmd.args([
+        "--print",
+        "id",
+        "--no-warnings",
+        "--no-download",
+        "--no-playlist",
+        // Cap network work — if the channel isn't live, error out
+        // quickly so the caller can fall back to the original URL.
+        "--socket-timeout",
+        "20",
+    ]);
+    if let Some(cookies) = cookies_path {
+        cmd.args(["--cookies", &cookies.to_string_lossy()]);
+    }
+    cmd.arg(channel_live_url);
+    cmd.stdin(Stdio::null());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        async move { cmd.output().await },
+    )
+    .await
+    .context("yt-dlp --print id timed out after 30 s")?
+    .context("yt-dlp --print id failed to spawn")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "yt-dlp --print id exit {}: {}",
+            output.status,
+            stderr
+                .lines()
+                .last()
+                .unwrap_or("(no stderr)")
+                .chars()
+                .take(200)
+                .collect::<String>()
+        );
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let video_id = stdout
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .map(|l| l.trim().to_string())
+        .ok_or_else(|| anyhow::anyhow!("yt-dlp --print id returned empty output"))?;
+
+    // Sanity-check the shape. YouTube video IDs are 11 chars of base64
+    // [A-Za-z0-9_-]. Anything else is suspicious.
+    if video_id.len() != 11 || !video_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-')) {
+        anyhow::bail!("yt-dlp --print id returned unexpected shape: {video_id:?}");
+    }
+    Ok(video_id)
+}
 
 pub struct YtDlpProcess {
     child: Child,
@@ -39,6 +116,11 @@ impl YtDlpProcess {
         let mut cmd = Command::new("yt-dlp");
         if live_from_start {
             cmd.arg("--live-from-start");
+            // YT-3 — give yt-dlp a brief grace period to find the
+            // video when the stream is just coming online. Default
+            // is to fail immediately, which loses the first 30 s of
+            // many recordings to the user's reaction time.
+            cmd.args(["--wait-for-video", "30"]);
         }
         cmd.arg("--continue");
         cmd.args(["--no-part"]);
