@@ -6,6 +6,7 @@
 //! first.
 
 use super::schema::{EdlDoc, EdlKind, EdlOp};
+use crate::pipeline::stage::ResourceLock;
 use crate::pipeline::{Pipeline, ResourceRegistry, Stage, StageId, StageKind};
 
 /// Build a Pipeline from an EDL. The resulting graph is linear for the
@@ -58,6 +59,134 @@ pub fn pipeline_from_edl(doc: &EdlDoc, _resources: &ResourceRegistry) -> Pipelin
         prev = Some(id);
     }
     p
+}
+
+/// Build a [`Pipeline`] from a Crunchr preset name + list of input
+/// recordings. Plugins land on this when fanning a batch out across
+/// the host DAG engine. (C1 phase 2.)
+///
+/// For each input we emit a per-input chain:
+///
+/// ```text
+///   extract → transcribe(provider) → [diarize(provider)?] →
+///   subtitle? → [analyze(provider, model)?]
+/// ```
+///
+/// `transcribe(whisperx-local)` and `transcribe(voxtral-local)` carry
+/// a [`ResourceLock::Gpu`] so two such stages can't run in parallel
+/// across pipelines. `analyze` carries a bounded
+/// [`ResourceLock::Api`] for the OpenRouter quota.
+///
+/// `preset_stages` is the typed sequence built from
+/// [`CrunchrPreset::stages`]; the caller flattens that out of the
+/// plugin crate before calling us so this crate doesn't grow a
+/// strivo-plugins dependency.
+pub fn pipeline_from_preset_stages(
+    preset_name: &str,
+    inputs: &[(String, std::path::PathBuf)],
+    preset_stages: &[PresetStageBridge],
+) -> Pipeline {
+    let mut p = Pipeline::new(format!("crunchr::{preset_name}"));
+    for (vod_id, _path) in inputs {
+        let mut prev: Option<StageId> = None;
+        // Every input chain starts with audio extraction.
+        let extract = Stage::new(
+            format!("extract:{vod_id}"),
+            StageKind::Extract,
+        )
+        .with_inputs(prev.iter().copied().collect());
+        let extract_id = p.add_stage(extract);
+        prev = Some(extract_id);
+
+        for stage in preset_stages {
+            let (kind, requires) = match stage {
+                PresetStageBridge::Transcribe { provider, max_attempts: _ } => {
+                    let mut locks = Vec::new();
+                    if provider.contains("local") {
+                        locks.push(ResourceLock::Gpu);
+                    } else if provider.contains("openrouter") || provider.contains("voxtral-api") {
+                        locks.push(ResourceLock::Api {
+                            name: "openrouter".into(),
+                            cap: 8,
+                        });
+                    }
+                    (
+                        StageKind::Transcribe {
+                            provider: provider.clone(),
+                        },
+                        locks,
+                    )
+                }
+                PresetStageBridge::Diarize { provider, .. } => {
+                    let mut locks = Vec::new();
+                    if provider.contains("local") {
+                        locks.push(ResourceLock::Gpu);
+                    }
+                    (
+                        StageKind::Diarize {
+                            provider: provider.clone(),
+                        },
+                        locks,
+                    )
+                }
+                PresetStageBridge::Subtitle => (StageKind::Subtitle, Vec::new()),
+                PresetStageBridge::Analyze {
+                    provider, model, ..
+                } => (
+                    StageKind::Analyze {
+                        provider: format!("{provider}:{model}"),
+                    },
+                    vec![ResourceLock::Api {
+                        name: "openrouter".into(),
+                        cap: 4,
+                    }],
+                ),
+            };
+            let max_attempts = match stage {
+                PresetStageBridge::Transcribe { max_attempts, .. }
+                | PresetStageBridge::Diarize { max_attempts, .. }
+                | PresetStageBridge::Analyze { max_attempts, .. } => *max_attempts,
+                PresetStageBridge::Subtitle => 1,
+            };
+            let s = Stage::new(format!("{}:{}", stage_label(stage), vod_id), kind)
+                .with_inputs(prev.iter().copied().collect())
+                .with_max_attempts(max_attempts)
+                .with_requires(requires);
+            prev = Some(p.add_stage(s));
+        }
+    }
+    p
+}
+
+/// Stage shape consumed by [`pipeline_from_preset_stages`]. This is
+/// the data crate's mirror of `strivo_plugins::crunchr::presets::CrunchrStage`;
+/// the plugin builds and passes one of these per stage so we don't
+/// pull strivo-plugins into the host crate.
+#[derive(Debug, Clone)]
+pub enum PresetStageBridge {
+    Transcribe {
+        provider: String,
+        max_attempts: u8,
+    },
+    Diarize {
+        provider: String,
+        max_attempts: u8,
+    },
+    Subtitle,
+    Analyze {
+        provider: String,
+        model: String,
+        max_attempts: u8,
+    },
+}
+
+fn stage_label(s: &PresetStageBridge) -> &'static str {
+    match s {
+        PresetStageBridge::Transcribe { .. } => "transcribe",
+        PresetStageBridge::Diarize { .. } => "diarize",
+        PresetStageBridge::Subtitle => "subtitle",
+        PresetStageBridge::Analyze { .. } => "analyze",
+    }
 }
 
 fn kind_label(k: &EdlKind) -> &'static str {
@@ -118,6 +247,54 @@ mod tests {
         assert_eq!(p.stages[1].inputs, vec![p.stages[0].id]);
         assert_eq!(p.stages[2].inputs, vec![p.stages[1].id]);
         assert!(p.assert_acyclic().is_ok());
+    }
+
+    #[test]
+    fn preset_bridge_fans_per_input() {
+        let inputs = vec![
+            ("rec-1".to_string(), std::path::PathBuf::from("/tmp/a.mkv")),
+            ("rec-2".to_string(), std::path::PathBuf::from("/tmp/b.mkv")),
+        ];
+        let stages = vec![
+            PresetStageBridge::Transcribe {
+                provider: "whisperx-local".into(),
+                max_attempts: 3,
+            },
+            PresetStageBridge::Diarize {
+                provider: "whisperx-local".into(),
+                max_attempts: 2,
+            },
+            PresetStageBridge::Subtitle,
+        ];
+        let p = pipeline_from_preset_stages("quality-local", &inputs, &stages);
+        // 2 inputs × (extract + 3 preset stages) = 8 stages.
+        assert_eq!(p.stages.len(), 8);
+        // Within each input, the chain is linear.
+        let rec1_extract = &p.stages[0];
+        let rec1_transcribe = &p.stages[1];
+        assert!(rec1_extract.inputs.is_empty());
+        assert_eq!(rec1_transcribe.inputs, vec![rec1_extract.id]);
+        // GPU lock present on the local transcribe stage.
+        assert!(rec1_transcribe
+            .requires
+            .iter()
+            .any(|r| matches!(r, ResourceLock::Gpu)));
+        assert!(p.assert_acyclic().is_ok());
+    }
+
+    #[test]
+    fn preset_bridge_api_provider_uses_api_lock() {
+        let inputs = vec![("rec".into(), std::path::PathBuf::from("/tmp/x.mkv"))];
+        let stages = vec![PresetStageBridge::Transcribe {
+            provider: "voxtral-openrouter".into(),
+            max_attempts: 3,
+        }];
+        let p = pipeline_from_preset_stages("quality-api", &inputs, &stages);
+        let transcribe = &p.stages[1]; // 0 is extract
+        assert!(transcribe
+            .requires
+            .iter()
+            .any(|r| matches!(r, ResourceLock::Api { name, .. } if name == "openrouter")));
     }
 
     #[test]
