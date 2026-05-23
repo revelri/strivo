@@ -85,6 +85,77 @@ impl PipelineRegistry {
         None
     }
 
+    /// Manually reset a Failed / Exhausted / Cancelled stage so the
+    /// executor will pick it up again on the next tick. Resets the
+    /// state to `Pending` and re-arms the cancellation token. If
+    /// `provider_override` is supplied and the stage carries a
+    /// provider-bearing kind, the new provider replaces the old one
+    /// for subsequent attempts. (C3 UI dispatcher.)
+    pub fn retry_stage(
+        &mut self,
+        stage_id: StageId,
+        provider_override: Option<String>,
+    ) -> Option<PipelineId> {
+        for (pid, pipe) in &mut self.pipelines {
+            if let Some(stage) = pipe.stages.iter_mut().find(|s| s.id == stage_id) {
+                stage.state = StageState::Pending;
+                stage.cancel = tokio_util::sync::CancellationToken::new();
+                if let Some(prov) = provider_override {
+                    match &mut stage.kind {
+                        super::stage::StageKind::Transcribe { provider }
+                        | super::stage::StageKind::Diarize { provider }
+                        | super::stage::StageKind::Analyze { provider } => {
+                            *provider = prov;
+                        }
+                        _ => {}
+                    }
+                }
+                // A pipeline that had any retryable stage flips back
+                // to Running so the executor wakes; the executor
+                // re-checks the post-condition once stages settle.
+                if matches!(pipe.state, PipelineState::Failed) {
+                    pipe.state = PipelineState::Running;
+                }
+                return Some(*pid);
+            }
+        }
+        None
+    }
+
+    /// Mark a stage as `Skipped` so the executor walks past it without
+    /// running. Downstream stages with this stage in their inputs
+    /// proceed as if the skipped stage had completed. The caller is
+    /// responsible for explaining "why" to the user via the status
+    /// bar. (C3 UI dispatcher.)
+    pub fn skip_stage(&mut self, stage_id: StageId) -> Option<PipelineId> {
+        for (pid, pipe) in &mut self.pipelines {
+            if let Some(stage) = pipe.stages.iter_mut().find(|s| s.id == stage_id) {
+                stage.state = StageState::Skipped;
+                return Some(*pid);
+            }
+        }
+        None
+    }
+
+    /// Cancel every still-running stage in a pipeline. Marks the
+    /// pipeline `Cancelled`. Idempotent.
+    pub fn cancel_pipeline(&mut self, pipeline_id: PipelineId) {
+        if let Some(pipe) = self.pipelines.get_mut(&pipeline_id) {
+            for stage in &mut pipe.stages {
+                if matches!(
+                    stage.state,
+                    StageState::Pending
+                        | StageState::Running { .. }
+                        | StageState::Failed { .. }
+                ) {
+                    stage.cancel.cancel();
+                    stage.state = StageState::Cancelled;
+                }
+            }
+            pipe.state = PipelineState::Cancelled;
+        }
+    }
+
     /// Record a stage failure. If retries remain, the stage stays in
     /// `Failed { attempt }` and the caller schedules a re-dispatch after
     /// [`super::stage::Stage::backoff_after`]. If retries are exhausted
@@ -191,6 +262,78 @@ mod tests {
         // Force the cycle.
         p.stages.iter_mut().find(|s| s.id == a).unwrap().inputs = vec![b];
         assert!(reg.submit(p).is_err());
+    }
+
+    #[test]
+    fn retry_stage_resets_to_pending() {
+        let mut reg = PipelineRegistry::new();
+        let mut p = Pipeline::new("t".to_string());
+        let a = p.add_stage(Stage::new("a", StageKind::Extract));
+        let pid = reg.submit(p).unwrap();
+
+        // Drive it to Exhausted.
+        reg.mark_stage_failed(a, "boom".into());
+        reg.mark_stage_failed(a, "boom".into());
+        reg.mark_stage_failed(a, "boom".into());
+        assert!(matches!(
+            reg.get(pid).unwrap().state,
+            PipelineState::Failed
+        ));
+
+        // Retry — provider override is irrelevant for Extract but
+        // shouldn't blow up.
+        reg.retry_stage(a, None);
+        let pipe = reg.get(pid).unwrap();
+        assert!(matches!(pipe.stages[0].state, StageState::Pending));
+        assert!(matches!(pipe.state, PipelineState::Running));
+    }
+
+    #[test]
+    fn retry_stage_swaps_transcribe_provider() {
+        let mut reg = PipelineRegistry::new();
+        let mut p = Pipeline::new("t".to_string());
+        let a = p.add_stage(Stage::new(
+            "a",
+            StageKind::Transcribe {
+                provider: "whisper-cli".into(),
+            },
+        ));
+        let pid = reg.submit(p).unwrap();
+        reg.mark_stage_failed(a, "boom".into());
+
+        reg.retry_stage(a, Some("voxtral-api".into()));
+        let pipe = reg.get(pid).unwrap();
+        match &pipe.stages[0].kind {
+            StageKind::Transcribe { provider } => assert_eq!(provider, "voxtral-api"),
+            _ => panic!("kind mutated unexpectedly"),
+        }
+    }
+
+    #[test]
+    fn skip_stage_marks_skipped() {
+        let mut reg = PipelineRegistry::new();
+        let mut p = Pipeline::new("t".to_string());
+        let a = p.add_stage(Stage::new("a", StageKind::Subtitle));
+        reg.submit(p).unwrap();
+        reg.skip_stage(a);
+        let pipe = reg.iter().next().unwrap();
+        assert!(matches!(pipe.stages[0].state, StageState::Skipped));
+    }
+
+    #[test]
+    fn cancel_pipeline_cascades() {
+        let mut reg = PipelineRegistry::new();
+        let mut p = Pipeline::new("t".to_string());
+        let a = p.add_stage(Stage::new("a", StageKind::Extract));
+        let b = p.add_stage(Stage::new("b", StageKind::Subtitle).with_inputs(vec![a]));
+        let pid = reg.submit(p).unwrap();
+        reg.cancel_pipeline(pid);
+        let pipe = reg.get(pid).unwrap();
+        assert!(matches!(pipe.state, PipelineState::Cancelled));
+        for s in &pipe.stages {
+            assert!(matches!(s.state, StageState::Cancelled));
+        }
+        let _ = b; // silence
     }
 
     #[test]
