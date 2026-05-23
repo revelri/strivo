@@ -344,7 +344,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
 
     let shimmer = hotkey_shimmer_char(app);
 
-    // Context-sensitive buttons
+    // Context-sensitive [Pane] segment — only rendered when the active pane
+    // contributes any bindings. Segments are separated by `│` so the user
+    // can see which keys are pane-scoped vs. always-on.
+    let pane_segment_start = spans.len();
     match app.active_pane {
         ActivePane::Detail => {
             push_button(
@@ -367,8 +370,17 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
         }
         _ => {}
     }
+    let has_pane_segment = spans.len() > pane_segment_start;
+    if has_pane_segment {
+        // Trailing separator between [Pane] and [Global] segments.
+        spans.push(Span::styled(
+            "│ ",
+            Style::new().fg(Theme::dim()).bg(bar_bg),
+        ));
+    }
 
-    // Always-visible buttons
+    // [Global] segment — always-on actions. The leading separator only
+    // appears when [Pane] was empty, so the two cases land identically.
     push_button(
         &mut spans, "Search", "/", bar_style, key_style, shimmer, bar_bg,
     );
@@ -406,16 +418,28 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
 
     // Plugin status indicators
     let plugin_statuses = registry.status_lines(app);
-    let plugin_width: usize = plugin_statuses.iter().map(|s| s.len() + 2).sum();
+    // `│ ` separator (2 cells) only added when plugin segment is non-empty.
+    let plugin_sep_width = if plugin_statuses.is_empty() { 0 } else { 2 };
+    let plugin_width: usize =
+        plugin_statuses.iter().map(|s| s.len() + 2).sum::<usize>() + plugin_sep_width;
 
     let pad = total_width.saturating_sub(used + ind_width + plugin_width);
     spans.push(Span::styled(" ".repeat(pad), bar_style));
 
-    for status in &plugin_statuses {
+    // [Plugin] segment — separator only when plugins actually contribute
+    // something, otherwise the right side flows straight into the platform
+    // indicators.
+    if !plugin_statuses.is_empty() {
         spans.push(Span::styled(
-            format!("[{status}] "),
-            Style::new().fg(Theme::secondary()).bg(bar_bg),
+            "│ ",
+            Style::new().fg(Theme::dim()).bg(bar_bg),
         ));
+        for status in &plugin_statuses {
+            spans.push(Span::styled(
+                format!("[{status}] "),
+                Style::new().fg(Theme::secondary()).bg(bar_bg),
+            ));
+        }
     }
     spans.extend(indicators);
 
