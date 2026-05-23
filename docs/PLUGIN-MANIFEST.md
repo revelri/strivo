@@ -18,17 +18,36 @@ dlopen the named cdylib at daemon launch.
 ## Fields
 
 ```toml
-name           = "scratchpad"
-version        = "0.1.0"
-description    = "Quick-notes scratchpad pinned to F2"
-activation_key = "F2"                 # yazi syntax: "F2", "<C-x>", single char
-pane           = "right"              # "right" | "overlay" | "statusbar"
-library_path   = "~/scratchpad.so"    # cdylib loaded via libloading
+name              = "scratchpad"
+version           = "0.1.0"
+description       = "Quick-notes scratchpad pinned to ,s"
+activation_letter = "s"                # preferred — registers as ",s"
+# activation_key  = "F2"               # deprecated; pre-comma-namespace form
+pane              = "right"            # "right" | "overlay" | "statusbar"
+library_path      = "~/scratchpad.so"  # cdylib loaded via libloading
 ```
 
 All fields except `name` are optional. Unknown fields are ignored (so
 future StriVo versions can extend the schema without breaking older
 manifests).
+
+### Plugin keybinding namespace (`,X`)
+
+As of v0.4, plugins should register their activation key as a single
+letter under the **`,` (comma) plugin leader** — `,c` for Crunchr,
+`,a` for Archiver, `,s` for the scratchpad example above. Set
+`activation_letter = "<one letter>"`; the host wires it to
+`<comma><letter>` automatically.
+
+This keeps plugin activations out of the global keymap so they cannot
+collide with built-in bindings like `s` (settings) or `a` (toggle
+auto-record). Two plugins claiming the same letter under `,` will
+log a warning on startup and only the first registered will fire —
+pick a different letter to fix it.
+
+The older `activation_key` field still works but is **deprecated**
+and logs an info-level migration nudge on startup. Migrate at your
+convenience; both fields can coexist while you transition.
 
 ## How discovery works
 

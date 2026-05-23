@@ -88,8 +88,18 @@ pub struct PluginManifest {
     pub description: Option<String>,
     /// Suggested activation key, e.g. `F2` or `<C-x>`. The TUI keymap
     /// table doesn't bind this automatically yet — see audit follow-up.
+    ///
+    /// **Deprecated in favor of `activation_letter`** for the `,`
+    /// plugin-leader namespace (P4 / YAZI-AUDIT §5). Set
+    /// `activation_letter` instead and the plugin will land under
+    /// `,<letter>` without colliding with global bindings.
     #[serde(default)]
     pub activation_key: Option<String>,
+    /// Single letter that activates the plugin under the `,` leader
+    /// (e.g. `activation_letter = "c"` → `,c`). Preferred over
+    /// `activation_key`; future versions will warn when both are set.
+    #[serde(default)]
+    pub activation_letter: Option<String>,
     /// Where the plugin would prefer to render: "right" (Detail pane
     /// replacement), "overlay", or "statusbar".
     #[serde(default)]
@@ -139,7 +149,39 @@ pub fn scan_user_plugins(dir: &std::path::Path) -> Vec<PluginManifest> {
 /// users who notice the warning in the log can pick a different key
 /// before they're confused at runtime.
 fn audit_manifest_conflicts(manifests: &[PluginManifest]) {
+    // Activation-letter collisions inside the `,` namespace. Two
+    // plugins claiming `,c` is a hard configuration error the user
+    // can fix by renaming one.
+    let mut letters_seen: std::collections::HashMap<char, &str> =
+        std::collections::HashMap::new();
     for m in manifests {
+        let Some(ref l) = m.activation_letter else {
+            continue;
+        };
+        if let Some(ch) = l.chars().next().filter(|_| l.chars().count() == 1) {
+            if let Some(prev) = letters_seen.insert(ch, &m.name) {
+                tracing::warn!(
+                    plugin = %m.name,
+                    conflicts_with = %prev,
+                    letter = %ch,
+                    "plugin activation_letter collides — only the first registered will fire",
+                );
+            }
+        } else {
+            tracing::warn!(
+                plugin = %m.name,
+                value = %l,
+                "plugin activation_letter must be exactly one character",
+            );
+        }
+    }
+    for m in manifests {
+        if m.activation_key.is_some() && m.activation_letter.is_none() {
+            tracing::info!(
+                plugin = %m.name,
+                "plugin uses deprecated activation_key; please migrate to activation_letter (',X' namespace)",
+            );
+        }
         let Some(ref key_spec) = m.activation_key else {
             continue;
         };
