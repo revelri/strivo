@@ -10,8 +10,27 @@ use crate::config::AppConfig;
 
 use super::{DaemonEventKind, PaneId, Plugin, PluginAction, PluginCommand, PluginContext};
 
+/// Lifecycle state for a registered plugin. Surfaced by the plugin browser
+/// (P1) and consulted by `init_all` / `shutdown_all` to report errors
+/// without aborting the whole pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginStatus {
+    /// Registered but `init` has not yet run.
+    Initializing,
+    /// `init` succeeded; plugin is operational.
+    Ready,
+    /// `init` or `shutdown` returned an error. Surfaced in the plugin
+    /// browser and the event log.
+    Error(String),
+    /// Plugin is registered but suppressed (currently reserved — no UI
+    /// path sets this yet).
+    Disabled,
+}
+
 pub struct PluginRegistry {
     plugins: Vec<Box<dyn Plugin>>,
+    /// Per-plugin lifecycle state, parallel-indexed with `plugins`.
+    statuses: Vec<PluginStatus>,
     pane_map: HashMap<PaneId, usize>,
     /// O(1) lookup for plugin activation keybindings.
     command_map: HashMap<(KeyCode, KeyModifiers), PaneId>,
@@ -28,6 +47,7 @@ impl Default for PluginRegistry {
     fn default() -> Self {
         Self {
             plugins: Vec::new(),
+            statuses: Vec::new(),
             pane_map: HashMap::new(),
             command_map: HashMap::new(),
             active_plugin_pane: None,
@@ -54,6 +74,7 @@ impl PluginRegistry {
             }
         }
         self.plugins.push(plugin);
+        self.statuses.push(PluginStatus::Initializing);
     }
 
     /// Register a dynamically-loaded plugin. The library MUST outlive
@@ -117,24 +138,52 @@ impl PluginRegistry {
         let base_data = AppConfig::data_dir();
         let base_cache = AppConfig::cache_dir();
 
-        for plugin in &mut self.plugins {
+        for (idx, plugin) in self.plugins.iter_mut().enumerate() {
             let ctx = PluginContext {
                 config,
                 data_dir: base_data.join("plugins").join(plugin.name()),
                 cache_dir: base_cache.join("plugins").join(plugin.name()),
             };
-            plugin.init(&ctx)?;
+            match plugin.init(&ctx) {
+                Ok(()) => {
+                    if let Some(s) = self.statuses.get_mut(idx) {
+                        *s = PluginStatus::Ready;
+                    }
+                }
+                Err(e) => {
+                    let msg = format!("{e:#}");
+                    if let Some(s) = self.statuses.get_mut(idx) {
+                        *s = PluginStatus::Error(msg.clone());
+                    }
+                    tracing::error!(plugin = %plugin.name(), error = %msg, "plugin init failed");
+                    return Err(e);
+                }
+            }
         }
         Ok(())
     }
 
     pub fn shutdown_all(&mut self) {
-        for plugin in &mut self.plugins {
+        for (idx, plugin) in self.plugins.iter_mut().enumerate() {
             let name = plugin.name();
             if let Err(e) = plugin.shutdown() {
-                tracing::error!(plugin = %name, error = ?e, "plugin shutdown failed");
+                let msg = format!("{e:#}");
+                if let Some(s) = self.statuses.get_mut(idx) {
+                    *s = PluginStatus::Error(msg.clone());
+                }
+                tracing::error!(plugin = %name, error = %msg, "plugin shutdown failed");
             }
         }
+    }
+
+    /// Snapshot of each plugin's `(name, display_name, status)` for the
+    /// plugin browser (P1) and diagnostics.
+    pub fn plugin_statuses(&self) -> Vec<(&str, &str, &PluginStatus)> {
+        self.plugins
+            .iter()
+            .zip(self.statuses.iter())
+            .map(|(p, s)| (p.name(), p.display_name(), s))
+            .collect()
     }
 
     /// Dispatch a DaemonEvent to all interested plugins.
