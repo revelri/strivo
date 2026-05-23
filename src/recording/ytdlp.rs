@@ -1,12 +1,17 @@
 use anyhow::Result;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
 use crate::config::ResolvedFormat;
 
+const STDERR_TAIL_LINES: usize = 40;
+
 pub struct YtDlpProcess {
     child: Child,
     pub output_path: PathBuf,
+    stderr_tail: Arc<Mutex<std::collections::VecDeque<String>>>,
 }
 
 impl YtDlpProcess {
@@ -59,9 +64,26 @@ impl YtDlpProcess {
         cmd.stdout(std::process::Stdio::null());
         cmd.stderr(std::process::Stdio::piped());
 
-        let child = cmd.spawn()?;
+        let mut child = cmd.spawn()?;
 
-        Ok(Self { child, output_path })
+        let stderr_tail = Arc::new(Mutex::new(std::collections::VecDeque::with_capacity(
+            STDERR_TAIL_LINES,
+        )));
+        if let Some(stderr) = child.stderr.take() {
+            let tail = stderr_tail.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    let mut t = tail.lock().unwrap();
+                    if t.len() >= STDERR_TAIL_LINES {
+                        t.pop_front();
+                    }
+                    t.push_back(line);
+                }
+            });
+        }
+
+        Ok(Self { child, output_path, stderr_tail })
     }
 
     /// Gracefully stop by sending SIGINT, then wait
@@ -103,6 +125,16 @@ impl YtDlpProcess {
         std::fs::metadata(&self.output_path)
             .map(|m| m.len())
             .unwrap_or(0)
+    }
+
+    pub fn stderr_tail(&self) -> String {
+        self.stderr_tail
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 

@@ -1,12 +1,18 @@
 use anyhow::Result;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 
 use crate::config::ResolvedFormat;
 
+/// How many trailing stderr lines to keep for diagnostics.
+const STDERR_TAIL_LINES: usize = 40;
+
 pub struct FfmpegProcess {
     child: Child,
     pub output_path: PathBuf,
+    stderr_tail: Arc<Mutex<std::collections::VecDeque<String>>>,
 }
 
 pub struct FfmpegBuilder {
@@ -14,6 +20,7 @@ pub struct FfmpegBuilder {
     output_path: PathBuf,
     transcode: bool,
     format: Option<ResolvedFormat>,
+    from_start: bool,
 }
 
 impl FfmpegBuilder {
@@ -23,6 +30,7 @@ impl FfmpegBuilder {
             output_path,
             transcode: false,
             format: None,
+            from_start: false,
         }
     }
 
@@ -36,6 +44,14 @@ impl FfmpegBuilder {
         self
     }
 
+    /// Start pulling from the first segment in the HLS manifest instead of
+    /// the live edge. For Twitch this lands ~5 minutes back (the DVR window);
+    /// the closest the protocol gets to "from beginning".
+    pub fn from_start(mut self, enabled: bool) -> Self {
+        self.from_start = enabled;
+        self
+    }
+
     pub fn build(self) -> Result<FfmpegProcess> {
         if let Some(parent) = self.output_path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -43,6 +59,16 @@ impl FfmpegBuilder {
 
         let mut cmd = Command::new("ffmpeg");
         cmd.args(["-y", "-hide_banner", "-loglevel", "warning"]);
+
+        if self.from_start {
+            // -99999 lands on the first segment in the current HLS
+            // playlist (negative is clamped to 0 after `n_segments +
+            // live_start_index`). Plain `0` would target absolute
+            // segment index 0, which is never present in a live
+            // playlist with rolling EXT-X-MEDIA-SEQUENCE — ffmpeg then
+            // 404s every segment and exits.
+            cmd.args(["-live_start_index", "-99999"]);
+        }
 
         cmd.args(["-i", &self.input_url]);
 
@@ -85,11 +111,32 @@ impl FfmpegBuilder {
         cmd.stdout(std::process::Stdio::null());
         cmd.stderr(std::process::Stdio::piped());
 
-        let child = cmd.spawn()?;
+        let mut child = cmd.spawn()?;
+
+        // Drain stderr asynchronously: a piped+un-drained stderr fills
+        // the kernel pipe buffer and stalls ffmpeg. Also keep the last
+        // STDERR_TAIL_LINES so failure paths can surface the real error.
+        let stderr_tail = Arc::new(Mutex::new(std::collections::VecDeque::with_capacity(
+            STDERR_TAIL_LINES,
+        )));
+        if let Some(stderr) = child.stderr.take() {
+            let tail = stderr_tail.clone();
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr).lines();
+                while let Ok(Some(line)) = reader.next_line().await {
+                    let mut t = tail.lock().unwrap();
+                    if t.len() >= STDERR_TAIL_LINES {
+                        t.pop_front();
+                    }
+                    t.push_back(line);
+                }
+            });
+        }
 
         Ok(FfmpegProcess {
             child,
             output_path: self.output_path,
+            stderr_tail,
         })
     }
 }
@@ -138,6 +185,18 @@ impl FfmpegProcess {
         std::fs::metadata(&self.output_path)
             .map(|m| m.len())
             .unwrap_or(0)
+    }
+
+    /// Snapshot of the trailing ffmpeg stderr lines, joined with newlines.
+    /// Useful for surfacing the real cause of a non-zero exit.
+    pub fn stderr_tail(&self) -> String {
+        self.stderr_tail
+            .lock()
+            .unwrap()
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
