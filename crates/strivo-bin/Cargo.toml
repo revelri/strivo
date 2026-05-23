@@ -5,7 +5,12 @@ edition = "2021"
 description = "StriVo TUI Live Stream PVR — CLI binary"
 authors = ["revelri <slrevoy@mailbox.org>"]
 license = "MIT"
-repository = "https://github.com/revelri/strivo"
+repository = "https://github.com/Chorosyne/strivo"
+homepage = "https://github.com/Chorosyne/strivo"
+readme = "../../README.md"
+keywords = ["tui", "twitch", "youtube", "streaming", "recording"]
+categories = ["command-line-utilities", "multimedia"]
+publish = false
 rust-version = "1.75"
 
 [[bin]]

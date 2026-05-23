@@ -3536,7 +3536,6 @@ dependencies = [
 [[package]]
 name = "strivo-plugins"
 version = "0.3.0"
-source = "git+https://github.com/Chorosyne/strivo-plugins?branch=main#cd8dd8272a0d4741717220443094bb24a196ad81"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3555,6 +3554,7 @@ dependencies = [
  "tracing",
  "unicode-segmentation",
  "uuid",
+ "which",
 ]
 
 [[package]]

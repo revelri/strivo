@@ -12,6 +12,8 @@ Cargo.lock.backup
 CLAUDE.md
 DESIGN.md
 TODOS.md
+REVIEW.md
+YAZI-AUDIT.md
 
 # Agent / tool state
 .gstack/

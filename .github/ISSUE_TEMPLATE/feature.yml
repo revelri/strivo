@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an enhancement or new capability.
+title: "feat: "
+labels: ["enhancement", "triage"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user need or limitation prompted this request?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like strivo to behave?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you have tried, or other shapes the feature could take.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links to similar features in other tools, mockups, related issues, etc.
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have checked [ROADMAP.md](../ROADMAP.md) and existing issues, and this is not already tracked.
+          required: true

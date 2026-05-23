@@ -5,6 +5,7 @@ pub mod event_log;
 pub mod highlight;
 pub mod log_viewer;
 pub mod platform_debug;
+pub mod plugin_browser;
 pub mod properties;
 pub mod recording_list;
 pub mod schedule;

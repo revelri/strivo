@@ -1,21 +1,157 @@
-# StriVo config reference — ~/.config/strivo/config.toml
+# strivo config reference — ~/.config/strivo/config.toml
 #
-# This file documents the theming + UI keys that the animation/UI/UX sprint
-# added. Everything below is optional; defaults match the built-in "neon"
-# theme with full motion enabled. Drop any of these snippets into your real
-# config.toml to customize.
+# Everything in this file is optional. Strivo loads with sensible defaults
+# and the first-run wizard writes the minimum required keys for you. Use
+# this file as documentation: copy any block into your real config.toml to
+# override a default, or leave the block omitted to keep the default.
+#
+# Path discovery follows XDG. To see the resolved path on your system:
+#
+#   strivo config path
+#
+# After editing, validate with:
+#
+#   strivo config list
+
+# ─── Top-level recording behaviour ────────────────────────────────────────
+
+# Where finished recordings land. ${HOME} and ~ are expanded.
+# recording_dir = "~/Videos/strivo"
+
+# How often the monitor polls each platform for live status, in seconds.
+# Lower values catch streams sooner at the cost of more API requests.
+# poll_interval_secs = 60
+
+# ─── Per-platform credentials ─────────────────────────────────────────────
+# All client IDs / secrets are stored in the OS keyring by default; the
+# fields below are read at startup if present and migrated into the keyring.
+# Prefer the first-run wizard or `strivo config set` over checking secrets
+# into this file.
+
+# [twitch]
+# client_id     = "..."
+# client_secret = "..."
+
+# [youtube]
+# client_id     = "..."
+# client_secret = "..."
+# # Path to a Netscape-format cookies.txt export, used for members-only and
+# # age-restricted streams. Leave unset to disable cookie-based auth.
+# cookies_path  = "/path/to/cookies.txt"
+
+# [patreon]
+# # Patreon uses cookie-based auth via the membership API. Path to a
+# # Netscape-format cookies.txt export from a logged-in browser session.
+# cookies_path  = "/path/to/patreon-cookies.txt"
+
+# ─── Recording pipeline ───────────────────────────────────────────────────
+
+# [recording]
+# # Re-encode the recorded stream rather than copying the source bitstream.
+# # Off by default — copying is faster, lossless, and the codec is usually
+# # fine straight from the platform.
+# transcode = false
+#
+# # Filename template. Available placeholders:
+# #   {channel}  — sanitised channel name
+# #   {date}     — local date, YYYY-MM-DD
+# #   {time}     — local time, HHMMSS
+# #   {title}    — sanitised stream title (truncated to 80 chars)
+# #   {platform} — twitch / youtube / patreon
+# filename_template = "{channel}_{date}_{title}.mkv"
+
+# ─── Auto-record channels ─────────────────────────────────────────────────
+# Each [[auto_record_channels]] block records that channel whenever it goes
+# live. Toggle these from the TUI sidebar with `a`; edits there round-trip
+# through this file.
+#
+# [[auto_record_channels]]
+# platform     = "twitch"
+# channel_id   = "12345"
+# channel_name = "streamer_name"
+
+# ─── Cron schedules ───────────────────────────────────────────────────────
+# Force-record a channel on a recurring schedule regardless of live status,
+# e.g. to grab a known-time broadcast on a flaky API.
+#
+# [[schedules]]
+# platform   = "twitch"
+# channel_id = "12345"
+# cron       = "0 20 * * 1-5"   # weekdays at 8 pm local time
+
+# ─── Crunchr (transcription + analysis) ───────────────────────────────────
+# AI transcription with optional LLM analysis. Disabled by default — flip
+# `enabled = true` (or use the in-TUI config modal) to turn it on.
+#
+# [crunchr]
+# enabled = false
+#
+# # Transcription backend. Default: voxtral-openrouter.
+# #   "voxtral-openrouter" — Voxtral Mini Transcribe via OpenRouter
+# #                          ($0.003/min). Needs OPENROUTER_API_KEY.
+# #                          No diarization.
+# #   "voxtral-api"        — Mistral's direct API ($0.003/min). Needs
+# #                          MISTRAL_API_KEY. Supports `diarize = true`.
+# #   "whisperx-local"     — self-hosted Whisper large-v3 + pyannote 3.1.
+# #                          Free, ~8 GB VRAM via two-stage VRAM unloading.
+# #                          Needs `pip install whisperx torch`, HF_TOKEN.
+# #                          Supports `diarize = true`.
+# #   "voxtral-local"      — self-hosted Voxtral via any OpenAI-compatible
+# #                          endpoint (vLLM / RunPod). Free, needs GPU.
+# #                          No diarization.
+# #   "whisper-cli"        — local Whisper subprocess (pip install openai-whisper).
+# #                          No diarization.
+# backend = "voxtral-openrouter"
+#
+# # Env var name to read the transcription API key from. Defaults:
+# #   OPENROUTER_API_KEY for voxtral-openrouter
+# #   MISTRAL_API_KEY    for voxtral-api
+# #   HF_TOKEN           for whisperx-local (pyannote model download license)
+# # Override only if your shell uses a different variable name.
+# api_key_env = "OPENROUTER_API_KEY"
+#
+# # Base URL for self-hosted Voxtral. Only used when backend = "voxtral-local".
+# endpoint = "http://localhost:8000/v1"
+#
+# # Whisper CLI model (tiny / base / small / medium / large). Only used when
+# # backend = "whisper-cli".
+# whisper_model = "base"
+#
+# # Hard cap on the whisper subprocess in seconds.
+# whisper_timeout_secs = 7200
+#
+# # Request speaker diarization. Only honoured by backends that actually
+# # produce speaker labels: `voxtral-api` (Mistral cloud) and `whisperx-local`
+# # (self-hosted GPU). When on, finished recordings open the Speaker Editor
+# # modal where you can audition each speaker and rename labels in place.
+# diarize = false
+#
+# # After a transcription job finishes, mux the generated `.vtt` subtitles
+# # back into the recording's `.mkv` via `mkvmerge` as a soft-sub track.
+# # Skipped quietly if `mkvmerge` is not on PATH.
+# embed_subs = true
+#
+# # Tandem auto-trigger: when a recording finishes for one of these channels
+# # / playlists, automatically queue it for transcription.
+# tandem_channels  = ["Twitch:12345"]
+# tandem_playlists = []
+#
+# [crunchr.analysis]
+# enabled                = false
+# openrouter_api_key_env = "OPENROUTER_API_KEY"
+# model                  = "mistralai/mistral-7b-instruct"
 
 # ─── Theme ────────────────────────────────────────────────────────────────
-# Two forms are accepted. Pick one.
-
-# Form 1 — plain string (legacy, still supported).
-# Any built-in name: neon, neon-light, neon-hc, monochrome, tokyo-night,
-# gruvbox-dark, rose-pine-moon, nord, dracula, kanagawa, everforest-dark,
+# Two forms are accepted; pick one.
+#
+# Form 1 — plain string (legacy, still supported). Any built-in name:
+# neon, neon-light, neon-hc, monochrome, tokyo-night, gruvbox-dark,
+# rose-pine-moon, nord, dracula, kanagawa, everforest-dark,
 # catppuccin-mocha, solarized-dark. Also accepts the basename of any user
 # theme in ~/.config/strivo/themes/*.{toml,conf}.
 #
 # theme = "tokyo-night"
-
+#
 # Form 2 — rich table with per-slot overrides layered on top of a base.
 # `name` picks the base theme; `[theme.colors]` and `[theme.ansi]` swap
 # individual slots. Anything you omit inherits from the base.
@@ -35,14 +171,14 @@
 # green = "#50FA7B"
 
 # ─── User themes directory ────────────────────────────────────────────────
-# Drop theme files into ~/.config/strivo/themes/ — StriVo loads them on
+# Drop theme files into ~/.config/strivo/themes/ — strivo loads them on
 # startup (and on `R` inside the Ctrl+T theme picker). Two formats:
 #
-#   *.toml   — native StriVo theme (see any built-in for the shape)
-#   *.conf   — Kitty/Ghostty keyword format (foreground, background,
-#              color0..color15, cursor, selection_foreground,
-#              selection_background). Unknown keys are skipped with a
-#              warning; missing slots fall back to Neon.
+#   *.toml   native strivo theme (see any built-in for the shape)
+#   *.conf   Kitty / Ghostty keyword format (foreground, background,
+#            color0..color15, cursor, selection_foreground,
+#            selection_background). Unknown keys are skipped with a
+#            warning; missing slots fall back to Neon.
 #
 # To convert a Kitty theme once (writes ~/.config/strivo/themes/<slug>.toml):
 #
@@ -50,12 +186,12 @@
 #   strivo theme import /path/to/kitty-theme.conf --name my-theme
 
 # ─── UI ───────────────────────────────────────────────────────────────────
-# Animation + accessibility toggles.
-
+# Animation and accessibility toggles.
+#
 # [ui]
 # # Snap every tween/pulse/shimmer to its end state. Equivalent to the
 # # STRIVO_REDUCE_MOTION=1 environment variable (env wins if both are set).
-# reduce_motion = false
+# reduce_motion  = false
 #
 # # Reserved for screen-reader-friendly status strings. Not all widgets
 # # consume this yet — safe to leave at default.

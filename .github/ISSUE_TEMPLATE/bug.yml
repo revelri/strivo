@@ -1,0 +1,84 @@
+name: Bug report
+description: Something is broken or behaving incorrectly.
+title: "bug: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please redact any OAuth
+        credentials, session cookies, or other secrets from logs before
+        pasting them below.
+  - type: input
+    id: version
+    attributes:
+      label: strivo version
+      description: Output of `strivo --version`
+      placeholder: "strivo 0.3.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other (please describe in summary)
+    validations:
+      required: true
+  - type: input
+    id: rustc
+    attributes:
+      label: Rust toolchain (only if built from source)
+      description: Output of `rustc --version`
+      placeholder: "rustc 1.85.0 (stable)"
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Affected platform integration
+      multiple: true
+      options:
+        - Twitch
+        - YouTube
+        - Patreon
+        - "Not platform-specific (TUI / daemon / plugin / build)"
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What did you do, what did you expect to happen, what actually happened?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. `strivo daemon start`
+        2. `strivo` and select channel X
+        3. Press `a`
+        4. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log excerpts
+      description: |
+        Find the log with `strivo log path` (typically
+        `~/.local/state/strivo/strivo.log`). Re-run with `-l debug` if the
+        log is thin. **Please redact secrets.**
+      render: shell
+  - type: checkboxes
+    id: terms
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have redacted credentials and cookies from any log output above.
+          required: true

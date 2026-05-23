@@ -1,6 +1,16 @@
 # Plugin Manifest Format (M4.4 + dynamic loader follow-up)
 
-Yazi-inspired (see YAZI-AUDIT.md §5). Drop a TOML file at
+> **Alpha plugin-safety warning.** In 0.3.0, third-party plugins are **not**
+> recommended for end users. The plugin ABI is a raw `extern "Rust"` symbol
+> handshake with no version check, so a plugin built against a different
+> strivo build or a different rustc toolchain can silently corrupt memory
+> and crash the daemon — taking any in-flight recording with it. Run only
+> first-party plugins (Crunchr, Archiver) shipped from the matching
+> `Chorosyne/strivo-plugins` revision, unless you are the plugin author and
+> compiled it against this exact strivo checkout. A versioned ABI handshake
+> is tracked for 0.4.x.
+
+Drop a TOML file at
 `~/.config/strivo/plugins/<slug>.toml` and StriVo will discover it on
 startup, list it in the Settings tab, and — if `library_path` is set —
 dlopen the named cdylib at daemon launch.

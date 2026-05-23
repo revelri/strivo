@@ -1,6 +1,28 @@
 # StriVo Roadmap
 
-Single source of truth for what is shipped, what is next, and what is explicitly out of scope. Absorbs the previous `TODOS.md` and `DESIGN-TODOS.md` planning state; companion docs are [DESIGN.md](./DESIGN.md) (visual spec), [YAZI-AUDIT.md](./YAZI-AUDIT.md) (TUI best-practice audit), [REVIEW.md](./REVIEW.md) (adversarial framework review), and [CHANGELOG.md](./CHANGELOG.md) (semver release notes only).
+Single source of truth for what is shipped, what is next, and what is
+explicitly out of scope. Absorbs the previous `TODOS.md` and `DESIGN-TODOS.md`
+planning state. The user-facing companion is
+[CHANGELOG.md](./CHANGELOG.md) (semver release notes only).
+
+References to `DESIGN.md`, `YAZI-AUDIT.md`, and `REVIEW.md` below point to
+internal design notes (visual spec, TUI best-practice audit, adversarial
+framework review respectively) that are kept out of the public tree.
+
+## Quick roadmap
+
+- **Shipped (0.1 → 0.3):** Twitch / YouTube / Patreon monitoring and
+  recording, ratatui TUI with sidebar / channel detail / recording browser /
+  settings / wizard / themes, daemon mode over Unix sockets, first-party
+  plugins (Crunchr transcription, Archiver gallery), dynamic cdylib plugin
+  loader.
+- **Next (0.4 → 0.5):** Recording durability (journal + crash-recovery for
+  in-flight ffmpeg processes), Crunchr retry / cancellation, full settings UI
+  coverage, command palette and unified keymap dispatcher, plugin ABI
+  versioning handshake.
+- **Vision:** A mature, composable terminal DVR for live streams with a
+  small, well-defined plugin surface and a complementary *arr-style web UI
+  that talks to the same daemon socket.
 
 **Status legend:** ✅ shipped · 🟡 in progress · ⬜ planned · ⏸ deferred (with reason)
 
@@ -69,8 +91,8 @@ Theme: finish features that already half-exist. Back-to-front per phase.
 - ⬜ **Patreon parity** — token refresh, backoff, dedupe missing. Generalize into shared `OAuthClient` trait. *Files:* `src/platform/patreon.rs`, `src/monitor/patreon.rs`
 - ⬜ **Archiver job persistence** — `update_job` is `#[allow(dead_code)]` at `strivo-plugins/src/archiver/db.rs:115`. Either wire it through or remove. Same for `get_channel_stats`.
 - ⬜ **Crunchr semantic search backend** — `SearchMode::Semantic` tab is a stub. Either feature-flag off or land fastembed-rs / OpenAI-embeddings backend with sqlite-vss. *Files:* `strivo-plugins/src/crunchr/types.rs:40–59`, `strivo-plugins/src/crunchr/mod.rs`
-- ⬜ **Crunchr retry + cancellation** — one transient API timeout kills the job; once started it can't be aborted. Add `CancellationToken` per job + backoff retry (3 attempts, 5/10/30 s). Adopt yazi's cooperative-cancellation idiom: long inner loops poll the token between chunks. *Files:* `strivo-plugins/src/crunchr/mod.rs:163–289`. [→ [YAZI-AUDIT §12](./YAZI-AUDIT.md)]
-- ⬜ **Archiver durability** — same cancellation-token discipline applied to the back-catalog pull loop in `strivo-plugins/src/archiver/downloader.rs`; ties into the recording journal above. [→ [YAZI-AUDIT §12](./YAZI-AUDIT.md)]
+- ⬜ **Crunchr retry + cancellation** — one transient API timeout kills the job; once started it can't be aborted. Add `CancellationToken` per job + backoff retry (3 attempts, 5/10/30 s). Adopt yazi's cooperative-cancellation idiom: long inner loops poll the token between chunks. *Files:* `strivo-plugins/src/crunchr/mod.rs:163–289`. *(YAZI-AUDIT §12 — internal note)*
+- ⬜ **Archiver durability** — same cancellation-token discipline applied to the back-catalog pull loop in `strivo-plugins/src/archiver/downloader.rs`; ties into the recording journal above. *(YAZI-AUDIT §12 — internal note)*
 - ⬜ **Crunchr token counting** — `words / 0.75` is wrong for code and non-English. Use `tiktoken-rs`. *Files:* `strivo-plugins/src/crunchr/pipeline.rs:171–174`
 - ⬜ **Stream URL validation before ffmpeg launch** — HEAD the URL or parse streamlink exit codes distinctly so stale HLS manifests don't yield cryptic ffmpeg errors. *Files:* `src/stream/resolver.rs`
 - ⬜ **Monitor first-poll race** — 10 s timeout can fire concurrently with auth. Gate poll on *auth-notified OR (timeout AND auth-present)*. *Files:* `src/monitor/mod.rs:62–112`
@@ -86,7 +108,7 @@ Theme: finish features that already half-exist. Back-to-front per phase.
 ### Phase 3 — TUI surfaces for existing backend
 
 - ⬜ **Schedule pane** — list with next-fire times, add/edit/delete dialogs writing back to `config.toml`; "next scheduled" indicator in Sidebar
-- ⬜ **Recording management** — `v` multi-select, `D` delete-to-trash (`~/.local/share/strivo/trash/`, 7-day TTL), `Enter` metadata pane (codec, bitrate, size, start/end), `shift+r` rename, `shift+m` move. Selection state shape: `IndexMap<RecordingId, u64>` (insertion order + microsecond timestamp tiebreaker) mirroring yazi's `Selected`. [→ [YAZI-AUDIT §11](./YAZI-AUDIT.md)]
+- ⬜ **Recording management** — `v` multi-select, `D` delete-to-trash (`~/.local/share/strivo/trash/`, 7-day TTL), `Enter` metadata pane (codec, bitrate, size, start/end), `shift+r` rename, `shift+m` move. Selection state shape: `IndexMap<RecordingId, u64>` (insertion order + microsecond timestamp tiebreaker) mirroring yazi's `Selected`. *(YAZI-AUDIT §11 — internal note)*
 - ⬜ **Playback overlay (mpv)** — `[⏸ 1:23 / 5:45  1.0x  vol 80%]`; `Space` pause, `<`/`>` speed, `j/k` seek ±10 s, `u` resume-from-last-position. Backend exposed in `src/playback/mod.rs`, never rendered.
 - ⬜ **Live log tail** — subscribe TUI to a `tracing_subscriber` layer; mirror events into in-memory ring
 - ⬜ **Event log pop-over** (`Shift+E`) — last 100 user-facing events with timestamp/level/source
@@ -102,7 +124,7 @@ Theme: finish features that already half-exist. Back-to-front per phase.
 - ⬜ Enumerate all ~67 fields across 15 structs in `src/config/`
 - ⬜ Tag each as `{exposed, hidden, derived, secret}`; emit a coverage report doc
 - ⬜ Decide persistence split: `config.toml` (user-authored) vs `~/.local/state/strivo/state.json` (TUI-managed: watched flags, selection, search history, last-used-theme). Documented in a short ARCHITECTURE.md follow-up.
-- ⬜ **Defaults-as-preset** — defaults live in code as a `Default` struct; user TOML is a strict overlay (not a full file). "Reset to defaults" rewrites the overlay back to empty. Optional follow-up: split `[[auto_record_channels]]` / `[[schedules]]` into prepend/append vecs so future official additions don't force user-file rewrites. [→ [YAZI-AUDIT §10](./YAZI-AUDIT.md)]
+- ⬜ **Defaults-as-preset** — defaults live in code as a `Default` struct; user TOML is a strict overlay (not a full file). "Reset to defaults" rewrites the overlay back to empty. Optional follow-up: split `[[auto_record_channels]]` / `[[schedules]]` into prepend/append vecs so future official additions don't force user-file rewrites. *(YAZI-AUDIT §10 — internal note)*
 
 ### Phase 2 — Settings tab redesign
 - ⬜ Hierarchical groups: **Recording / Archiver / Crunchr / Notifications / Output / Theme / Keymap**
@@ -128,7 +150,7 @@ TUI controls deliberately *not* backed by config (decide explicitly):
 
 **Goal:** one keymap source of truth, no per-pane drift, room for remap (deferred but unblocked).
 
-### Phase 1 — Centralize *(highest-leverage adoption from the yazi audit)* [→ [YAZI-AUDIT §2](./YAZI-AUDIT.md)]
+### Phase 1 — Centralize *(highest-leverage adoption from the yazi audit)* *(YAZI-AUDIT §2 — internal note)*
 - ⬜ New module `src/tui/keymap.rs` with `KeyAction` enum + binding table; chord struct analogous to yazi's `Chord { on, run, desc }`
 - ⬜ Each pane consumes `(ActivePane, KeyEvent) → Option<KeyAction>` via lookup, not match arms
 - ⬜ Replace scattered match arms in `src/app.rs::handle_key`
@@ -143,7 +165,7 @@ TUI controls deliberately *not* backed by config (decide explicitly):
 
 ### Phase 3 — Conflict / coverage verification
 - ⬜ Build-time check: dedupe `(pane, key, modifiers)`; fail if duplicate (yazi's prepend/append dedup hook is the reference shape)
-- ⬜ **Help overlay auto-generated from the keymap table** — three columns (key / action / desc), pane-aware so "what keys work right now?" stops being a hand-maintained string. [→ [YAZI-AUDIT §8](./YAZI-AUDIT.md)]
+- ⬜ **Help overlay auto-generated from the keymap table** — three columns (key / action / desc), pane-aware so "what keys work right now?" stops being a hand-maintained string. *(YAZI-AUDIT §8 — internal note)*
 
 ### Phase 4 — Foundation for remap (deferred from Tier 4)
 - ⬜ Lookup-driven dispatch means `~/.config/strivo/keybindings.toml` becomes a config overlay rather than a rewrite — `prepend_keymap` / `keymap` / `append_keymap` exactly as yazi does it
@@ -152,28 +174,28 @@ TUI controls deliberately *not* backed by config (decide explicitly):
 
 ## M4 — Yazi-grade TUI Polish (0.6.0)
 
-Driven by findings in [YAZI-AUDIT.md](./YAZI-AUDIT.md). Adversarial framework review (ratatui vs opentui) in [REVIEW.md](./REVIEW.md) — verdict: stay on ratatui; this milestone is what unlocks the polish that previously felt blocked.
+Driven by findings in YAZI-AUDIT.md. Adversarial framework review (ratatui vs opentui) in REVIEW.md — verdict: stay on ratatui; this milestone is what unlocks the polish that previously felt blocked.
 
 ### Phase 1 — Substrate (the two big structural lifts)
-- ⬜ **Async task manager** — new `src/tasks/` module: `TaskId`, `TaskKind` (Record / Transcode / ArchiverPull / CrunchrAnalyze / ThemeImport), `Progress` enum with byte-based percent. Per-task `CancellationToken`. Right-side or status-bar tasks pane: `[2 active · Crunchr 73% · Pull 1.2 GB/3.4 GB · ETA 2m]`. Subsumes the half-built progress spinners and gives notifications a clean event source. [→ [YAZI-AUDIT §4](./YAZI-AUDIT.md)]
-- ⬜ **Input modes** — `InputMode { Normal, Visual, Insert }` distinct from `ActivePane`. Stateless enum; transitions live in the keymap dispatcher from M3. Visual mode is the home for multi-select (M1 Phase 3 graduates into Visual). [→ [YAZI-AUDIT §1](./YAZI-AUDIT.md)]
+- ⬜ **Async task manager** — new `src/tasks/` module: `TaskId`, `TaskKind` (Record / Transcode / ArchiverPull / CrunchrAnalyze / ThemeImport), `Progress` enum with byte-based percent. Per-task `CancellationToken`. Right-side or status-bar tasks pane: `[2 active · Crunchr 73% · Pull 1.2 GB/3.4 GB · ETA 2m]`. Subsumes the half-built progress spinners and gives notifications a clean event source. *(YAZI-AUDIT §4 — internal note)*
+- ⬜ **Input modes** — `InputMode { Normal, Visual, Insert }` distinct from `ActivePane`. Stateless enum; transitions live in the keymap dispatcher from M3. Visual mode is the home for multi-select (M1 Phase 3 graduates into Visual). *(YAZI-AUDIT §1 — internal note)*
 
 ### Phase 2 — Discoverability
-- ⬜ **Command palette** (`:`) — input widget parses a string into the same `KeyAction` enum from M3. Keys and commands dispatch through one path. [→ [YAZI-AUDIT §3](./YAZI-AUDIT.md)]
+- ⬜ **Command palette** (`:`) — input widget parses a string into the same `KeyAction` enum from M3. Keys and commands dispatch through one path. *(YAZI-AUDIT §3 — internal note)*
 - ⬜ **Marks / registers** for channels — `'a` jumps to mark; persisted to `~/.local/state/strivo/marks.json` as `BTreeMap<char, ChannelId>`.
-- ⬜ **Fuzzy finder upgrade** — `src/search.rs` returns score + highlight spans (via `nucleo` or `skim`); match-cache parallel to yazi's `Finder.matched` so `n` / `N` jump-to-next is O(1); field filters (`date:`, `channel:`, `duration:`, `size:`); sort by relevance. [→ [YAZI-AUDIT §7](./YAZI-AUDIT.md)]
+- ⬜ **Fuzzy finder upgrade** — `src/search.rs` returns score + highlight spans (via `nucleo` or `skim`); match-cache parallel to yazi's `Finder.matched` so `n` / `N` jump-to-next is O(1); field filters (`date:`, `channel:`, `duration:`, `size:`); sort by relevance. *(YAZI-AUDIT §7 — internal note)*
 
 ### Phase 3 — Preview pipeline
-- ⬜ **Lazy preview lock + spawn-cancel** — debounce/cancel previous preview job on Sidebar selection change; one `tokio::spawn` per preview, results back via a render lock. [→ [YAZI-AUDIT §6](./YAZI-AUDIT.md)]
+- ⬜ **Lazy preview lock + spawn-cancel** — debounce/cancel previous preview job on Sidebar selection change; one `tokio::spawn` per preview, results back via a render lock. *(YAZI-AUDIT §6 — internal note)*
 - ⬜ **Hover / preview pane** — channel preview (thumbnail + last-N stream meta), recording preview (codec/bitrate/duration + first-frame thumbnail via FFmpeg-extract), schedule preview ("if this cron fires, next 5 dates").
 
 ### Phase 4 — Plugin system maturation
-- ⬜ **Plugin manifest format** — `[plugin]` section per crate declaring name, version, hotkeys, pane preferences. Lets users introspect installed plugins without grep. [→ [YAZI-AUDIT §5](./YAZI-AUDIT.md)]
+- ⬜ **Plugin manifest format** — `[plugin]` section per crate declaring name, version, hotkeys, pane preferences. Lets users introspect installed plugins without grep. *(YAZI-AUDIT §5 — internal note)*
 - ⬜ **Plugin discovery** — scan `~/.config/strivo/plugins/*.toml` for declared out-of-tree plugin paths. (Lua not adopted; Rust crates remain the plugin substrate.)
 - ⬜ Lifecycle hygiene — adopt yazi's hook pattern (run on completion + cancellation) so plugin shutdown errors are surfaced rather than swallowed.
 
 ### Phase 5 — Render-loop micro-optimization
-- ⬜ **Batched event draining** — when daemon emits a burst (`ChannelsUpdated` + `RecordingProgress` + …), drain via `try_recv()` until empty, then redraw once. Mirrors yazi's `recv().await` + drain loop. [→ [YAZI-AUDIT §9](./YAZI-AUDIT.md)] (Other render-loop ideas — partial render, synchronized output — skipped; see audit §9 rationale.)
+- ⬜ **Batched event draining** — when daemon emits a burst (`ChannelsUpdated` + `RecordingProgress` + …), drain via `try_recv()` until empty, then redraw once. Mirrors yazi's `recv().await` + drain loop. *(YAZI-AUDIT §9 — internal note)* (Other render-loop ideas — partial render, synchronized output — skipped; see audit §9 rationale.)
 
 ### Phase 6 — Polish (the loose-end pile)
 - ⬜ Notifications extended beyond go-live: recording-complete, schedule-fired, transcription-done, disk-low

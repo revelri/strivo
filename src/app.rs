@@ -558,6 +558,10 @@ pub struct AppState {
     pub event_log_opened_at: Option<std::time::Instant>,
     /// `Some` iff the Shift+E event-log pop-over is visible.
     pub show_event_log: bool,
+    /// Shift+P plugin browser overlay visibility.
+    pub show_plugin_browser: bool,
+    /// When the plugin browser opened — drives the enter ramp.
+    pub plugin_browser_opened_at: Option<std::time::Instant>,
     /// Scroll offset within the event log (rows from top, newest-first).
     pub event_log_scroll: usize,
 
@@ -589,6 +593,7 @@ pub enum OverlayKey {
     Stopping,
     EventLog,
     TextInput,
+    PluginBrowser,
 }
 
 /// Live state for the theme picker overlay. Preview is applied immediately
@@ -736,6 +741,8 @@ impl AppState {
             stopping_opened_at: None,
             event_log_opened_at: None,
             show_event_log: false,
+            show_plugin_browser: false,
+            plugin_browser_opened_at: None,
             event_log_scroll: 0,
             last_hotkey: None,
             last_hotkey_at: None,
@@ -757,6 +764,7 @@ impl AppState {
             OverlayKey::Stopping => self.stopping_opened_at,
             OverlayKey::EventLog => self.event_log_opened_at,
             OverlayKey::TextInput => self.text_input_opened_at,
+            OverlayKey::PluginBrowser => self.plugin_browser_opened_at,
         };
         let Some(at) = at else {
             return 1.0;
@@ -790,6 +798,10 @@ impl AppState {
         );
         sync_open(&mut self.event_log_opened_at, self.show_event_log);
         sync_open(&mut self.text_input_opened_at, self.text_input.is_some());
+        sync_open(
+            &mut self.plugin_browser_opened_at,
+            self.show_plugin_browser,
+        );
         // Drop terminal tasks 2 seconds after they enter the Done/Failed
         // state — long enough for the user to read the result, short
         // enough to keep the tail clean.
@@ -1761,6 +1773,10 @@ impl AppState {
                 self.event_log_scroll = 0;
                 None
             }
+            A::PluginBrowserToggle => {
+                self.show_plugin_browser = !self.show_plugin_browser;
+                None
+            }
             A::EnterStatusBar => {
                 if self.active_pane != ActivePane::StatusBar {
                     self.prev_pane = Some(self.active_pane.clone());
@@ -2257,6 +2273,10 @@ impl AppState {
         // the table dispatches on action codes, not modal toggles.
         if self.show_help && matches!(key.code, KeyCode::Esc) {
             self.show_help = false;
+            return None;
+        }
+        if self.show_plugin_browser && matches!(key.code, KeyCode::Esc) {
+            self.show_plugin_browser = false;
             return None;
         }
 

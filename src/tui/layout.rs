@@ -92,6 +92,16 @@ pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) 
         );
     }
 
+    if app.show_plugin_browser {
+        crate::tui::widgets::plugin_browser::render(
+            frame,
+            frame.area(),
+            app,
+            registry,
+            app.overlay_enter(crate::app::OverlayKey::PluginBrowser, 0.18),
+        );
+    }
+
     if app.text_input.is_some() {
         crate::tui::widgets::text_input::render(
             frame,
