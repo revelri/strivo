@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -43,6 +43,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
         .border_style(Theme::border_ramp(
             app.overlay_enter(crate::app::OverlayKey::Properties, 0.18),
         ))
+        .padding(Padding::horizontal(1))
         .title(format!(" {title_display} "))
         .title_style(Theme::title());
 

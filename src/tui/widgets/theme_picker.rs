@@ -10,7 +10,9 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{
+        Block, BorderType, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Wrap,
+    },
     Frame,
 };
 
@@ -52,6 +54,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(border_style)
+        .padding(Padding::horizontal(1))
         .title(" Theme Picker ")
         .title_style(Theme::title());
     let inner = block.inner(center);

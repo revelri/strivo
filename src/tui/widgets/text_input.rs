@@ -10,7 +10,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph},
+    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph},
     Frame,
 };
 
@@ -199,7 +199,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, enter_progress: f32
         .title_alignment(Alignment::Center)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(border_style);
+        .border_style(border_style)
+        .padding(Padding::horizontal(1));
 
     let inner = block.inner(center);
     frame.render_widget(block, center);

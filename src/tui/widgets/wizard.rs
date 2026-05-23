@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -33,6 +33,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState) {
         .border_style(Theme::border_ramp(
             app.overlay_enter(crate::app::OverlayKey::Wizard, 0.24),
         ))
+        .padding(Padding::horizontal(1))
         .title(" Setup Wizard ")
         .title_style(Theme::title());
 

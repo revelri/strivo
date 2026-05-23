@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Clear, Padding, Paragraph, Wrap},
     Frame,
 };
 
@@ -83,6 +83,7 @@ pub fn render_help(
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Theme::border_ramp(enter_progress))
+        .padding(Padding::horizontal(1))
         .title(" Help ")
         .title_style(Theme::title());
 
@@ -321,6 +322,7 @@ pub fn render_stopping(frame: &mut Frame, area: Rect, app: &AppState) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(Theme::blend_for(Theme::dim(), Theme::red(), enter_progress)))
+        .padding(Padding::horizontal(1))
         .title(" Stopping Recordings ")
         .title_style(Style::new().fg(Theme::red()).add_modifier(Modifier::BOLD));
 
@@ -393,6 +395,7 @@ pub fn render_confirm(frame: &mut Frame, area: Rect, message: &str, enter_progre
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::new().fg(border_color))
+        .padding(Padding::horizontal(1))
         .title(" Confirm ")
         .title_style(
             Style::new()
