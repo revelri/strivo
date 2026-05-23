@@ -71,6 +71,7 @@ async fn handle_command(cmd: &Command, config_path: Option<&std::path::Path>) ->
         Command::Search { query } => handle_search(query, config_path),
         Command::Theme { action } => handle_theme_command(action),
         Command::Doctor => handle_doctor().await,
+        Command::Serve { bind, api_key } => handle_serve(bind, api_key.as_deref()).await,
         Command::Chapter { file, every } => handle_chapter(file, *every),
         Command::Import { source } => handle_import(source, config_path),
         Command::Merge { output, sources } => handle_merge(output, sources),
@@ -482,6 +483,40 @@ fn handle_chapter(file: &std::path::Path, every: u64) -> Result<()> {
     embed_chapters(file, &chapters)?;
     println!("ok");
     Ok(())
+}
+
+async fn handle_serve(bind: &str, api_key: Option<&str>) -> Result<()> {
+    let addr: std::net::SocketAddr = bind
+        .parse()
+        .with_context(|| format!("invalid --bind {bind}"))?;
+
+    // Key precedence: explicit --api-key > config.toml `[web] api_key`
+    // > freshly generated + saved.
+    let mut cfg = config::AppConfig::load(None).context("load config")?;
+    let api_key = if let Some(k) = api_key {
+        strivo_web::auth::ApiKey(k.to_string())
+    } else if let Some(k) = cfg.web.api_key.clone() {
+        strivo_web::auth::ApiKey(k)
+    } else {
+        let generated = strivo_web::auth::ApiKey::generate();
+        cfg.web.api_key = Some(generated.as_str().to_string());
+        if let Err(e) = cfg.save(None) {
+            tracing::warn!("could not persist [web] api_key to config.toml: {e}");
+        }
+        generated
+    };
+
+    println!(
+        "strivo-web on http://{} (X-Api-Key: {})",
+        addr,
+        api_key.as_str()
+    );
+    strivo_web::serve(strivo_web::ServeConfig {
+        bind: addr,
+        api_key,
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 async fn handle_doctor() -> Result<()> {

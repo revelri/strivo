@@ -1,0 +1,14 @@
+  {% if live_channels.is_empty() %}
+    <li class="empty">nothing live right now</li>
+  {% else %}
+    {% for ch in live_channels %}
+    <li class="live-row">
+      <span class="platform p-{{ ch.platform }}">{{ ch.platform }}</span>
+      <span class="name">{{ ch.display_name }}</span>
+      <span class="title">{{ ch.title }}</span>
+      {% if ch.viewer_count > 0 %}
+      <span class="viewers">{{ ch.viewer_count }} viewers</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  {% endif %}

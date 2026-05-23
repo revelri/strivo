@@ -40,9 +40,29 @@ pub struct AppConfig {
     #[serde(default)]
     pub archiver: ArchiverConfig,
 
+    /// Web UI (`strivo serve`) settings. Generated lazily on first
+    /// `serve` invocation; persisted so the API key survives restarts.
+    #[serde(default)]
+    pub web: WebConfig,
+
     /// Tracks the path this config was loaded from, so save() can use it
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
+}
+
+/// `[web]` config section. (Part 11.)
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct WebConfig {
+    /// API key for the `X-Api-Key` header on `/api/v1/*`. Persisted so
+    /// repeated `strivo serve` invocations hand the same key to scripts.
+    /// `None` means "generate on first run and save".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// HMAC secret used to sign browser-session cookies (W3). Persisted
+    /// so cookies survive restarts. `None` means "generate on first
+    /// session and save".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_secret: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -559,6 +579,7 @@ impl Default for AppConfig {
             schedule: Vec::new(),
             crunchr: CrunchrConfig::default(),
             archiver: ArchiverConfig::default(),
+            web: WebConfig::default(),
             config_path: None,
         }
     }

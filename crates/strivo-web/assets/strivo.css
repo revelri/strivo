@@ -1,0 +1,72 @@
+/* Skeleton CSS — palette pulled from DESIGN.md (neon dark).
+   Refine per-page in later phases. */
+:root {
+  --bg: #0a0e14;
+  --bg-2: #11161d;
+  --fg: #d8dee9;
+  --fg-dim: #6b7280;
+  --accent: #00d4ff;
+  --ok: #7ee787;
+  --warn: #ffb86b;
+  --err: #ff6b6b;
+  --border: #1f2630;
+}
+
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 14px; line-height: 1.5;
+}
+
+.topbar {
+  display: flex; align-items: center; gap: 2rem;
+  padding: 0.75rem 1.25rem; background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+}
+.brand { color: var(--accent); font-weight: bold; letter-spacing: 0.04em; }
+.topbar nav a {
+  color: var(--fg-dim); text-decoration: none; margin-right: 1rem;
+  text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.05em;
+}
+.topbar nav a:hover { color: var(--fg); }
+
+main { padding: 1.5rem 1.25rem; max-width: 1100px; margin: 0 auto; }
+h1 { color: var(--accent); font-weight: normal; letter-spacing: 0.04em; }
+
+.cards { display: flex; gap: 1rem; margin: 1.5rem 0; }
+.card {
+  flex: 1; padding: 1.25rem;
+  background: var(--bg-2); border: 1px solid var(--border); border-radius: 4px;
+  display: flex; flex-direction: column; align-items: flex-start;
+}
+.card .num { font-size: 2rem; color: var(--accent); }
+.card .lbl { color: var(--fg-dim); text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.06em; }
+
+.platforms ul { list-style: none; padding: 0; }
+.platforms li { padding: 0.25rem 0; }
+.ok { color: var(--ok); } .off { color: var(--fg-dim); }
+
+/* Dashboard partials */
+section { margin: 1.5rem 0; }
+h2 { color: var(--fg-dim); text-transform: uppercase; font-size: 0.85rem; letter-spacing: 0.06em; }
+.card.connections .conn-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.conn { padding: 0.1rem 0.5rem; border-radius: 3px; font-size: 0.8rem; }
+.conn.ok { background: rgba(126, 231, 135, 0.15); color: var(--ok); }
+.conn.off { background: rgba(107, 114, 128, 0.15); color: var(--fg-dim); }
+
+.live, .recordings { background: var(--bg-2); border: 1px solid var(--border); border-radius: 4px; padding: 1rem; }
+.live ul, .recordings ul { list-style: none; padding: 0; margin: 0; }
+.live li, .recordings li { padding: 0.4rem 0; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 80px 1fr 2fr auto; gap: 1rem; align-items: center; }
+.live li:last-child, .recordings li:last-child { border-bottom: none; }
+.empty { color: var(--fg-dim); font-style: italic; }
+.platform { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.1rem 0.4rem; border-radius: 3px; background: rgba(0, 212, 255, 0.15); color: var(--accent); }
+.p-Twitch { background: rgba(145, 70, 255, 0.2); color: #b388ff; }
+.p-YouTube { background: rgba(255, 80, 80, 0.18); color: #ff8a8a; }
+.p-Patreon { background: rgba(255, 112, 67, 0.18); color: #ffa07a; }
+.viewers { color: var(--fg-dim); font-size: 0.85rem; }
+.rec-row .rec-state { font-size: 0.75rem; text-transform: uppercase; }
+.rec-row .s-recording { color: var(--accent); }
+.rec-row .s-resolvingurl { color: var(--warn); }
+.rec-row .s-stopping { color: var(--warn); }
+.err { color: var(--err); padding: 0.5rem; }

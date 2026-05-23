@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Settings</h1>
+
+<form method="post" action="/settings/reset"
+      onsubmit="return confirm('Reset all settings to defaults? Credentials are preserved.');"
+      class="reset-form">
+  <button type="submit" class="danger">Reset to defaults</button>
+</form>
+
+{% for group in groups %}
+<section class="settings-group">
+  <h2>{{ group.title }}</h2>
+  <table class="settings-table">
+    {% for row in group.rows %}
+    <tr>
+      <th>{{ row.label }}</th>
+      <td>
+        {% if row.kind == "bool" %}
+          <form method="post" action="/settings/{{ row.key }}" class="inline">
+            <input type="hidden" name="value" value="{% if row.bool_val %}false{% else %}true{% endif %}">
+            <button type="submit">{% if row.bool_val %}on{% else %}off{% endif %}</button>
+          </form>
+        {% else %}
+          <form method="post" action="/settings/{{ row.key }}" class="inline">
+            <input type="text" name="value" value="{{ row.value }}">
+            <button type="submit">save</button>
+          </form>
+        {% endif %}
+      </td>
+      <td class="hint">{{ row.hint }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+{% endfor %}
+{% endblock %}

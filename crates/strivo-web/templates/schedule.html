@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Calendar</h1>
+
+<section class="add-schedule">
+  <form hx-post="/schedule" hx-target="#schedule-list" hx-swap="outerHTML">
+    <input type="text" name="channel" placeholder="twitch:shroud" required>
+    <input type="text" name="cron"    placeholder="0 20 * * 1-5" required>
+    <input type="text" name="duration" placeholder="4h" value="4h" required>
+    <button type="submit">Add schedule</button>
+  </form>
+</section>
+
+{% include "_schedule_list.html" %}
+{% endblock %}

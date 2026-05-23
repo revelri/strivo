@@ -71,6 +71,15 @@ pub enum Command {
 
     /// Check that required external tools are installed
     Doctor,
+    /// Run the *arr-style web UI. Talks to a running daemon over IPC.
+    Serve {
+        /// Bind address.
+        #[arg(long, default_value = "127.0.0.1:8181")]
+        bind: String,
+        /// Override the API key (default: random per run; persist via `[web] api_key`).
+        #[arg(long)]
+        api_key: Option<String>,
+    },
     /// Import auto-record channels from an OBS scene collection or a
     /// Streamlink-style stream list (M5.7).
     Import {

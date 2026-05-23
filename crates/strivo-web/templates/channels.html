@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Channels</h1>
+
+<section class="add-channel">
+  <form hx-post="/channels" hx-target="#channels-list" hx-swap="outerHTML">
+    <input type="text" name="url" placeholder="twitch.tv/shroud · youtube.com/@mkbhd · patreon.com/xxx" required>
+    <button type="submit">Add</button>
+  </form>
+</section>
+
+<section class="channels">
+  {% include "_channels_list.html" %}
+</section>
+{% endblock %}

@@ -1,0 +1,19 @@
+<ul id="schedule-list" class="schedule">
+  {% if rows.is_empty() %}
+    <li class="empty">No schedules. Add one above or edit ~/.config/strivo/config.toml.</li>
+  {% else %}
+    {% for r in rows %}
+    <li class="sched-row">
+      <span class="sched-channel">{{ r.channel }}</span>
+      <span class="sched-cron">{{ r.cron }}</span>
+      <span class="sched-duration">{{ r.duration }}</span>
+      <span class="sched-next">{{ r.next_fire }}</span>
+      <button class="del"
+              hx-delete="/schedule/{{ r.index }}"
+              hx-target="#schedule-list"
+              hx-swap="outerHTML"
+              hx-confirm="Delete schedule for {{ r.channel }}?">×</button>
+    </li>
+    {% endfor %}
+  {% endif %}
+</ul>

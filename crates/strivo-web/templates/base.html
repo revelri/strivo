@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ title }} — strivo</title>
+  <link rel="stylesheet" href="/assets/strivo.css">
+  <script src="/assets/htmx.min.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <span class="brand">strivo</span>
+    <nav>
+      <a href="/">Activity</a>
+      <a href="/channels">Channels</a>
+      <a href="/recordings">Recordings</a>
+      <a href="/schedule">Calendar</a>
+      <a href="/settings">Settings</a>
+      <a href="/system/status">System</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

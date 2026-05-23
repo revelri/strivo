@@ -1,0 +1,45 @@
+[package]
+name = "strivo-web"
+version = "0.3.0"
+edition = "2021"
+description = "*arr-style web UI for StriVo, talking to the daemon over IPC"
+authors = ["revelri <slrevoy@mailbox.org>"]
+license = "MIT"
+rust-version = "1.75"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+strivo-core = { path = "../.." }
+
+# HTTP
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "fs"] }
+hyper = "1"
+
+# Templates
+askama = "0.12"
+
+# Serde
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Embedded assets
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+
+# Misc
+anyhow = "1"
+tracing = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+rand = "0.8"
+futures = "0.3"
+async-stream = "0.3"
+tokio-util = { version = "0.7", features = ["io"] }
+cron = "0.15"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

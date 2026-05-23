@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Recordings</h1>
+
+<section class="search">
+  <input type="text"
+         name="q"
+         placeholder="Search channel, title…"
+         hx-get="/_partials/recordings-list"
+         hx-trigger="input changed delay:200ms"
+         hx-target="#recordings-list"
+         hx-swap="outerHTML">
+</section>
+
+{% include "_recordings_list.html" %}
+{% endblock %}

@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/strivo-bin"]
+members = [".", "crates/strivo-bin", "crates/strivo-web"]
 resolver = "2"
 
 # strivo-plugins git-deps strivo-core; route that back to the workspace

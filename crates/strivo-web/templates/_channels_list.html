@@ -1,0 +1,27 @@
+<ul id="channels-list">
+  {% if channels.is_empty() %}
+    <li class="empty">No channels yet — add one above.</li>
+  {% else %}
+    {% for ch in channels %}
+    <li class="ch-row">
+      <span class="platform p-{{ ch.platform }}">{{ ch.platform }}</span>
+      <span class="name">{{ ch.display_name }}</span>
+      <span class="live-marker {% if ch.is_live %}live{% else %}offline{% endif %}">
+        {% if ch.is_live %}LIVE{% else %}offline{% endif %}
+      </span>
+      <span class="auto-marker">
+        <input type="checkbox"
+               hx-post="/channels/{{ ch.platform }}/{{ ch.id }}/auto-record"
+               hx-swap="none"
+               {% if ch.auto_record %}checked{% endif %}>
+        auto
+      </span>
+      <button class="del"
+              hx-delete="/channels/{{ ch.platform }}/{{ ch.id }}"
+              hx-target="#channels-list"
+              hx-swap="outerHTML"
+              hx-confirm="Remove {{ ch.display_name }}?">×</button>
+    </li>
+    {% endfor %}
+  {% endif %}
+</ul>

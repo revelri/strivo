@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>System Logs</h1>
+
+<section class="logs"
+        hx-ext="sse"
+        sse-connect="/logs/stream"
+        sse-swap="line"
+        hx-swap="beforeend">
+  <pre id="log-tail" class="log-tail">{{ initial }}</pre>
+</section>
+{% endblock %}

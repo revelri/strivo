@@ -1,0 +1,23 @@
+<ul id="recordings-list" class="recordings">
+  {% if rows.is_empty() %}
+    <li class="empty">{{ empty_msg }}</li>
+  {% else %}
+    {% for r in rows %}
+    <li class="rec-row">
+      <span class="rec-state s-{{ r.state }}">{{ r.state }}</span>
+      <span class="rec-channel">{{ r.channel_name }}</span>
+      <span class="rec-title">{{ r.title }}</span>
+      <span class="rec-when">{{ r.started_at }}</span>
+      <span class="rec-bytes">{{ r.bytes }}</span>
+      {% if r.is_finished %}
+      <span class="rec-actions">
+        <a class="action" href="/recordings/{{ r.id }}/play">play</a>
+        <a class="action" href="/recordings/{{ r.id }}/download">download</a>
+      </span>
+      {% else %}
+      <span class="rec-actions muted">—</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  {% endif %}
+</ul>

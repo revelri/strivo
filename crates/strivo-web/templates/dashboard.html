@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Activity</h1>
+
+<section class="cards" id="dashboard-cards"
+         hx-get="/_partials/dashboard-cards"
+         hx-trigger="every 5s, sse:channel-live from:body, sse:recording-started from:body, sse:recording-finished from:body, sse:channels-updated from:body"
+         hx-swap="outerHTML">
+  {% include "_dashboard_cards.html" %}
+</section>
+
+<section class="live">
+  <h2>Live now</h2>
+  <ul id="live-list"
+      hx-get="/_partials/dashboard-live"
+      hx-trigger="every 5s, sse:channel-live from:body, sse:channel-offline from:body, sse:channels-updated from:body"
+      hx-swap="outerHTML">
+    {% include "_dashboard_live.html" %}
+  </ul>
+</section>
+
+<section class="recordings">
+  <h2>Active recordings</h2>
+  <ul id="active-recordings"
+      hx-get="/_partials/dashboard-active"
+      hx-trigger="every 2s, sse:recording-started from:body, sse:recording-finished from:body, sse:recording-progress from:body"
+      hx-swap="outerHTML">
+    {% include "_dashboard_active.html" %}
+  </ul>
+</section>
+
+<script>
+  // Mount an SSE connection at <body> so every section above can
+  // subscribe by event name via hx-trigger="sse:<name> from:body".
+  document.body.setAttribute("hx-ext", "sse");
+  document.body.setAttribute("sse-connect", "/events");
+  // htmx requires processing after attribute changes.
+  if (window.htmx) htmx.process(document.body);
+</script>
+{% endblock %}

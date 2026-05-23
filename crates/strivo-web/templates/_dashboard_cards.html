@@ -1,0 +1,11 @@
+  <div class="card"><span class="num">{{ channel_count }}</span><span class="lbl">channels</span></div>
+  <div class="card"><span class="num">{{ live_count }}</span><span class="lbl">live now</span></div>
+  <div class="card"><span class="num">{{ recording_count }}</span><span class="lbl">recording</span></div>
+  <div class="card connections">
+    <span class="lbl">connections</span>
+    <span class="conn-row">
+      <span class="conn {% if twitch_connected %}ok{% else %}off{% endif %}">twitch</span>
+      <span class="conn {% if youtube_connected %}ok{% else %}off{% endif %}">youtube</span>
+      <span class="conn {% if patreon_connected %}ok{% else %}off{% endif %}">patreon</span>
+    </span>
+  </div>

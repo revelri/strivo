@@ -1,0 +1,12 @@
+  {% if active_recordings.is_empty() %}
+    <li class="empty">no active recordings</li>
+  {% else %}
+    {% for r in active_recordings %}
+    <li class="rec-row">
+      <span class="rec-state s-{{ r.state }}">{{ r.state }}</span>
+      <span class="rec-name">{{ r.channel_name }}</span>
+      <span class="rec-bytes">{{ r.bytes_human }}</span>
+      <span class="rec-duration">{{ r.duration_human }}</span>
+    </li>
+    {% endfor %}
+  {% endif %}
