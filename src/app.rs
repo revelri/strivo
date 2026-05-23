@@ -623,6 +623,37 @@ pub struct ActionsPopupState {
     pub selected: usize,
 }
 
+impl ActionsPopupState {
+    /// Merge plugin-contributed item-scoped verbs into the entry list.
+    /// Idempotent: re-running is safe (we replace the entry vector
+    /// with the freshly-merged list rather than dedup). Called from
+    /// the layout render loop where the registry handle is in scope.
+    pub fn hydrate_plugin_verbs(
+        &mut self,
+        registry: &crate::plugin::registry::PluginRegistry,
+        kind: crate::plugin::ItemKind,
+    ) {
+        use crate::tui::widgets::actions_popup::ActionDispatch;
+        // Drop any prior plugin verbs so re-hydrate doesn't duplicate.
+        self.entries.retain(|e| !matches!(
+            e.dispatch,
+            ActionDispatch::PluginVerb { .. }
+        ));
+        for (plugin_name, cmd) in registry.item_commands(kind) {
+            self.entries
+                .push(crate::tui::widgets::actions_popup::ActionEntry {
+                    label: format!("{}: {}", plugin_name, cmd.name),
+                    desc: cmd.description.to_string(),
+                    dispatch: ActionDispatch::PluginVerb {
+                        plugin: plugin_name,
+                        verb: cmd.name,
+                    },
+                    multi: false,
+                });
+        }
+    }
+}
+
 /// Command-palette overlay state. The filter list is rebuilt on each
 /// render by walking the keymap table + plugin commands; we only own
 /// query / cursor / selection here. (D4.)
@@ -1950,7 +1981,12 @@ impl AppState {
                 // pane; once `PluginCommand::Scope::Item` lands the
                 // entry list grows per active context.
                 if matches!(self.active_pane, ActivePane::RecordingList) {
-                    let entries = crate::tui::widgets::actions_popup::entries_for_recording_list();
+                    // We don't have the plugin registry handle here
+                    // (apply_key_action is called outside the render
+                    // path). Wire built-ins; plugin-contributed verbs
+                    // are merged in just before render — see the
+                    // hydrate_plugin_verbs() call in the render loop.
+                    let entries = crate::tui::widgets::actions_popup::entries_for_recording_list_builtins();
                     self.actions_popup = Some(ActionsPopupState {
                         entries,
                         selected: 0,
@@ -3255,10 +3291,26 @@ impl AppState {
                 None
             }
             KeyCode::Enter => {
-                let action = popup.entries.get(popup.selected).map(|e| e.action);
+                use crate::tui::widgets::actions_popup::ActionDispatch;
+                let dispatch = popup
+                    .entries
+                    .get(popup.selected)
+                    .map(|e| e.dispatch.clone());
                 self.actions_popup = None;
-                if let Some(a) = action {
-                    return self.apply_key_action(a);
+                match dispatch {
+                    Some(ActionDispatch::KeyAction(a)) => {
+                        return self.apply_key_action(a);
+                    }
+                    Some(ActionDispatch::PluginVerb { plugin, verb }) => {
+                        // The plugin's own on_key handles the verb's
+                        // semantics; for the MVP we surface the
+                        // intent in the status bar and let the user
+                        // continue inside the plugin pane. A future
+                        // commit threads the verb through a
+                        // dedicated PluginAction route.
+                        self.status_message = format!("→ {plugin}: {verb}");
+                    }
+                    None => {}
                 }
                 None
             }

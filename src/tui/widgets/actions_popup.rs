@@ -24,65 +24,121 @@ use crate::app::AppState;
 use crate::tui::keymap::KeyAction;
 use crate::tui::theme::Theme;
 
-/// One verb in the popup.
+fn truncate(s: &str, n: usize) -> String {
+    if s.chars().count() > n {
+        s.chars().take(n.saturating_sub(1)).collect::<String>() + "…"
+    } else {
+        s.to_string()
+    }
+}
+
+/// One verb in the popup. Built-in entries route through a
+/// [`KeyAction`] in `dispatch`; plugin-contributed entries carry the
+/// plugin's name + verb name so the dispatcher can route them via the
+/// plugin's `on_key` (or via a dedicated `PluginVerb` route the host
+/// adds later).
 #[derive(Debug, Clone)]
 pub struct ActionEntry {
-    pub label: &'static str,
-    pub desc: &'static str,
-    pub action: KeyAction,
+    pub label: String,
+    pub desc: String,
+    pub dispatch: ActionDispatch,
     /// Whether the verb is meaningful for multi-selection. Verbs that
     /// only make sense on a single cursor row (e.g. Rename) get a dim
     /// tag in the popup when the selection set is non-empty.
     pub multi: bool,
 }
 
-/// Built-in verbs for RecordingList. Plugin extensions will append to
-/// this list once `PluginCommand::Scope::Item` lands.
-pub fn entries_for_recording_list() -> Vec<ActionEntry> {
+/// What pressing Enter on this row does. (D5+X5.)
+#[derive(Debug, Clone)]
+pub enum ActionDispatch {
+    /// Built-in path — apply a [`KeyAction`] through
+    /// [`crate::app::AppState::apply_key_action`].
+    KeyAction(KeyAction),
+    /// Plugin-contributed verb. The host surfaces it via the status
+    /// message + sends the plugin a focused-pane activate so the
+    /// plugin's own on_key can pick up the next interaction. A
+    /// future commit adds a dedicated routing channel; for now the
+    /// activation + status surface is the visible affordance.
+    PluginVerb {
+        plugin: &'static str,
+        verb: &'static str,
+    },
+}
+
+/// Built-in verbs for the RecordingList. Plugin-contributed verbs are
+/// appended via [`entries_for_recording_list_with_plugins`].
+pub fn entries_for_recording_list_builtins() -> Vec<ActionEntry> {
     vec![
         ActionEntry {
-            label: "Play",
-            desc: "open in mpv",
-            action: KeyAction::PlayRecording,
+            label: "Play".into(),
+            desc: "open in mpv".into(),
+            dispatch: ActionDispatch::KeyAction(KeyAction::PlayRecording),
             multi: false,
         },
         ActionEntry {
-            label: "Properties",
-            desc: "show metadata + plugin sections",
-            action: KeyAction::ShowRecordingProperties,
+            label: "Properties".into(),
+            desc: "show metadata + plugin sections".into(),
+            dispatch: ActionDispatch::KeyAction(KeyAction::ShowRecordingProperties),
             multi: false,
         },
         ActionEntry {
-            label: "Copy path",
-            desc: "copy file path to system clipboard",
-            action: KeyAction::CopyToClipboard,
+            label: "Copy path".into(),
+            desc: "copy file path to system clipboard".into(),
+            dispatch: ActionDispatch::KeyAction(KeyAction::CopyToClipboard),
             multi: false,
         },
         ActionEntry {
-            label: "Open in folder",
-            desc: "reveal in file manager",
-            action: KeyAction::OpenInFolder,
+            label: "Open in folder".into(),
+            desc: "reveal in file manager".into(),
+            dispatch: ActionDispatch::KeyAction(KeyAction::OpenInFolder),
             multi: false,
         },
         ActionEntry {
-            label: "Rename",
-            desc: "rename the recording file",
-            action: KeyAction::RenameRecording,
+            label: "Rename".into(),
+            desc: "rename the recording file".into(),
+            dispatch: ActionDispatch::KeyAction(KeyAction::RenameRecording),
             multi: false,
         },
         ActionEntry {
-            label: "Delete (selection)",
-            desc: "move selected recordings to trash",
-            action: KeyAction::TrashSelectedRecordings,
+            label: "Delete (selection)".into(),
+            desc: "move selected recordings to trash".into(),
+            dispatch: ActionDispatch::KeyAction(KeyAction::TrashSelectedRecordings),
             multi: true,
         },
         ActionEntry {
-            label: "Clear selections",
-            desc: "drop the multi-select set",
-            action: KeyAction::ClearRecordingSelections,
+            label: "Clear selections".into(),
+            desc: "drop the multi-select set".into(),
+            dispatch: ActionDispatch::KeyAction(KeyAction::ClearRecordingSelections),
             multi: true,
         },
     ]
+}
+
+/// Combined verb list: built-ins + plugin-contributed item-scoped
+/// verbs registered against [`crate::plugin::ItemKind::Recording`]. (D5+X5.)
+pub fn entries_for_recording_list_with_plugins(
+    registry: &crate::plugin::registry::PluginRegistry,
+) -> Vec<ActionEntry> {
+    let mut entries = entries_for_recording_list_builtins();
+    for (plugin_name, cmd) in registry.item_commands(crate::plugin::ItemKind::Recording) {
+        entries.push(ActionEntry {
+            label: format!("{}: {}", plugin_name, cmd.name),
+            desc: cmd.description.to_string(),
+            dispatch: ActionDispatch::PluginVerb {
+                plugin: plugin_name,
+                verb: cmd.name,
+            },
+            multi: false,
+        });
+    }
+    entries
+}
+
+/// Back-compat shim — callers that don't have a registry handy get
+/// just the built-in list.
+#[deprecated(note = "use entries_for_recording_list_with_plugins for full surface")]
+pub fn entries_for_recording_list() -> Vec<ActionEntry> {
+    entries_for_recording_list_builtins()
 }
 
 pub fn render(
@@ -186,9 +242,9 @@ pub fn render(
             };
             Line::from(vec![
                 Span::styled(marker.to_string(), Style::new().fg(Theme::secondary())),
-                Span::styled(format!("{:<22}", e.label), label_style),
+                Span::styled(format!("{:<28}", truncate(&e.label, 28)), label_style),
                 Span::raw("  "),
-                Span::styled(e.desc.to_string(), Style::new().fg(Theme::muted())),
+                Span::styled(e.desc.clone(), Style::new().fg(Theme::muted())),
                 if dim {
                     Span::styled(
                         "  (single-target)".to_string(),

@@ -251,6 +251,25 @@ impl PluginRegistry {
         cmds
     }
 
+    /// Plugin verbs scoped to a specific item type. Backs the actions
+    /// popup (D5+X5) — each entry becomes a row alongside built-in
+    /// verbs like Play / Properties / Delete.
+    pub fn item_commands(
+        &self,
+        kind: super::ItemKind,
+    ) -> Vec<(&'static str, PluginCommand)> {
+        use super::PluginCommandScope;
+        let mut out = Vec::new();
+        for plugin in &self.plugins {
+            for cmd in plugin.commands() {
+                if matches!(cmd.scope, PluginCommandScope::Item(k) if k == kind) {
+                    out.push((plugin.name(), cmd));
+                }
+            }
+        }
+        out
+    }
+
     /// Collect status line contributions from all plugins whose
     /// [`StatusSlot`] is `Tray` or `Banner` (banner falls back to tray
     /// until the M4 telemetry strip lands). Plugins that return
@@ -366,12 +385,12 @@ mod tests {
         }
         fn commands(&self) -> Vec<PluginCommand> {
             if self.pane.is_some() {
-                vec![PluginCommand {
-                    name: "test",
-                    description: "test command",
-                    key: KeyCode::Char('T'),
-                    modifiers: KeyModifiers::SHIFT,
-                }]
+                vec![PluginCommand::new(
+                    "test",
+                    "test command",
+                    KeyCode::Char('T'),
+                    KeyModifiers::SHIFT,
+                )]
             } else {
                 Vec::new()
             }

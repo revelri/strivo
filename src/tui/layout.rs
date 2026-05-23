@@ -136,6 +136,12 @@ pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) 
         );
     }
 
+    if let Some(popup) = app.actions_popup.as_mut() {
+        // D5+X5 — merge plugin-contributed verbs into the popup
+        // entries on every render. Idempotent (the hydrator strips
+        // prior plugin rows before adding).
+        popup.hydrate_plugin_verbs(registry, crate::plugin::ItemKind::Recording);
+    }
     if app.actions_popup.is_some() {
         crate::tui::widgets::actions_popup::render(
             frame,
