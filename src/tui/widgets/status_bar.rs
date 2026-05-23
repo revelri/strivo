@@ -292,6 +292,23 @@ pub fn render(frame: &mut Frame, area: Rect, app: &AppState, registry: &PluginRe
     let mut spans: Vec<Span> = Vec::new();
     spans.push(Span::styled(" ", bar_style));
 
+    // Mode/pane chip — zellij-style colored pill at the leftmost segment.
+    // Shows the active pane so the user always knows which keymap layer
+    // is in force. The chip color is the focused-border accent (primary)
+    // so the pane border and the chip glow together when the pane gains
+    // focus. Search/Wizard/Playback have their own dedicated bars above,
+    // so by the time we hit this code path the mode is effectively
+    // "browsing pane X."
+    let (chip_label, chip_fg, chip_bg) = pane_chip(app);
+    spans.push(Span::styled(
+        format!(" {chip_label} "),
+        Style::new()
+            .fg(chip_fg)
+            .bg(chip_bg)
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(Span::styled(" ", bar_style));
+
     // Filter-active indicator — visible whenever a search filter is in force
     // but the input is not focused. Spells out what Esc will do.
     if !app.search_query.is_empty() {
@@ -535,6 +552,32 @@ fn hotkey_shimmer_char(app: &AppState) -> Option<(char, f32)> {
         return None;
     }
     Some((c, (elapsed / 0.24).clamp(0.0, 1.0)))
+}
+
+/// Build the leftmost mode/pane chip. Format: `MODE · pane`, e.g. `NOR · detail`
+/// or `VIS · recordings`. Visual mode flips the chip background to the
+/// secondary (amber) accent so multi-select state is unambiguous; normal
+/// mode tracks the focused-border ramp by using the primary accent.
+fn pane_chip(app: &AppState) -> (String, Color, Color) {
+    let mode = app.input_mode.label();
+    let pane_label = match &app.active_pane {
+        ActivePane::Sidebar => "sidebar",
+        ActivePane::Detail => "detail",
+        ActivePane::RecordingList => "recordings",
+        ActivePane::Settings => "settings",
+        ActivePane::Log => "log",
+        ActivePane::Schedule => "schedule",
+        ActivePane::StatusBar => "statusbar",
+        ActivePane::Wizard => "wizard",
+        ActivePane::Plugin(_) => "plugin",
+    };
+    let label = format!("{mode} · {pane_label}");
+    let (fg, bg) = match app.input_mode {
+        crate::app::InputMode::Visual => (Theme::bg(), Theme::secondary()),
+        crate::app::InputMode::Insert => (Theme::bg(), Theme::blue()),
+        crate::app::InputMode::Normal => (Theme::bg(), Theme::primary()),
+    };
+    (label, fg, bg)
 }
 
 /// Returns `(matched, total)` for the pane the filter currently applies to.
