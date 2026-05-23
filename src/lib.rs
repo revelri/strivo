@@ -25,6 +25,7 @@ pub mod daemon;
 pub mod ipc;
 pub mod media;
 pub mod monitor;
+pub mod pipeline;
 pub mod platform;
 pub mod playback;
 pub mod plugin;
