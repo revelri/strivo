@@ -260,16 +260,11 @@ pub async fn run_manager(
                                 // was lost), prefer yt-dlp's resolved
                                 // uploader name for the filename's channel
                                 // slot. Otherwise keep what the caller said.
-                                let is_uc_id = filename_channel_owned.len() == 24
-                                    && filename_channel_owned.starts_with("UC")
-                                    && filename_channel_owned
-                                        .chars()
-                                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'));
-                                let filename_channel_final = if (is_uc_id
-                                    || filename_channel_owned.is_empty())
-                                    && resolved_uploader
-                                        .as_ref()
-                                        .is_some_and(|u| !u.is_empty())
+                                let filename_channel_final = if ytdlp::looks_like_uc_id(
+                                    &filename_channel_owned,
+                                ) && resolved_uploader
+                                    .as_ref()
+                                    .is_some_and(|u| !u.is_empty())
                                 {
                                     resolved_uploader.clone().unwrap()
                                 } else {
