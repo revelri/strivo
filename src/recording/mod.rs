@@ -136,8 +136,13 @@ pub async fn run_manager(
     let mut active: HashMap<Uuid, ActiveRecording> = HashMap::new();
     let mut poll_interval = tokio::time::interval(std::time::Duration::from_secs(2));
     // Channel for spawned resolve tasks to send back results
+    // Second tuple slot = optional rename of the recording's output_path.
+    // YT-5: the YouTube from-start spawn resolves the broadcast title in
+    // the same round-trip it resolves the video id, and rebuilds the
+    // filename so a fresh-start auto-record no longer lands as
+    // `UCxxxx_2026-…_stream.mkv`. Other call sites pass None.
     let (resolve_tx, mut resolve_rx) =
-        mpsc::unbounded_channel::<(Uuid, Result<RecorderProcess, String>)>();
+        mpsc::unbounded_channel::<(Uuid, Result<(RecorderProcess, Option<PathBuf>), String>)>();
 
     loop {
         tokio::select! {
@@ -207,22 +212,36 @@ pub async fn run_manager(
                             let cookies = cookies_path.clone();
                             let fmt = resolved_format.clone();
                             let log_channel = channel_name.clone();
+                            let cfg_clone = config.clone();
+                            let filename_channel_owned = filename_channel.to_string();
+                            let pre_resolved_title = active
+                                .get(&job_id)
+                                .and_then(|r| r.job.stream_title.clone());
                             tokio::spawn(async move {
-                                let watch_url = match ytdlp::resolve_live_video_id(
-                                    &alias_url,
-                                    cookies.as_deref(),
-                                )
-                                .await
+                                // YT-5: fetch id + title in one round-trip.
+                                // The title is what makes the filename
+                                // human-readable; falling back to "stream"
+                                // produces the alphanumeric-only filenames
+                                // the user has been seeing.
+                                let (watch_url, resolved_title) =
+                                    match ytdlp::resolve_live_fields(
+                                        &alias_url,
+                                        cookies.as_deref(),
+                                    )
+                                    .await
                                 {
-                                    Ok(id) => {
-                                        let url =
-                                            format!("https://www.youtube.com/watch?v={id}");
+                                    Ok(fields) => {
+                                        let url = format!(
+                                            "https://www.youtube.com/watch?v={}",
+                                            fields.video_id
+                                        );
                                         tracing::info!(
                                             channel = %log_channel,
-                                            video_id = %id,
+                                            video_id = %fields.video_id,
+                                            title = ?fields.title,
                                             "yt-dlp: resolved /live → /watch?v= for live-from-start"
                                         );
-                                        url
+                                        (url, fields.title)
                                     }
                                     Err(e) => {
                                         tracing::warn!(
@@ -230,18 +249,42 @@ pub async fn run_manager(
                                             error = %e,
                                             "yt-dlp: live-id resolve failed; falling back to /live alias"
                                         );
-                                        alias_url
+                                        (alias_url, None)
                                     }
                                 };
+
+                                // Prefer the title yt-dlp pulled from the
+                                // active broadcast metadata over whatever
+                                // the monitor cached. Fall back to the
+                                // monitor's value, then to the constant.
+                                let title_for_filename = resolved_title
+                                    .clone()
+                                    .or(pre_resolved_title);
+                                let new_output_path = build_output_path(
+                                    &cfg_clone,
+                                    &filename_channel_owned,
+                                    PlatformKind::YouTube,
+                                    title_for_filename.as_deref(),
+                                );
+                                let path_changed = new_output_path != output_path;
+
                                 match YtDlpProcess::with_options(
                                     &watch_url,
-                                    output_path,
+                                    new_output_path.clone(),
                                     cookies.as_deref(),
                                     Some(&fmt),
                                     true,
                                 ) {
                                     Ok(process) => {
-                                        let _ = rtx.send((job_id, Ok(RecorderProcess::YtDlp(process))));
+                                        let rename = if path_changed {
+                                            Some(new_output_path)
+                                        } else {
+                                            None
+                                        };
+                                        let _ = rtx.send((
+                                            job_id,
+                                            Ok((RecorderProcess::YtDlp(process), rename)),
+                                        ));
                                     }
                                     Err(e) => {
                                         let _ = rtx.send((job_id, Err(format!("yt-dlp failed: {e}"))));
@@ -322,7 +365,7 @@ pub async fn run_manager(
                                     .build()
                                 {
                                     Ok(process) => {
-                                        let _ = rtx.send((job_id, Ok(RecorderProcess::Ffmpeg(process))));
+                                        let _ = rtx.send((job_id, Ok((RecorderProcess::Ffmpeg(process), None))));
                                     }
                                     Err(e) => {
                                         let _ = rtx.send((job_id, Err(format!("FFmpeg failed: {e}"))));
@@ -384,7 +427,7 @@ pub async fn run_manager(
                         tokio::spawn(async move {
                             match YtDlpProcess::with_options(&url, output_path, cookies_path.as_deref(), Some(&fmt), false) {
                                 Ok(process) => {
-                                    let _ = rtx.send((job_id, Ok(RecorderProcess::YtDlp(process))));
+                                    let _ = rtx.send((job_id, Ok((RecorderProcess::YtDlp(process), None))));
                                 }
                                 Err(e) => {
                                     let _ = rtx.send((job_id, Err(format!("yt-dlp VOD download failed: {e}"))));
@@ -397,10 +440,20 @@ pub async fn run_manager(
             Some((job_id, result)) = resolve_rx.recv() => {
                 if let Some(rec) = active.get_mut(&job_id) {
                     match result {
-                        Ok(process) => {
+                        Ok((process, renamed_path)) => {
+                            if let Some(new_path) = renamed_path {
+                                rec.job.output_path = new_path.clone();
+                                // segments[0] is the base path other code derives
+                                // resume segments from; keep it in sync so a crash
+                                // resume still writes next-to the renamed file.
+                                if !rec.segments.is_empty() {
+                                    rec.segments[0] = new_path;
+                                }
+                            }
                             rec.process = Some(process);
                             rec.job.state = RecordingState::Recording;
                             rec.job.started_at = chrono::Utc::now();
+                            let _ = event_tx.send(AppEvent::recording_started(rec.job.clone()));
                         }
                         Err(e) => {
                             rec.job.state = RecordingState::Failed;
@@ -484,7 +537,7 @@ pub async fn run_manager(
                                                     .format(retry_fmt)
                                                     .build()
                                                 {
-                                                    Ok(p) => { let _ = rtx.send((jid, Ok(RecorderProcess::Ffmpeg(p)))); }
+                                                    Ok(p) => { let _ = rtx.send((jid, Ok((RecorderProcess::Ffmpeg(p), None)))); }
                                                     Err(e) => { let _ = rtx.send((jid, Err(format!("{e}")))); }
                                                 }
                                             }
