@@ -75,19 +75,43 @@ const API = {
 const events = {
   source: null,
   listeners: new Set(),
+  degradedPoll: null,
   start() {
     if (this.source) return;
     this.source = new EventSource("/events", { withCredentials: true });
+    this.source.onopen = () => this.setConnected(true);
     this.source.onmessage = (e) => {
+      this.setConnected(true);
       try {
         const data = JSON.parse(e.data);
         this.listeners.forEach((fn) => fn(data));
       } catch (_) {}
     };
     this.source.onerror = () => {
-      // Auto-reconnect via the browser; if we're 401-ing the user is
-      // probably logged out and a route('login') will reset us.
+      // Make the stale-data state VISIBLE (research §A/§5: silent
+      // real-time breakage is the #1 cited gotcha). The browser
+      // auto-reconnects; meanwhile we show a pill and degrade to a
+      // slow poll so list views don't go stale.
+      this.setConnected(false);
     };
+  },
+  // Show/hide the topbar "reconnecting…" pill and arm/disarm a 10s
+  // degraded re-poll of the current data route.
+  setConnected(ok) {
+    const pill = document.getElementById("conn-status");
+    if (pill) pill.hidden = ok;
+    if (ok) {
+      if (this.degradedPoll) {
+        clearInterval(this.degradedPoll);
+        this.degradedPoll = null;
+      }
+    } else if (!this.degradedPoll) {
+      this.degradedPoll = setInterval(() => {
+        const r = currentRoute();
+        if (r === "library") renderHome().catch(() => {});
+        else if (r === "recordings") renderRecordings().catch(() => {});
+      }, 10000);
+    }
   },
   on(fn) {
     this.listeners.add(fn);
@@ -332,6 +356,8 @@ function chrome(content) {
               aria-label="Live recording count"></span>
         <span id="storage-pill" class="storage-pill" style="display: none"
               aria-label="Storage usage"></span>
+        <span id="conn-status" class="conn-status" role="status" hidden
+              title="Live updates connection">● reconnecting…</span>
         <span class="spacer"></span>
         <nav class="topnav" aria-label="Main navigation">${nav}</nav>
         <button id="poll-now" title="Poke channel monitor (p)"
@@ -454,7 +480,10 @@ function paintChannelList() {
 
   rail.innerHTML =
     channels.length === 0
-      ? '<div class="ch-empty">No channels yet</div>'
+      ? `<div class="ch-empty">No channels yet.<br><br>
+           Connect Twitch / YouTube / Patreon and follow channels — they
+           appear here automatically.<br>
+           <a href="#/settings">Check Settings →</a></div>`
       : section(`● LIVE`, live) +
         section("Twitch", byPlat("Twitch")) +
         section("YouTube", byPlat("YouTube")) +
@@ -702,7 +731,7 @@ function livePreviewHtml(c) {
   </div>`;
 }
 
-function wireChannelDetail(c) {
+function wireChannelDetail() {
   document.querySelector('[data-action="cd-close"]')?.addEventListener("click", () => {
     selectedChannelKey = null;
     render();

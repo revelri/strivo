@@ -953,3 +953,15 @@ button.busy::after {
   font-size: 0.75rem;
   color: var(--muted);
 }
+
+/* ── SSE connection-status pill (item 8 / research §A) ── */
+.conn-status {
+  background: color-mix(in srgb, var(--secondary) 22%, transparent);
+  color: var(--secondary);
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.conn-status[hidden] { display: none; }
+.conn-status::first-letter { /* the dot */ }
