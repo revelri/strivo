@@ -16,7 +16,7 @@
 //!   GET /api/v1/settings         — non-secret config snapshot
 
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
@@ -31,16 +31,35 @@ use crate::server::AppState;
 
 const API_KEY_HEADER: &str = "x-api-key";
 
+/// Authorize a request via EITHER the `X-Api-Key` header (programmatic
+/// clients) OR a valid `strivo_session` cookie (browser, set by /login).
+/// The browser SPA only carries the cookie, so cookie support is what
+/// lets it reach /channels, /recordings, … after logging in. (W3.)
 fn check_key(headers: &HeaderMap, state: &AppState) -> Result<(), StatusCode> {
+    // 1. X-Api-Key header.
     let key = headers
         .get(API_KEY_HEADER)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    if state.api_key.matches(key) {
-        Ok(())
-    } else {
-        Err(StatusCode::UNAUTHORIZED)
+    if !key.is_empty() && state.api_key.matches(key) {
+        return Ok(());
     }
+
+    // 2. Signed session cookie.
+    if let Some(secret) = state.session_secret.as_deref() {
+        if let Some(cookie_header) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) {
+            for pair in cookie_header.split(';') {
+                let pair = pair.trim();
+                if let Some(val) = pair.strip_prefix(&format!("{}=", crate::routes::login::SESSION_COOKIE)) {
+                    if crate::auth::SessionToken::decode_verify(val, secret).is_some() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
+    Err(StatusCode::UNAUTHORIZED)
 }
 
 async fn channels(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
