@@ -27,7 +27,7 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   (re-issues past the halfway mark via response middleware). — `__Host-strivo_session; HttpOnly;
   Secure; SameSite=Lax; Path=/`; rotate HMAC session on activity; expired/invalid HMAC
   ⇒ logged-out (302/401), never 500. Must still work on `*.ts.net` over HTTPS.
-- [ ] **5. CSRF custom-header on cookie mutations** `[F]` — require `X-Strivo-CSRF`
+- [x] **5. CSRF custom-header on cookie mutations** `[F]` — require `X-Strivo-CSRF`
   (or `X-Requested-With`) on all cookie-authed state-changing requests, plus strict
   `Origin`/`Host` allowlist (`127.0.0.1`, `*.ts.net`). `X-Api-Key` track stays
   CSRF-exempt by design. All mutations POST/PUT/DELETE (never GET).

@@ -6,49 +6,53 @@
 //! Host-match check, which defeats the cross-origin form-submit class
 //! of CSRF without requiring every template to embed a hidden field.
 //!
-//! What we enforce (only on POST/PUT/PATCH/DELETE):
+//! Two auth tracks, two CSRF stances (only on POST/PUT/PATCH/DELETE):
 //!
-//! 1. The request carries an `Origin` (preferred) or `Referer` header.
-//! 2. Its scheme+host+port matches the server's `Host` header.
+//! - **Programmatic track** — any request carrying `X-Api-Key`. A browser
+//!   can't attach a custom header cross-site without a CORS preflight (which
+//!   we never grant), so this track is CSRF-immune by construction. Allowed
+//!   through; the key's *validity* is checked downstream by `check_key`.
+//! - **Cookie / browser track** — everything else (the SPA authenticates
+//!   via the session cookie). Required to carry a custom `X-Strivo-CSRF`
+//!   (or `X-Requested-With`) header AND have its `Origin`/`Referer` match
+//!   the `Host`. The custom header alone defeats classic CSRF; the
+//!   Origin/Host allowlist is defense in depth.
 //!
-//! What we deliberately do **not** check:
+//! GET / HEAD / OPTIONS are safe by definition and skip the check.
 //!
-//! - `/api/v1/*` — already protected by the constant-time `X-Api-Key`
-//!   header; CORS-preflighted browsers can't forge that header.
-//! - GET / HEAD / OPTIONS — safe by definition.
-//!
-//! This is documented in `crates/strivo-web/README.md`. Users binding
-//! the web UI to a non-loopback interface should run it behind a
-//! reverse proxy that adds CSRF tokens (e.g. nginx + a session cookie
-//! middleware) until a full per-form token scheme lands.
+//! Users binding the web UI to a non-loopback interface should still front
+//! it with a reverse proxy (e.g. `tailscale serve`) terminating TLS.
 
 use axum::body::Body;
 use axum::http::{HeaderMap, Method, Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::Response;
 
+const API_KEY_HEADER: &str = "x-api-key";
+const CSRF_HEADER: &str = "x-strivo-csrf";
+
 pub async fn csrf_guard(req: Request<Body>, next: Next) -> Result<Response, StatusCode> {
     if !is_state_changing(req.method()) {
         return Ok(next.run(req).await);
     }
 
-    // /api/v1 is authenticated separately via X-Api-Key + constant-time
-    // compare. CSRF doesn't apply there: a browser cross-origin form
-    // can't add custom headers without a preflight, and the preflight
-    // would be denied (no permissive CORS handler).
-    let path = req.uri().path();
-    if path.starts_with("/api/v1") {
+    let headers = req.headers();
+
+    // Programmatic track: presence of the custom X-Api-Key header marks a
+    // non-browser caller (can't be forged cross-site without a denied
+    // preflight). Validity is enforced by the handler's check_key.
+    if headers.contains_key(API_KEY_HEADER) {
         return Ok(next.run(req).await);
     }
 
-    let headers = req.headers();
-    if origin_matches_host(headers) {
+    // Cookie/browser track: custom CSRF header AND Origin/Host match.
+    if has_csrf_header(headers) && origin_matches_host(headers) {
         Ok(next.run(req).await)
     } else {
         tracing::warn!(
             method = %req.method(),
-            path,
-            "csrf: rejecting state-changing request with missing or mismatched Origin/Referer"
+            path = req.uri().path(),
+            "csrf: blocked cookie-track mutation missing X-Strivo-CSRF header or Origin/Host match"
         );
         Err(StatusCode::FORBIDDEN)
     }
@@ -56,6 +60,12 @@ pub async fn csrf_guard(req: Request<Body>, next: Next) -> Result<Response, Stat
 
 fn is_state_changing(method: &Method) -> bool {
     matches!(*method, Method::POST | Method::PUT | Method::PATCH | Method::DELETE)
+}
+
+/// A browser can only set these custom headers on a same-origin request
+/// (cross-site fetch would need a CORS preflight we never grant).
+fn has_csrf_header(headers: &HeaderMap) -> bool {
+    headers.contains_key(CSRF_HEADER) || headers.contains_key("x-requested-with")
 }
 
 fn origin_matches_host(headers: &HeaderMap) -> bool {
@@ -142,5 +152,36 @@ mod tests {
         assert!(!is_state_changing(&Method::OPTIONS));
         assert!(is_state_changing(&Method::POST));
         assert!(is_state_changing(&Method::DELETE));
+    }
+
+    #[test]
+    fn csrf_header_detected() {
+        let mut h = HeaderMap::new();
+        assert!(!has_csrf_header(&h));
+        h.insert(CSRF_HEADER, HeaderValue::from_static("1"));
+        assert!(has_csrf_header(&h));
+
+        let mut h2 = HeaderMap::new();
+        h2.insert("x-requested-with", HeaderValue::from_static("XMLHttpRequest"));
+        assert!(has_csrf_header(&h2));
+    }
+
+    #[test]
+    fn cookie_track_needs_both_header_and_origin() {
+        // Header present but no Origin → not enough.
+        let mut only_header = hm("127.0.0.1:8181", None, None);
+        only_header.insert(CSRF_HEADER, HeaderValue::from_static("1"));
+        assert!(has_csrf_header(&only_header));
+        assert!(!origin_matches_host(&only_header));
+
+        // Origin present but no custom header → not enough.
+        let only_origin = hm("127.0.0.1:8181", Some("http://127.0.0.1:8181"), None);
+        assert!(!has_csrf_header(&only_origin));
+        assert!(origin_matches_host(&only_origin));
+
+        // Both present and matching → the only accepted cookie-track shape.
+        let mut both = hm("127.0.0.1:8181", Some("http://127.0.0.1:8181"), None);
+        both.insert(CSRF_HEADER, HeaderValue::from_static("1"));
+        assert!(has_csrf_header(&both) && origin_matches_host(&both));
     }
 }

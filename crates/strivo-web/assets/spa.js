@@ -6,7 +6,14 @@
 
 const API = {
   async _fetch(path, opts = {}) {
-    const headers = { Accept: "application/json", ...(opts.headers || {}) };
+    // X-Strivo-CSRF is a custom header browsers can't attach cross-site
+    // without a (denied) preflight, so it gates cookie-authed mutations
+    // against CSRF. Harmless on GETs. See crates/strivo-web/src/csrf.rs.
+    const headers = {
+      Accept: "application/json",
+      "X-Strivo-CSRF": "1",
+      ...(opts.headers || {}),
+    };
     if (opts.body && typeof opts.body !== "string") {
       headers["Content-Type"] = "application/json";
       opts.body = JSON.stringify(opts.body);
