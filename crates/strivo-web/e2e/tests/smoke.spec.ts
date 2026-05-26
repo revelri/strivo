@@ -75,6 +75,13 @@ test("system page renders health + tasks", async ({ page }) => {
   await expect(page.locator(".sys-check").first()).toBeVisible();
 });
 
+test("logs page renders with level selector and lines", async ({ page }) => {
+  await page.goto("/app#/logs");
+  await expect(page.getByRole("heading", { name: "Logs" })).toBeVisible();
+  await expect(page.locator("#logs-level")).toBeVisible();
+  await expect(page.locator("#logs-output")).toContainText("StriVo daemon starting");
+});
+
 test("command palette opens with Ctrl+K and navigates", async ({ page }) => {
   await page.goto("/app#/library");
   await page.keyboard.press("Control+k");

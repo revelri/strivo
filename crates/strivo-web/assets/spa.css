@@ -1060,6 +1060,32 @@ button.busy::after {
 }
 
 /* System page — checks grouped by domain (item 13). */
+/* Logs viewer (item 15). */
+.logs-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.75rem;
+}
+.logs-toolbar label { font-size: 0.8rem; color: var(--muted); }
+.logs-toolbar select { width: auto; }
+.logs-file { font-size: 0.72rem; color: var(--muted); }
+.logs-output {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 0.75rem 1rem;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 70vh;
+  overflow: auto;
+}
+
 .sys-domain { margin-bottom: 0.8rem; }
 .sys-domain-title {
   font-size: 0.74rem;

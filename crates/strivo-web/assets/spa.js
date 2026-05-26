@@ -49,6 +49,8 @@ const API = {
   pollNow: () => API._fetch("/poll_now", { method: "POST" }),
   health: () => API._fetch("/health"),
   healthChecks: () => API._fetch("/health/checks"),
+  logs: (level, lines = 300) =>
+    API._fetch(`/logs?level=${encodeURIComponent(level || "trace")}&lines=${lines}`),
   storage: () => API._fetch("/storage"),
   settings: () => API._fetch("/settings"),
   patreon: () => API._fetch("/patreon"),
@@ -276,6 +278,7 @@ const ROUTES = [
   "plugins",
   "settings",
   "system",
+  "logs",
   "login",
 ];
 
@@ -332,6 +335,9 @@ async function render() {
     case "system":
       await renderSystem();
       break;
+    case "logs":
+      await renderLogs();
+      break;
   }
 }
 
@@ -345,6 +351,7 @@ const TOPNAV = [
   ["plugins", "🧩", "Plugins", "g"],
   ["settings", "⚙", "Settings", "c"],
   ["system", "🛠", "System", "y"],
+  ["logs", "📜", "Logs", "o"],
 ];
 
 function chrome(content) {
@@ -1563,6 +1570,47 @@ async function renderSystem() {
       btn.disabled = false;
     }
   });
+}
+
+// ── Logs viewer (item 15) — tails the rolling log with a level selector. ──
+let logsLevel = "info";
+async function renderLogs() {
+  const levels = ["error", "warn", "info", "debug", "trace"];
+  const options = levels
+    .map((l) => `<option value="${l}"${l === logsLevel ? " selected" : ""}>${l.toUpperCase()}</option>`)
+    .join("");
+  root.innerHTML = chrome(`
+    <h1 class="page-title">Logs</h1>
+    <div class="logs-toolbar">
+      <label>Min level
+        <select id="logs-level">${options}</select>
+      </label>
+      <button id="logs-refresh" class="sm" title="Reload">↻ Refresh</button>
+      <span id="logs-file" class="logs-file"></span>
+    </div>
+    <pre id="logs-output" class="logs-output" aria-live="polite">Loading…</pre>
+  `);
+  setupChromeHandlers();
+
+  async function load() {
+    const out = document.getElementById("logs-output");
+    const fileEl = document.getElementById("logs-file");
+    try {
+      const r = await API.logs(logsLevel, 500);
+      const lines = r.lines || [];
+      out.textContent = lines.length ? lines.join("\n") : "No log lines at this level.";
+      if (fileEl) fileEl.textContent = r.file ? `· ${r.file} · ${lines.length} lines` : "";
+      out.scrollTop = out.scrollHeight;
+    } catch (e) {
+      out.textContent = `Failed to load logs: ${e.message}`;
+    }
+  }
+  document.getElementById("logs-level")?.addEventListener("change", (e) => {
+    logsLevel = e.target.value;
+    load();
+  });
+  document.getElementById("logs-refresh")?.addEventListener("click", load);
+  await load();
 }
 
 // ── Live-count ticker ────────────────────────────────────────────────

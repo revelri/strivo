@@ -96,10 +96,10 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   a settings-write endpoint, so the System Tasks interval becomes editable
   without a restart. (Deferred from 14 to avoid a config-write that silently
   needs a restart.)
-- [~] **15. Logs viewer polish** `[E]` — *(part 1 of 2: backend — daemon now
-  logs to rolling/capped files (daily rotation, keep 7 via tracing-appender)
-  + `GET /api/v1/logs?level=&lines=` tails the newest file with min-level*
-  *filtering. Remaining: SPA Logs view + level selector — next fire.)*
+- [x] **15. Logs viewer polish** `[E]` — daemon logs to rolling/capped files
+  (daily rotation, keep 7 via tracing-appender); `GET /api/v1/logs?level=&lines=`
+  tails the newest file with min-level filtering; SPA Logs route (📜) renders
+  the tail in a mono pane with a level-selector dropdown + refresh. e2e covers it.
 - [ ] **16. Config/DB backup + restore** `[E]` — scheduled + on-demand backup of
   config + jobs DB with a restore path.
 

@@ -116,6 +116,15 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/api/v1/")) {
     const p = path.slice("/api/v1".length);
     if (p === "/health") return json(res, 200, { status: "ok" });
+    if (p.startsWith("/logs"))
+      return json(res, 200, {
+        file: "strivo.2026-05-26.log",
+        level: "info",
+        lines: [
+          "2026-05-26T22:00:00Z  INFO strivo_core::daemon: StriVo daemon starting",
+          "2026-05-26T22:00:01Z  WARN strivo_core::monitor: example warning",
+        ],
+      });
     if (p === "/health/checks")
       return json(res, 200, {
         status: "ok",
