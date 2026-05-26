@@ -91,6 +91,14 @@ pub struct VodEntry {
     pub thumbnail_url: Option<String>,
 }
 
+/// A YouTube playlist usable as a bulk-download scope (task #73).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PlaylistInfo {
+    pub id: String,
+    pub title: String,
+    pub item_count: Option<u64>,
+}
+
 #[allow(dead_code)]
 #[async_trait::async_trait]
 pub trait Platform: Send + Sync {

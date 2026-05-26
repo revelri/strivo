@@ -396,6 +396,7 @@ pub enum DaemonEventKind {
     PatreonPostFound,
     PatreonState,
     BulkProgress,
+    PlaylistList,
     ScheduleFired,
     Error,
 }
@@ -417,6 +418,7 @@ impl DaemonEventKind {
             DaemonEvent::PatreonPostFound { .. } => Self::PatreonPostFound,
             DaemonEvent::PatreonState { .. } => Self::PatreonState,
             DaemonEvent::BulkProgress { .. } => Self::BulkProgress,
+            DaemonEvent::PlaylistList { .. } => Self::PlaylistList,
             DaemonEvent::ScheduleFired { .. } => Self::ScheduleFired,
             DaemonEvent::Error(_) => Self::Error,
         }

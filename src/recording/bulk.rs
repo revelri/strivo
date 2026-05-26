@@ -24,8 +24,16 @@ pub enum BulkCommand {
         channel_id: String,
         channel_name: String,
         platform: PlatformKind,
+        /// Optional YouTube playlist scope (task #73). When set, only that
+        /// playlist's items are pulled instead of the whole channel.
+        playlist_id: Option<String>,
     },
     Stop {
+        channel_id: String,
+    },
+    /// Fetch a YouTube channel's playlists and emit them as
+    /// DaemonEvent::PlaylistList for the scope picker (task #73).
+    ListPlaylists {
         channel_id: String,
     },
 }
@@ -49,6 +57,7 @@ pub fn spawn(
                     channel_id,
                     channel_name,
                     platform,
+                    playlist_id,
                 } => {
                     if active.contains_key(&channel_id) {
                         tracing::info!(channel = %channel_name, "bulk-dl already running");
@@ -60,8 +69,16 @@ pub fn spawn(
                     let etx = event_tx.clone();
                     let done_tx = internal_tx.clone();
                     tokio::spawn(async move {
-                        run_channel_pull(&cfg, &channel_id, &channel_name, platform, cancel, &etx)
-                            .await;
+                        run_channel_pull(
+                            &cfg,
+                            &channel_id,
+                            &channel_name,
+                            platform,
+                            playlist_id.as_deref(),
+                            cancel,
+                            &etx,
+                        )
+                        .await;
                         // Self-deregister so a later Start can re-run.
                         let _ = done_tx.send(BulkCommand::Stop {
                             channel_id: channel_id.clone(),
@@ -73,6 +90,20 @@ pub fn spawn(
                         cancel.cancel();
                     }
                 }
+                BulkCommand::ListPlaylists { channel_id } => {
+                    let cfg = config.clone();
+                    let etx = event_tx.clone();
+                    tokio::spawn(async move {
+                        let playlists = fetch_playlists(&cfg, &channel_id).await.unwrap_or_else(|e| {
+                            tracing::warn!("bulk-dl: fetch_playlists failed: {e:#}");
+                            Vec::new()
+                        });
+                        let _ = etx.send(AppEvent::Daemon(DaemonEvent::PlaylistList {
+                            channel_id,
+                            playlists,
+                        }));
+                    });
+                }
             }
         }
     });
@@ -80,11 +111,13 @@ pub fn spawn(
 }
 
 /// Resolve a channel's catalog and run the pull, emitting BulkProgress.
+#[allow(clippy::too_many_arguments)]
 async fn run_channel_pull(
     config: &AppConfig,
     channel_id: &str,
     channel_name: &str,
     platform: PlatformKind,
+    playlist_id: Option<&str>,
     cancel: CancellationToken,
     event_tx: &mpsc::UnboundedSender<AppEvent>,
 ) {
@@ -99,7 +132,7 @@ async fn run_channel_pull(
 
     emit(0, 0, true);
 
-    let vods = match resolve_vods(config, channel_id, platform).await {
+    let vods = match resolve_vods(config, channel_id, platform, playlist_id).await {
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(channel = %channel_name, "bulk-dl resolve failed: {e:#}");
@@ -192,11 +225,31 @@ async fn run_channel_pull(
     emit(total, total, false);
 }
 
+/// Fetch a YouTube channel's playlists for the scope picker (task #73).
+async fn fetch_playlists(
+    config: &AppConfig,
+    channel_id: &str,
+) -> anyhow::Result<Vec<crate::platform::PlaylistInfo>> {
+    use anyhow::Context;
+    let cfg = config
+        .youtube
+        .clone()
+        .context("youtube section missing in config")?;
+    let yt = crate::platform::youtube::YouTubePlatform::new(
+        cfg.client_id,
+        cfg.client_secret,
+        cfg.cookies_path.clone(),
+    );
+    yt.load_stored_tokens().await.context("youtube auth")?;
+    yt.fetch_playlists(channel_id).await
+}
+
 /// Resolve a channel's back-catalog VODs. Mirrors the `pull` CLI path.
 async fn resolve_vods(
     config: &AppConfig,
     channel_id: &str,
     platform: PlatformKind,
+    playlist_id: Option<&str>,
 ) -> anyhow::Result<Vec<VodEntry>> {
     use anyhow::Context;
     match platform {
@@ -211,7 +264,12 @@ async fn resolve_vods(
                 cfg.cookies_path.clone(),
             );
             yt.load_stored_tokens().await.context("youtube auth")?;
-            yt.fetch_channel_vods(channel_id, None, None).await
+            // Playlist scope (task #73): pull only that playlist's items.
+            if let Some(pl) = playlist_id {
+                yt.fetch_playlist_items(pl, channel_id, None, None).await
+            } else {
+                yt.fetch_channel_vods(channel_id, None, None).await
+            }
         }
         PlatformKind::Twitch => {
             let cfg = config

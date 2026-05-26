@@ -39,6 +39,15 @@ pub enum ClientMessage {
         channel_name: String,
         platform: PlatformKind,
         action: BulkAction,
+        /// Optional YouTube playlist scope (task #73). None = whole channel.
+        #[serde(default)]
+        playlist_id: Option<String>,
+    },
+    /// Request the playlists for a YouTube channel, to populate the
+    /// bulk-download scope picker (task #73). Answered asynchronously
+    /// with DaemonEvent::PlaylistList.
+    ListPlaylists {
+        channel_id: String,
     },
 }
 

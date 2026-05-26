@@ -69,6 +69,12 @@ pub enum DaemonEvent {
         total: usize,
         active: bool,
     },
+    /// Playlists for a YouTube channel, answering ClientMessage::ListPlaylists
+    /// to populate the bulk-download scope picker (task #73).
+    PlaylistList {
+        channel_id: String,
+        playlists: Vec<crate::platform::PlaylistInfo>,
+    },
     /// A cron schedule fired and a recording was kicked off. Includes the
     /// pre-generated `job_id` so the TUI can correlate with the
     /// `RecordingStarted` that follows.
@@ -87,6 +93,17 @@ pub struct BulkDlStatus {
     pub done: usize,
     pub total: usize,
     pub active: bool,
+}
+
+/// Bulk-download scope picker for YouTube channels (task #73). Row 0 is
+/// always "Whole channel"; the rest are the channel's playlists.
+#[derive(Debug, Clone)]
+pub struct PlaylistPicker {
+    pub channel_id: String,
+    pub channel_name: String,
+    pub playlists: Vec<crate::platform::PlaylistInfo>,
+    pub selected: usize,
+    pub loading: bool,
 }
 
 /// Events handled by the TUI application.
@@ -484,6 +501,9 @@ pub struct AppState {
     /// and the start/stop toggle.
     pub bulk_downloads: HashMap<String, BulkDlStatus>,
 
+    /// Active YouTube playlist scope picker overlay (task #73), if open.
+    pub playlist_picker: Option<PlaylistPicker>,
+
     // Thumbnail cache (channel_id -> protocol state for rendering)
     pub thumbnail_cache: HashMap<String, PathBuf>,
     pub thumbnail_protocols: HashMap<String, StatefulProtocol>,
@@ -858,6 +878,7 @@ impl AppState {
             patreon_posts: HashMap::new(),
             patreon_post_cursor: 0,
             bulk_downloads: HashMap::new(),
+            playlist_picker: None,
             thumbnail_cache: HashMap::new(),
             thumbnail_protocols: HashMap::new(),
             picker: {
@@ -1678,6 +1699,18 @@ impl AppState {
                     self.bulk_downloads.remove(&channel_id);
                 }
             }
+            DaemonEvent::PlaylistList {
+                channel_id,
+                playlists,
+            } => {
+                // Fill the open picker if it's for this channel.
+                if let Some(picker) = self.playlist_picker.as_mut() {
+                    if picker.channel_id == channel_id {
+                        picker.playlists = playlists;
+                        picker.loading = false;
+                    }
+                }
+            }
             DaemonEvent::PatreonState { creators, posts } => {
                 // Cache posts by campaign_id, newest first.
                 let mut by_campaign: HashMap<String, Vec<crate::platform::patreon::PatreonPost>> =
@@ -2260,6 +2293,10 @@ impl AppState {
                 self.toggle_bulk_download_platform();
                 None
             }
+            A::PickBulkPlaylist => {
+                self.open_playlist_picker();
+                None
+            }
             // Default action records from the start of the stream:
             // YouTube via yt-dlp --live-from-start, Twitch via ffmpeg
             // -live_start_index 0 (~5min DVR window).
@@ -2640,6 +2677,14 @@ impl AppState {
             // to the table below — keep that behavior.
             if !matches!(key.code, KeyCode::Char('E')) {
                 return None;
+            }
+        }
+
+        // Playlist scope picker overlay (task #73) — modal, intercepts
+        // all keys while open.
+        if self.playlist_picker.is_some() {
+            if let Some(consumed) = self.handle_playlist_picker_key(&key) {
+                return consumed;
             }
         }
 
@@ -3067,6 +3112,7 @@ impl AppState {
             channel_name: channel_name.clone(),
             platform,
             action,
+            playlist_id: None,
         });
         self.status_message = format!("{verb} bulk download for {channel_name}…");
     }
@@ -3115,6 +3161,7 @@ impl AppState {
                 channel_name: channel_name.clone(),
                 platform,
                 action: action.clone(),
+                playlist_id: None,
             });
         }
         let verb = if any_active { "Stopping" } else { "Starting" };
@@ -3123,6 +3170,82 @@ impl AppState {
             targets.len(),
             platform
         );
+    }
+
+    /// Open the YouTube playlist scope picker for the selected channel
+    /// (task #73) and request its playlists from the daemon.
+    fn open_playlist_picker(&mut self) {
+        let Some(ch) = self.channels.get(self.selected_channel) else {
+            return;
+        };
+        if ch.platform != PlatformKind::YouTube {
+            self.status_message = "Playlist scope is YouTube-only".to_string();
+            return;
+        }
+        let channel_id = ch.id.clone();
+        let channel_name = ch.display_name.clone();
+        let Some(ref tx) = self.daemon_tx else {
+            self.status_message = "Playlist scope needs the daemon".to_string();
+            return;
+        };
+        let _ = tx.send(crate::ipc::ClientMessage::ListPlaylists {
+            channel_id: channel_id.clone(),
+        });
+        self.playlist_picker = Some(PlaylistPicker {
+            channel_id,
+            channel_name,
+            playlists: Vec::new(),
+            selected: 0,
+            loading: true,
+        });
+        self.status_message = "Loading playlists…".to_string();
+    }
+
+    /// Handle a key while the playlist picker overlay is open (task #73).
+    /// Returns Some(consumed) when handled. Row 0 = whole channel.
+    fn handle_playlist_picker_key(
+        &mut self,
+        key: &crossterm::event::KeyEvent,
+    ) -> Option<Option<AppAction>> {
+        use crossterm::event::KeyCode;
+        let picker = self.playlist_picker.as_mut()?;
+        let row_count = picker.playlists.len() + 1; // +1 for "Whole channel"
+        match key.code {
+            KeyCode::Esc => {
+                self.playlist_picker = None;
+                Some(None)
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                picker.selected = (picker.selected + 1).min(row_count - 1);
+                Some(None)
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                picker.selected = picker.selected.saturating_sub(1);
+                Some(None)
+            }
+            KeyCode::Enter => {
+                let picker = self.playlist_picker.take().unwrap();
+                let (playlist_id, scope_label) = if picker.selected == 0 {
+                    (None, "whole channel".to_string())
+                } else {
+                    let pl = &picker.playlists[picker.selected - 1];
+                    (Some(pl.id.clone()), pl.title.clone())
+                };
+                if let Some(ref tx) = self.daemon_tx {
+                    let _ = tx.send(crate::ipc::ClientMessage::BulkDownload {
+                        channel_id: picker.channel_id,
+                        channel_name: picker.channel_name.clone(),
+                        platform: PlatformKind::YouTube,
+                        action: crate::ipc::BulkAction::Start,
+                        playlist_id,
+                    });
+                    self.status_message =
+                        format!("Bulk download: {} ({scope_label})", picker.channel_name);
+                }
+                Some(None)
+            }
+            _ => Some(None), // swallow other keys while the overlay is open
+        }
     }
 
     fn toggle_auto_record_on_selected(&mut self) {

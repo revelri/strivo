@@ -427,6 +427,21 @@ impl YouTubePlatform {
         } else {
             bail!("channel_id must start with 'UC' for YouTube uploads enumeration: {channel_id}");
         };
+        self.fetch_playlist_items(&uploads_id, channel_id, since, limit)
+            .await
+    }
+
+    /// Enumerate a specific playlist's items as VodEntries (task #73).
+    /// `channel_id` is recorded on each VodEntry for provenance/dedupe.
+    /// Reverse-chrono, so `since` short-circuits once items age out.
+    pub async fn fetch_playlist_items(
+        &self,
+        playlist_id: &str,
+        channel_id: &str,
+        since: Option<chrono::DateTime<chrono::Utc>>,
+        limit: Option<usize>,
+    ) -> Result<Vec<VodEntry>> {
+        let uploads_id = playlist_id.to_string();
 
         let mut out = Vec::new();
         let mut page_token: Option<String> = None;
@@ -522,6 +537,66 @@ impl YouTubePlatform {
             }
         }
 
+        Ok(out)
+    }
+
+    /// List a channel's playlists for the bulk-download scope picker
+    /// (task #73). Paginates `playlists?channelId=…`. The uploads
+    /// playlist is implicit (whole-channel scope handles it) so it's
+    /// not returned here.
+    pub async fn fetch_playlists(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<crate::platform::PlaylistInfo>> {
+        let mut out = Vec::new();
+        let mut page_token: Option<String> = None;
+        loop {
+            let mut url = format!(
+                "{YOUTUBE_API_URL}/playlists?part=snippet,contentDetails&maxResults=50&channelId={channel_id}"
+            );
+            if let Some(ref t) = page_token {
+                url.push_str(&format!("&pageToken={t}"));
+            }
+            let resp: serde_json::Value = self.api_get(&url).await?;
+            let items = resp
+                .get("items")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            for item in items {
+                let id = item
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if id.is_empty() {
+                    continue;
+                }
+                let title = item
+                    .get("snippet")
+                    .and_then(|s| s.get("title"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Untitled playlist")
+                    .to_string();
+                let item_count = item
+                    .get("contentDetails")
+                    .and_then(|c| c.get("itemCount"))
+                    .and_then(|v| v.as_u64());
+                out.push(crate::platform::PlaylistInfo {
+                    id,
+                    title,
+                    item_count,
+                });
+            }
+            page_token = resp
+                .get("nextPageToken")
+                .and_then(|v| v.as_str())
+                .filter(|t| !t.is_empty())
+                .map(String::from);
+            if page_token.is_none() {
+                break;
+            }
+        }
         Ok(out)
     }
 

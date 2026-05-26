@@ -117,6 +117,7 @@ pub enum KeyAction {
     ToggleAutoRecord,
     ToggleBulkDownload,
     ToggleBulkDownloadPlatform,
+    PickBulkPlaylist,
 
     // Detail
     StartRecording,
@@ -207,6 +208,7 @@ impl KeyAction {
             Self::ToggleAutoRecord => "toggle auto-record",
             Self::ToggleBulkDownload => "start/stop bulk download",
             Self::ToggleBulkDownloadPlatform => "start/stop bulk download (whole platform)",
+            Self::PickBulkPlaylist => "bulk download a YouTube playlist",
             Self::StartRecording => "start recording",
             Self::StartRecordingFromStart => "record from start (YouTube)",
             Self::WatchStream => "watch in mpv",
@@ -274,6 +276,7 @@ impl KeyAction {
             Self::ToggleAutoRecord => "ToggleAutoRecord",
             Self::ToggleBulkDownload => "ToggleBulkDownload",
             Self::ToggleBulkDownloadPlatform => "ToggleBulkDownloadPlatform",
+            Self::PickBulkPlaylist => "PickBulkPlaylist",
             Self::StartRecording => "StartRecording",
             Self::StartRecordingFromStart => "StartRecordingFromStart",
             Self::WatchStream => "WatchStream",
@@ -343,6 +346,7 @@ impl KeyAction {
             "ToggleAutoRecord" => Self::ToggleAutoRecord,
             "ToggleBulkDownload" => Self::ToggleBulkDownload,
             "ToggleBulkDownloadPlatform" => Self::ToggleBulkDownloadPlatform,
+            "PickBulkPlaylist" => Self::PickBulkPlaylist,
             "StartRecording" => Self::StartRecording,
             "StartRecordingFromStart" => Self::StartRecordingFromStart,
             "WatchStream" => Self::WatchStream,
@@ -909,6 +913,15 @@ fn table() -> &'static [Chord] {
             },
             KeyAction::ToggleBulkDownloadPlatform,
             "bulk download whole platform",
+        ),
+        c(
+            Layer::Detail,
+            KeyPattern {
+                code: Char('P'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::PickBulkPlaylist,
+            "bulk download a YouTube playlist",
         ),
         c(
             Layer::Detail,

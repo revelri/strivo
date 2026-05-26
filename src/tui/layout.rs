@@ -177,4 +177,74 @@ pub fn render(frame: &mut Frame, app: &mut AppState, registry: &PluginRegistry) 
     if app.theme_picker.is_some() {
         theme_picker::render(frame, frame.area(), app);
     }
+
+    if app.playlist_picker.is_some() {
+        render_playlist_picker(frame, app);
+    }
+}
+
+/// Centered modal listing a YouTube channel's playlists as bulk-download
+/// scopes (task #73). Row 0 is always "Whole channel".
+fn render_playlist_picker(frame: &mut ratatui::Frame, app: &crate::app::AppState) {
+    use ratatui::layout::{Constraint, Layout, Rect};
+    use ratatui::style::{Modifier, Style};
+    use ratatui::text::Line;
+    use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, ListState};
+    use crate::tui::theme::Theme;
+
+    let Some(picker) = app.playlist_picker.as_ref() else {
+        return;
+    };
+
+    let area = frame.area();
+    let w = area.width.saturating_sub(8).min(70).max(30);
+    let h = area.height.saturating_sub(6).min(20).max(6);
+    let x = area.x + (area.width.saturating_sub(w)) / 2;
+    let y = area.y + (area.height.saturating_sub(h)) / 2;
+    let rect = Rect { x, y, width: w, height: h };
+
+    frame.render_widget(Clear, rect);
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::new().fg(Theme::primary()))
+        .title(format!(" Bulk download scope — {} ", picker.channel_name))
+        .title_style(Theme::title());
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+
+    let [list_area, hint_area] =
+        Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(inner);
+
+    if picker.loading {
+        let p = ratatui::widgets::Paragraph::new("Loading playlists…")
+            .style(Style::new().fg(Theme::muted()));
+        frame.render_widget(p, list_area);
+    } else {
+        let mut items: Vec<ListItem> = Vec::with_capacity(picker.playlists.len() + 1);
+        items.push(ListItem::new(Line::from("▣ Whole channel (all uploads)")));
+        for pl in &picker.playlists {
+            let count = pl
+                .item_count
+                .map(|c| format!("  ({c})"))
+                .unwrap_or_default();
+            items.push(ListItem::new(Line::from(format!("≡ {}{count}", pl.title))));
+        }
+        let list = List::new(items)
+            .highlight_style(
+                Style::new()
+                    .fg(Theme::bg())
+                    .bg(Theme::primary())
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol("▶ ");
+        let mut state = ListState::default();
+        state.select(Some(picker.selected));
+        frame.render_stateful_widget(list, list_area, &mut state);
+    }
+
+    let hint = ratatui::widgets::Paragraph::new("[j/k] move  [Enter] start  [Esc] cancel")
+        .style(Style::new().fg(Theme::muted()));
+    frame.render_widget(hint, hint_area);
 }

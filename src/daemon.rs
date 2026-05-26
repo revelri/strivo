@@ -640,11 +640,19 @@ async fn handle_client(
                 cancel.cancel();
                 break;
             }
+            ClientMessage::ListPlaylists { channel_id } => {
+                if let Some(ref tx) = bulk_tx {
+                    let _ = tx.send(crate::recording::bulk::BulkCommand::ListPlaylists {
+                        channel_id,
+                    });
+                }
+            }
             ClientMessage::BulkDownload {
                 channel_id,
                 channel_name,
                 platform,
                 action,
+                playlist_id,
             } => {
                 let cmd = match action {
                     crate::ipc::BulkAction::Start => {
@@ -652,6 +660,7 @@ async fn handle_client(
                             channel_id,
                             channel_name,
                             platform,
+                            playlist_id,
                         }
                     }
                     crate::ipc::BulkAction::Stop => {
