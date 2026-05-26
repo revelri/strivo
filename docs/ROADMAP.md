@@ -31,7 +31,7 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   (or `X-Requested-With`) on all cookie-authed state-changing requests, plus strict
   `Origin`/`Host` allowlist (`127.0.0.1`, `*.ts.net`). `X-Api-Key` track stays
   CSRF-exempt by design. All mutations POST/PUT/DELETE (never GET).
-- [ ] **6. Security unit tests** `[review][F]` — cover HMAC encode/verify + expiry,
+- [x] **6. Security unit tests** `[review][F]` — cover HMAC encode/verify + expiry,
   CSRF header/Origin/Host checks, and the path-containment guard. These are
   load-bearing; they get dedicated tests.
 

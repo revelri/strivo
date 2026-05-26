@@ -29,29 +29,14 @@ use uuid::Uuid;
 
 use crate::server::AppState;
 
-const API_KEY_HEADER: &str = "x-api-key";
-
 /// Authorize a request via EITHER the `X-Api-Key` header (programmatic
 /// clients) OR a valid `strivo_session` cookie (browser, set by /login).
 /// The browser SPA only carries the cookie, so cookie support is what
 /// lets it reach /channels, /recordings, … after logging in. (W3.)
 fn check_key(headers: &HeaderMap, state: &AppState) -> Result<(), StatusCode> {
-    // 1. X-Api-Key header.
-    let key = headers
-        .get(API_KEY_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if !key.is_empty() && state.api_key.matches(key) {
-        return Ok(());
-    }
-
-    // 2. Signed session cookie (either the plain or `__Host-` name).
-    if crate::routes::login::session_from_headers(headers, state.session_secret.as_deref()).is_some()
-    {
-        return Ok(());
-    }
-
-    Err(StatusCode::UNAUTHORIZED)
+    // Single dual-track gate: valid X-Api-Key header OR a valid session
+    // cookie (plain or `__Host-` name). See login::check_dual.
+    crate::routes::login::check_dual(headers, &state.api_key, state.session_secret.as_deref())
 }
 
 async fn channels(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {

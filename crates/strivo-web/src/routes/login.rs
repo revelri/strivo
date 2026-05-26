@@ -343,4 +343,64 @@ mod tests {
         );
         assert!(session_from_headers(&h, Some(&secret)).is_none());
     }
+
+    // --- check_dual: the integrated auth gate (HMAC verify + header path) ---
+
+    #[test]
+    fn check_dual_accepts_valid_api_key() {
+        let key = crate::auth::ApiKey("secret-key".into());
+        let mut h = HeaderMap::new();
+        h.insert("x-api-key", HeaderValue::from_static("secret-key"));
+        assert!(check_dual(&h, &key, None).is_ok());
+    }
+
+    #[test]
+    fn check_dual_rejects_wrong_api_key() {
+        let key = crate::auth::ApiKey("secret-key".into());
+        let mut h = HeaderMap::new();
+        h.insert("x-api-key", HeaderValue::from_static("nope"));
+        assert_eq!(check_dual(&h, &key, None).unwrap_err(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn check_dual_accepts_valid_cookie() {
+        let key = crate::auth::ApiKey("secret-key".into());
+        let secret = generate_session_secret();
+        let value = SessionToken::new(60).encode(&secret);
+        let mut h = HeaderMap::new();
+        h.insert(
+            "cookie",
+            HeaderValue::from_str(&format!("{SESSION_COOKIE}={value}")).unwrap(),
+        );
+        // Wrong/absent api-key, but the cookie alone authorizes.
+        assert!(check_dual(&h, &key, Some(&secret)).is_ok());
+    }
+
+    #[test]
+    fn check_dual_rejects_when_neither_present() {
+        let key = crate::auth::ApiKey("secret-key".into());
+        let secret = generate_session_secret();
+        let h = HeaderMap::new();
+        assert_eq!(
+            check_dual(&h, &key, Some(&secret)).unwrap_err(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[test]
+    fn check_dual_rejects_cookie_signed_by_other_secret() {
+        let key = crate::auth::ApiKey("secret-key".into());
+        let real = generate_session_secret();
+        let attacker = generate_session_secret();
+        let value = SessionToken::new(60).encode(&attacker);
+        let mut h = HeaderMap::new();
+        h.insert(
+            "cookie",
+            HeaderValue::from_str(&format!("{SESSION_COOKIE}={value}")).unwrap(),
+        );
+        assert_eq!(
+            check_dual(&h, &key, Some(&real)).unwrap_err(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
 }
