@@ -479,6 +479,9 @@ function paintChannelList() {
   // always-visible section (item 6).
   const byPlat = (plat) => offline.filter((c) => c.platform === plat);
 
+  // Preserve scroll position across repaints (the rail is rebuilt
+  // wholesale, which would otherwise jump it to the top on every event).
+  const prevScroll = rail.scrollTop;
   rail.innerHTML =
     channels.length === 0
       ? `<div class="ch-empty">No channels yet.<br><br>
@@ -496,6 +499,7 @@ function paintChannelList() {
       selectChannel(el.dataset.channelKey);
     });
   });
+  rail.scrollTop = prevScroll;
 }
 
 function platformGlyph(p) {
@@ -591,8 +595,8 @@ async function renderHome() {
 
   const center = selected
     ? `${channelDetailHtml(selected)}
-       <div class="dash-band">${recordingsDashboardHtml(true)}</div>`
-    : recordingsDashboardHtml(false);
+       <div class="dash-band"><div id="dash">${recordingsDashboardHtml(true)}</div></div>`
+    : `<div id="dash">${recordingsDashboardHtml(false)}</div>`;
 
   root.innerHTML = chrome(center);
   setupChromeHandlers();
@@ -601,6 +605,16 @@ async function renderHome() {
     wireChannelDetail(selected);
     loadChannelDetailData(selected);
   }
+  wireDashboard();
+}
+
+// Repaint ONLY the recordings dashboard subtree (#dash) — never the chrome,
+// left rail, or channel-detail iframe. Driven by high-frequency recording
+// events so they don't reload the live preview or reset rail scroll.
+function paintDashboard() {
+  const el = document.getElementById("dash");
+  if (!el) return;
+  el.innerHTML = recordingsDashboardHtml(!!selectedChannelKey);
   wireDashboard();
 }
 
@@ -1735,26 +1749,59 @@ function injectKeyboardHelp() {
 events.on((event) => {
   const onHome = currentRoute() === "library";
 
-  // Channel transitions: update the cache + repaint the left rail; if the
-  // home dashboard is showing, refresh it too.
+  // Surgical updates only — NEVER full renderHome on background events.
+  // renderHome rebuilds the whole page (chrome + rail + channel-detail
+  // iframe), so doing it on the ~2s RecordingProgress stream reloaded the
+  // live preview and reset the rail scroll. Each handler now touches the
+  // smallest subtree: paintChannelList (rail, scroll-preserved) or
+  // paintDashboard (#dash only), leaving the detail iframe untouched.
+
   if (event.ChannelsUpdated) {
     channelCache = event.ChannelsUpdated;
     paintChannelList();
-    if (onHome) renderHome().catch(console.error);
   }
   if (event.ChannelWentLive || event.ChannelWentOffline) {
-    paintChannelList();
-    if (onHome) renderHome().catch(console.error);
+    // Refetch so the new live state (and ordering) is reflected.
+    API.channels()
+      .then((d) => {
+        channelCache = d.channels || [];
+        paintChannelList();
+      })
+      .catch(() => {});
   }
 
-  // Recording lifecycle: refresh the dashboard + left-rail rec dots.
-  if (event.RecordingStarted || event.RecordingFinished || event.RecordingProgress || event.AllRecordingsStopped) {
-    if (currentRoute() === "recordings") renderRecordings().catch(console.error);
-    else if (onHome) renderHome().catch(console.error);
-    else paintChannelList();
+  // High-frequency progress: update the in-memory job + the dashboard
+  // subtree in place. No rail/detail rebuild.
+  if (event.RecordingProgress) {
+    const p = event.RecordingProgress;
+    const j = recCache.find((r) => r.id === p.job_id);
+    if (j) {
+      j.bytes_written = p.bytes_written;
+      j.duration_secs = p.duration_secs;
+    }
+    updateLiveCount(recCache.filter((r) => isInProgress(r.state)).length);
+    if (currentRoute() === "recordings") paintRecordings();
+    else paintDashboard();
   }
 
-  // #74 — bulk-download progress drives the per-channel button.
+  // Lifecycle state changes (rare): refetch recordings, refresh the
+  // dashboard + rail rec-dots, without rebuilding the detail.
+  if (event.RecordingStarted || event.RecordingFinished || event.AllRecordingsStopped) {
+    API.recordings()
+      .then((d) => {
+        recCache = d.recordings || [];
+        dashRecordings = recCache;
+        updateLiveCount(recCache.filter((r) => isInProgress(r.state)).length);
+        if (currentRoute() === "recordings") renderRecordings().catch(() => {});
+        else {
+          paintDashboard();
+          paintChannelList();
+        }
+      })
+      .catch(() => {});
+  }
+
+  // #74 — bulk-download progress: update state + the rail bulk badge only.
   if (event.BulkProgress) {
     const p = event.BulkProgress;
     if (p.active) {
@@ -1762,7 +1809,7 @@ events.on((event) => {
     } else {
       delete bulkStatus[p.channel_id];
     }
-    if (onHome) renderHome().catch(console.error);
+    paintChannelList();
   }
 
   // #75 — Patreon snapshot feeds the channel list + Patreon detail.
