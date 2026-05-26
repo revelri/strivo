@@ -48,6 +48,15 @@ const API = {
       method: "POST",
       body,
     }),
+  bulkDownload: (channelId, body) =>
+    API._fetch(`/channels/${encodeURIComponent(channelId)}/bulk`, {
+      method: "POST",
+      body,
+    }),
+  requestPlaylists: (channelId) =>
+    API._fetch(`/channels/${encodeURIComponent(channelId)}/playlists`, {
+      method: "POST",
+    }),
   login: (apiKey) =>
     API._fetch("/auth/login", { method: "POST", body: { api_key: apiKey } }),
   logout: () => API._fetch("/auth/logout", { method: "POST" }),
@@ -79,6 +88,9 @@ const events = {
 
 // Activity event ring (most-recent-first, capped at 50).
 const activityLog = [];
+// #74 — per-channel bulk-download status, keyed by channel_id:
+// { done, total, active }. Fed by the `bulk-progress` SSE event.
+const bulkStatus = {};
 function pushActivity(event) {
   const kind = Object.keys(event)[0] || "event";
   const summary = summarizeEvent(event);
@@ -390,6 +402,94 @@ async function renderLibrary() {
   document.querySelectorAll("[data-action=auto-record]").forEach((btn) => {
     btn.addEventListener("click", () => toggleAutoRecord(btn.dataset));
   });
+  document.querySelectorAll("[data-action=bulk]").forEach((btn) => {
+    btn.addEventListener("click", () => toggleBulk(btn.dataset));
+  });
+  document.querySelectorAll("[data-action=bulk-playlist]").forEach((btn) => {
+    btn.addEventListener("click", () => openPlaylistPicker(btn.dataset));
+  });
+}
+
+// #74 — start/stop a per-channel bulk download.
+async function toggleBulk(ds) {
+  const active = ds.bulkActive === "true";
+  try {
+    await API.bulkDownload(ds.channelId, {
+      channel_name: ds.channelName,
+      platform: ds.platform,
+      action: active ? "stop" : "start",
+    });
+    // Optimistic: flip local state; SSE bulk-progress will correct it.
+    bulkStatus[ds.channelId] = active
+      ? { done: 0, total: 0, active: false }
+      : { done: 0, total: 0, active: true };
+    if (currentRoute() === "library") render();
+  } catch (e) {
+    alert(`Bulk download failed: ${e.message}`);
+  }
+}
+
+// #74 / #73 — request the channel's playlists; the picker modal opens
+// when the `playlist-list` SSE event arrives.
+let pendingPlaylistChannel = null;
+async function openPlaylistPicker(ds) {
+  pendingPlaylistChannel = { id: ds.channelId, name: ds.channelName };
+  try {
+    await API.requestPlaylists(ds.channelId);
+    showPlaylistModal({ loading: true, name: ds.channelName, playlists: [] });
+  } catch (e) {
+    alert(`Couldn't load playlists: ${e.message}`);
+  }
+}
+
+function showPlaylistModal(opts) {
+  let modal = document.getElementById("playlist-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "playlist-modal";
+    modal.className = "kbd-help"; // reuse the centered-overlay styling
+    document.body.appendChild(modal);
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) modal.classList.remove("open");
+    });
+  }
+  const rows = opts.loading
+    ? "<div>Loading playlists…</div>"
+    : [
+        `<div class="pl-row" data-pl=""><b>▣ Whole channel</b> (all uploads)</div>`,
+        ...opts.playlists.map(
+          (p) =>
+            `<div class="pl-row" data-pl="${escape(p.id)}">≡ ${escape(p.title)}${
+              p.item_count != null ? ` (${p.item_count})` : ""
+            }</div>`,
+        ),
+      ].join("");
+  modal.innerHTML = `
+    <div class="card">
+      <h2>Bulk download — ${escape(opts.name)}</h2>
+      <div class="pl-list">${rows}</div>
+    </div>`;
+  modal.classList.add("open");
+  modal.querySelectorAll(".pl-row").forEach((row) => {
+    row.addEventListener("click", async () => {
+      const ch = pendingPlaylistChannel;
+      if (!ch) return;
+      const playlist_id = row.dataset.pl || null;
+      try {
+        await API.bulkDownload(ch.id, {
+          channel_name: ch.name,
+          platform: "YouTube",
+          action: "start",
+          playlist_id,
+        });
+        bulkStatus[ch.id] = { done: 0, total: 0, active: true };
+        modal.classList.remove("open");
+        if (currentRoute() === "library") render();
+      } catch (e) {
+        alert(`Bulk download failed: ${e.message}`);
+      }
+    });
+  });
 }
 
 function channelCard(c) {
@@ -432,9 +532,32 @@ function channelCard(c) {
                 data-enabled="${!c.auto_record}">
           ${c.auto_record ? "Disable auto" : "Enable auto"}
         </button>
+        ${bulkButton(c)}
+        ${c.platform === "YouTube" ? `
+          <button data-action="bulk-playlist" data-channel-id="${c.id}"
+                  data-channel-name="${escape(c.display_name || c.name)}">
+            ⛁ Playlist…
+          </button>
+        ` : ""}
       </div>
     </div>
   `;
+}
+
+// #74 — bulk-download toggle button reflecting live SSE progress.
+function bulkButton(c) {
+  const st = bulkStatus[c.id];
+  if (st && st.active) {
+    const label = st.total > 0 ? `⇩ ${st.done}/${st.total} — Stop` : "⇩ … — Stop";
+    return `<button data-action="bulk" data-bulk-active="true"
+              data-channel-id="${c.id}"
+              data-channel-name="${escape(c.display_name || c.name)}"
+              data-platform="${c.platform}">${label}</button>`;
+  }
+  return `<button data-action="bulk" data-bulk-active="false"
+            data-channel-id="${c.id}"
+            data-channel-name="${escape(c.display_name || c.name)}"
+            data-platform="${c.platform}">⇩ Bulk DL</button>`;
 }
 
 async function startRecordingFromCard(d) {
@@ -871,6 +994,27 @@ events.on((event) => {
       event.RecordingProgress)
   ) {
     renderRecordings().catch(console.error);
+  }
+  // #74 — bulk-download progress drives the per-channel button.
+  if (event.BulkProgress) {
+    const p = event.BulkProgress;
+    if (p.active) {
+      bulkStatus[p.channel_id] = { done: p.done, total: p.total, active: true };
+    } else {
+      delete bulkStatus[p.channel_id];
+    }
+    if (currentRoute() === "library") renderLibrary().catch(console.error);
+  }
+  // #74 / #73 — playlist list answers the picker request.
+  if (event.PlaylistList) {
+    const pl = event.PlaylistList;
+    if (pendingPlaylistChannel && pl.channel_id === pendingPlaylistChannel.id) {
+      showPlaylistModal({
+        loading: false,
+        name: pendingPlaylistChannel.name,
+        playlists: pl.playlists || [],
+      });
+    }
   }
 });
 events.start();

@@ -193,6 +193,22 @@ input:focus-visible {
   width: 480px;
   max-width: 92vw;
 }
+/* #74 — playlist scope picker modal (reuses .kbd-help overlay). */
+.pl-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+.pl-row {
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.pl-row:hover {
+  background: var(--overlay);
+  color: var(--primary);
+}
+
 .kbd-help h2 {
   margin: 0 0 1rem 0;
   color: var(--primary);

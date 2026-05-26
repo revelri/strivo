@@ -22,7 +22,7 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
-use strivo_core::ipc::{ClientMessage, ServerMessage};
+use strivo_core::ipc::{BulkAction, ClientMessage, ServerMessage};
 use strivo_core::platform::PlatformKind;
 use strivo_core::recording::RecordingCommand;
 use uuid::Uuid;
@@ -521,6 +521,86 @@ async fn plugin_rpc(
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct BulkDownloadPayload {
+    channel_name: String,
+    platform: PlatformKind,
+    /// "start" | "stop"
+    action: String,
+    #[serde(default)]
+    playlist_id: Option<String>,
+}
+
+/// `POST /api/v1/channels/{id}/bulk` — start or stop a per-channel bulk
+/// back-catalog download. Mirrors the TUI's `b` toggle (#71) and the
+/// playlist-scoped Shift+P picker (#73). Progress streams back over
+/// `/events` as `bulk-progress`. (W#74.)
+async fn bulk_download(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    Json(body): Json<BulkDownloadPayload>,
+) -> impl IntoResponse {
+    if let Err(code) = check_key(&headers, &state) {
+        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    }
+    let action = match body.action.as_str() {
+        "start" => BulkAction::Start,
+        "stop" => BulkAction::Stop,
+        other => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("unknown action {other:?}")})),
+            )
+                .into_response()
+        }
+    };
+    let cmd = ClientMessage::BulkDownload {
+        channel_id,
+        channel_name: body.channel_name,
+        platform: body.platform,
+        action,
+        playlist_id: body.playlist_id,
+    };
+    match state.ipc.send_command(cmd).await {
+        Ok(()) => (StatusCode::ACCEPTED, Json(json!({"status": "queued"}))).into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+/// `POST /api/v1/channels/{id}/playlists` — request the channel's
+/// YouTube playlists for the scope picker. The list arrives over
+/// `/events` as `playlist-list`. (W#74 / #73.)
+async fn request_playlists(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(code) = check_key(&headers, &state) {
+        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    }
+    match state
+        .ipc
+        .send_command(ClientMessage::ListPlaylists { channel_id })
+        .await
+    {
+        Ok(()) => (
+            StatusCode::ACCEPTED,
+            Json(json!({"status": "requested", "note": "result arrives via /events playlist-list"})),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/health", get(health))
@@ -542,4 +622,10 @@ pub fn router() -> Router<AppState> {
         // W5: stream-recorder surfaces
         .route("/api/v1/storage", get(storage))
         .route("/api/v1/gantt", get(gantt))
+        // #74: bulk-download controls
+        .route("/api/v1/channels/{channel_id}/bulk", post(bulk_download))
+        .route(
+            "/api/v1/channels/{channel_id}/playlists",
+            post(request_playlists),
+        )
 }
