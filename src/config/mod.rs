@@ -656,6 +656,25 @@ impl AppConfig {
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
+    /// The capture profile attached to an auto-record channel, if any
+    /// (roadmap item 21). `platform` is the `Display` form ("Twitch", …).
+    pub fn capture_profile_for(&self, platform: &str, channel_id: &str) -> Option<&CaptureProfile> {
+        let entry = self
+            .auto_record_channels
+            .iter()
+            .find(|a| a.channel_id == channel_id && a.platform.eq_ignore_ascii_case(platform))?;
+        let name = entry.profile.as_ref()?;
+        self.capture_profiles.iter().find(|p| &p.name == name)
+    }
+
+    /// Effective transcode setting for an auto-record channel: the channel's
+    /// capture profile overrides the global `[recording]` default.
+    pub fn effective_transcode(&self, platform: &str, channel_id: &str) -> bool {
+        self.capture_profile_for(platform, channel_id)
+            .and_then(|p| p.transcode)
+            .unwrap_or(self.recording.transcode)
+    }
+
     /// Lint the config for pathological capture-profile / auto-record setups
     /// (roadmap item 21). Returns human-readable warnings; the daemon logs
     /// them at startup. Pure (no I/O) so it's unit-testable.
@@ -887,6 +906,31 @@ mod profile_tests {
         }];
         let w = cfg.config_warnings();
         assert!(w.iter().any(|s| s.contains("perpetual re-capture")), "{w:?}");
+    }
+
+    #[test]
+    fn effective_transcode_honours_profile_override() {
+        let mut cfg = AppConfig::default();
+        cfg.recording.transcode = false; // global default off
+        cfg.capture_profiles = vec![CaptureProfile {
+            name: "hq".into(),
+            format: None,
+            transcode: Some(true), // profile turns it on
+            audio_only: false,
+            transcript: false,
+            cutoff_episodes: None,
+        }];
+        cfg.auto_record_channels = vec![AutoRecordEntry {
+            platform: "Twitch".into(),
+            channel_id: "42".into(),
+            channel_name: "Foo".into(),
+            format: None,
+            profile: Some("hq".into()),
+        }];
+        // Channel with the profile → override wins.
+        assert!(cfg.effective_transcode("Twitch", "42"));
+        // Unknown channel → global default.
+        assert!(!cfg.effective_transcode("Twitch", "999"));
     }
 
     #[test]

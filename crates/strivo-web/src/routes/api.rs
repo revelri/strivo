@@ -158,6 +158,7 @@ async fn settings(headers: HeaderMap, State(state): State<AppState>) -> impl Int
                 "recording": cfg.recording,
                 "ui": cfg.ui,
                 "auto_record_channels": cfg.auto_record_channels,
+                "capture_profiles": cfg.capture_profiles,
                 "schedule": cfg.schedule,
                 "archiver": cfg.archiver,
                 "twitch_configured": cfg.twitch.is_some(),

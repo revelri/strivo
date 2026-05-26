@@ -217,12 +217,17 @@ impl ChannelMonitor {
                             {
                                 self.auto_recorded.insert(ch.id.clone(), true);
                                 let cookies_path = self.get_cookies_path(ch.platform);
+                                // A channel's capture profile (item 21) overrides
+                                // the global transcode default.
+                                let transcode = self
+                                    .config
+                                    .effective_transcode(&ch.platform.to_string(), &ch.id);
                                 let _ = self.recording_tx.send(RecordingCommand::Start {
                                     channel_id: ch.id.clone(),
                                     channel_name: ch.name.clone(),
                                     display_name: Some(ch.display_name.clone()),
                                     platform: ch.platform,
-                                    transcode: self.config.recording.transcode,
+                                    transcode,
                                     cookies_path,
                                     stream_title: ch.stream_title.clone(),
                                     from_start: true,
