@@ -4,23 +4,40 @@
  * overlay #3B3D56, fg #E8E8E2, primary #00E5FF (cyan),
  * secondary #FFB020 (amber), live #39FF7F, recording #FF4444. */
 
+/* ElegantFin-derived theme (see DESIGN.md "Web UI Theme" + docs/reference).
+   Ported as literally as possible: ElegantFin tokens + the user's near-black
+   YouTube-style gradient override. */
 :root {
-  --bg: #1a1b26;
-  --surface: #24253a;
-  --overlay: #3b3d56;
-  --border: #3b3d56;
-  --fg: #e8e8e2;
-  --muted: #a9aecf;
-  --dim: #565b7e;
-  --primary: #00e5ff;
-  --secondary: #ffb020;
-  --live: #39ff7f;
-  --recording: #ff4444;
+  /* Background = user's gradient override; --bg is the darker base point. */
+  --bg: #050505;
+  --bg-lighter: #101010;
+  --bg-gradient: linear-gradient(180deg, #101010 0%, #050505 100%);
+  /* Glass card/panel surface over the gradient (ElegantFin uses #1d2635-ish). */
+  --surface: rgba(29, 38, 53, 0.85);
+  --overlay: rgba(55, 65, 81, 0.5);
+  --border: hsl(214, 13%, 32%);
+  --border-light: hsla(0, 0%, 100%, 0.2);
+  --fg: rgb(209, 213, 219);
+  --muted: rgb(156, 163, 175);
+  --dim: hsl(214, 13%, 45%);
+  /* ElegantFin accent (activeColor). */
+  --primary: rgb(119, 91, 244);
+  --accent: rgb(119, 91, 244);
+  --submit: rgb(61, 54, 178);
+  --secondary: #f5a623;
+  --live: rgb(50, 167, 105);
+  --recording: rgb(217, 84, 84);
   --twitch: #9146ff;
   --youtube: #ff0000;
   --patreon: #ff424d;
-  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen-Sans,
-    Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+  /* Radii / blur / shadow (ElegantFin). */
+  --radius-lg: 1em;
+  --radius: 0.5em;
+  --radius-sm: 0.375em;
+  --blur: blur(10px);
+  --shadow: 0.1em 0.1em 0.15em hsla(0, 0%, 0%, 0.3);
+  --font: "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
 
@@ -31,7 +48,8 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
+  background: var(--bg-gradient) fixed;
+  background-color: var(--bg);
   color: var(--fg);
   font-family: var(--font);
   font-size: 14px;
@@ -47,27 +65,32 @@ a:hover {
   text-decoration: underline;
 }
 
+/* ElegantFin non-primary button: translucent black, rounded 10px, soft glow. */
 button {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border-light);
   color: var(--fg);
   padding: 0.4rem 0.8rem;
-  border-radius: 6px;
+  border-radius: 10px;
+  box-shadow: 0 0 0.5em rgba(0, 0, 0, 0.75);
   cursor: pointer;
   font-family: inherit;
   font-size: 0.875rem;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 button:hover {
+  background: rgba(0, 0, 0, 0.5);
   border-color: var(--primary);
 }
 button.primary {
-  background: var(--primary);
-  color: var(--bg);
+  background: var(--submit);
+  color: #fff;
   border-color: var(--primary);
   font-weight: 600;
 }
 button.primary:hover {
-  filter: brightness(1.1);
+  background: var(--primary);
+  filter: brightness(1.05);
 }
 button.danger {
   border-color: var(--recording);
@@ -151,8 +174,10 @@ input[type="password"]:focus {
 
 .topbar {
   grid-area: topbar;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: rgba(30, 40, 54, 0.8);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border-bottom: 1px solid var(--border-light);
   display: flex;
   align-items: center;
   padding: 0 1rem;
@@ -291,8 +316,10 @@ th[data-sort]:hover {
 /* Left rail = channel list (TUI-style). */
 .leftrail {
   grid-area: leftrail;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
+  background: rgba(30, 40, 54, 0.55);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border-right: 1px solid var(--border-light);
   padding: 0.5rem 0;
   overflow-y: auto;
 }
@@ -386,10 +413,22 @@ th[data-sort]:hover {
   overflow-y: auto;
 }
 
+/* ElegantFin section title: white, with a short leading bar. */
 .page-title {
-  font-size: 1.5rem;
+  display: flex;
+  align-items: center;
+  font-size: 1.6rem;
   font-weight: 700;
+  color: #fff;
   margin: 0 0 1rem 0;
+}
+.page-title::before {
+  content: "";
+  height: 2px;
+  width: 1.3em;
+  margin-right: 0.5em;
+  background: #fff;
+  flex: none;
 }
 .page-subtitle {
   color: var(--muted);

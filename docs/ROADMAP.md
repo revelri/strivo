@@ -68,7 +68,11 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   with severity + fix + worst-rollup) + SPA: global topbar health pill
   (amber/red, links to System, hidden when ok) and a domain-grouped checks
   list on the System page sourced from the registry.
-- [ ] **13.5. ElegantFin webui restyle (BUMPED — do next)** `[D]` — restyle
+- [~] **13.5. ElegantFin webui restyle (BUMPED — do next)** `[D]` — *(part 1*
+  *of 2 done: `:root` tokens ported (gradient/accent/text/borders/radii/blur/*
+  *shadow), body gradient, glass topbar+leftrail, ElegantFin buttons,*
+  *section-title leading bar. Remaining: cards, tables, dialogs/modals,*
+  *forms/inputs, pills — next fire.)* — restyle
   `crates/strivo-web/assets/spa.css` to follow the user's Jellyfin theme as
   **literally as possible**: the ElegantFin theme + the near-black YouTube
   gradient override. Port the token table from DESIGN.md ("Web UI Theme")
