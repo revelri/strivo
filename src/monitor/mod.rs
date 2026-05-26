@@ -30,6 +30,9 @@ pub struct ChannelMonitor {
     auth_notify: Arc<tokio::sync::Notify>,
     /// Notified when a client requests an immediate re-poll
     poll_notify: Arc<tokio::sync::Notify>,
+    /// Read-only persistence handle for capture-profile cutoff checks
+    /// (roadmap item 21). `None` when the daemon has no DB.
+    persist: Option<Arc<crate::recording::persist::PersistDb>>,
 }
 
 impl ChannelMonitor {
@@ -51,12 +54,18 @@ impl ChannelMonitor {
             last_channels: HashMap::new(),
             auth_notify: Arc::new(tokio::sync::Notify::new()),
             poll_notify: Arc::new(tokio::sync::Notify::new()),
+            persist: None,
         }
     }
 
     /// Set an external auth notify (shared with auth tasks)
     pub fn set_auth_notify(&mut self, notify: Arc<tokio::sync::Notify>) {
         self.auth_notify = notify;
+    }
+
+    /// Provide a read-only persistence handle for capture-profile cutoffs.
+    pub fn set_persist(&mut self, db: Arc<crate::recording::persist::PersistDb>) {
+        self.persist = Some(db);
     }
 
     /// Get a handle to trigger an immediate re-poll
@@ -214,6 +223,7 @@ impl ChannelMonitor {
                             // Auto-record trigger: use ch.auto_record from fresh data
                             if ch.auto_record
                                 && !self.auto_recorded.get(&ch.id).copied().unwrap_or(false)
+                                && !self.cutoff_reached(ch).await
                             {
                                 self.auto_recorded.insert(ch.id.clone(), true);
                                 let cookies_path = self.get_cookies_path(ch.platform);
@@ -281,6 +291,35 @@ impl ChannelMonitor {
         let _ = self.event_tx.send(AppEvent::channels_updated(all_channels));
 
         Ok(())
+    }
+
+    /// True if the channel's capture profile has a `cutoff_episodes` and at
+    /// least that many finished recordings already exist (roadmap item 21).
+    /// Best-effort: a DB error or missing handle never blocks recording.
+    async fn cutoff_reached(&self, ch: &ChannelEntry) -> bool {
+        let Some(profile) = self
+            .config
+            .capture_profile_for(&ch.platform.to_string(), &ch.id)
+        else {
+            return false;
+        };
+        let Some(cutoff) = profile.cutoff_episodes else {
+            return false;
+        };
+        let Some(db) = &self.persist else { return false };
+        match db.count_finished_recordings(&ch.id).await {
+            Ok(n) if (n as u32) >= cutoff => {
+                tracing::info!(
+                    "auto-record skipped for {}: profile '{}' cutoff {} reached ({} recorded)",
+                    ch.name,
+                    profile.name,
+                    cutoff,
+                    n
+                );
+                true
+            }
+            _ => false,
+        }
     }
 
     fn get_cookies_path(&self, platform: PlatformKind) -> Option<PathBuf> {

@@ -360,6 +360,19 @@ impl PersistDb {
         Ok(out)
     }
 
+    /// Count finished recordings for a channel (roadmap item 21 cutoff). Used
+    /// by the monitor to stop auto-recording once a profile's cutoff is met.
+    pub async fn count_finished_recordings(&self, channel_id: &str) -> Result<usize> {
+        let jobs = self.load_recording_jobs().await?;
+        Ok(jobs
+            .iter()
+            .filter(|j| {
+                j.channel_id == channel_id
+                    && matches!(j.state, crate::recording::job::RecordingState::Finished)
+            })
+            .count())
+    }
+
     pub async fn upsert_crunchr_queue(&self, entry: &CrunchrQueueEntry) -> Result<()> {
         let conn = self.inner.lock().await;
         let now = chrono::Utc::now().to_rfc3339();

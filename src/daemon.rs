@@ -405,6 +405,9 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
             cancel.clone(),
         );
         monitor.set_auth_notify(auth_notify.clone());
+        if let Some(ref db) = persist_db {
+            monitor.set_persist(db.clone());
+        }
         let poll_notify = monitor.poll_notify();
         tokio::spawn(async move {
             monitor.run().await;

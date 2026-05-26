@@ -132,13 +132,14 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   dashboard; dismissable via Continue. (Platform auth + config writes stay in
   the TUI/CLI — the webui can't do device-code OAuth — so the wizard reports
   status and directs the user there rather than faking config it can't write.)
-- [~] **21. Named capture profiles + cutoff** `[B]` — *(pt1: `[[capture_profiles]]`*
-  *schema + per-channel `profile` ref + `config_warnings()` lint. pt2:*
-  *`effective_transcode()` resolver applies a channel's profile transcode*
-  *override on auto-record; `capture_profiles` surfaced in `/settings`; test.*
-  *Remaining (pt3): enforce `cutoff_episodes` (count recorded eps via DB in the*
-  *monitor) + audio_only/format application + SPA profile-management UI.)* —
-  define once, attach to many, cutoff stops re-capture.
+- [x] **21. Named capture profiles + cutoff** `[B]` — `[[capture_profiles]]`
+  schema (name/format/transcode/audio_only/transcript/cutoff_episodes) +
+  per-channel `profile` ref; `config_warnings()` lint (unknown ref, cutoff=0,
+  dupes, auto-record+schedule perpetual re-capture); profile transcode override
+  applied on auto-record; **cutoff enforced** — the monitor counts finished
+  recordings per channel (read-only `PersistDb`) and skips auto-record once a
+  profile's `cutoff_episodes` is met. (Polish deferred: applying audio_only/
+  format to the capture, and a SPA profile editor — needs config-write, item 14b.)
 - [ ] **22. Index density + mass-edit** `[B]` — switchable table/overview density over
   the recordings/channels dataset + multi-select mass-edit action bar (re-run plugins /
   delete / re-record).
