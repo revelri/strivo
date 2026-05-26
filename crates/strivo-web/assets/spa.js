@@ -77,6 +77,8 @@ const API = {
     API._fetch(`/channels/${encodeURIComponent(channelId)}/playlists`, {
       method: "POST",
     }),
+  resolveChannel: (platform, query) =>
+    API._fetch("/channels/resolve", { method: "POST", body: { platform, query } }),
   requestChannelVods: (channelId, platform) =>
     API._fetch(`/channels/${encodeURIComponent(channelId)}/vods`, {
       method: "POST",
@@ -391,6 +393,8 @@ function chrome(content) {
            role="status" title="System health — click for details"></a>
         <span class="spacer"></span>
         <nav class="topnav" aria-label="Main navigation">${nav}</nav>
+        <button id="add-channel" title="Add a channel to monitor"
+                aria-label="Add channel">＋ Add</button>
         <button id="poll-now" title="Poke channel monitor (p)"
                 aria-label="Trigger immediate channel poll">↻ Poll</button>
         <button id="logout" title="Logout" aria-label="Sign out">⏻</button>
@@ -416,6 +420,7 @@ function setupChromeHandlers() {
       console.error(e);
     }
   });
+  document.getElementById("add-channel")?.addEventListener("click", () => openAddChannelWizard());
   document.getElementById("logout")?.addEventListener("click", async () => {
     await API.logout().catch(() => {});
     route("login");
@@ -1013,6 +1018,106 @@ async function openPlaylistPicker(ds) {
   } catch (e) {
     Toast.error(`Couldn't load playlists: ${e.message}`);
   }
+}
+
+// ── Add-Channel two-phase wizard (item 19) ───────────────────────────
+// Phase 1: pick platform + type a name → resolve (live, via SSE).
+// Phase 2: show the resolved channel → confirm → enable auto-record.
+// Config is deferred until the entity is confirmed.
+let addWizard = null; // { platform, query } while a resolve is in flight
+
+function openAddChannelWizard() {
+  let modal = document.getElementById("add-channel-modal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "add-channel-modal";
+    modal.className = "kbd-help";
+    document.body.appendChild(modal);
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) modal.classList.remove("open");
+    });
+  }
+  paintAddWizardSearch(modal);
+  modal.classList.add("open");
+}
+
+function paintAddWizardSearch(modal, opts = {}) {
+  modal = modal || document.getElementById("add-channel-modal");
+  if (!modal) return;
+  const plat = opts.platform || "Twitch";
+  const sel = (p) => (p === plat ? " selected" : "");
+  modal.innerHTML = `
+    <div class="card">
+      <h2>Add channel</h2>
+      <p class="wizard-step">Step 1 of 2 — find the channel</p>
+      <div class="wizard-row">
+        <select id="aw-platform">
+          <option value="Twitch"${sel("Twitch")}>Twitch</option>
+          <option value="YouTube"${sel("YouTube")}>YouTube</option>
+          <option value="Patreon"${sel("Patreon")}>Patreon</option>
+        </select>
+        <input id="aw-query" type="text" placeholder="Twitch login, or YouTube/Patreon id"
+               value="${escape(opts.query || "")}" autofocus />
+        <button id="aw-search" class="primary">Search</button>
+      </div>
+      <div id="aw-result" class="wizard-result">${opts.message || ""}</div>
+    </div>`;
+  const doSearch = async () => {
+    const platform = modal.querySelector("#aw-platform").value;
+    const query = modal.querySelector("#aw-query").value.trim();
+    if (!query) return;
+    addWizard = { platform, query };
+    modal.querySelector("#aw-result").innerHTML = '<div class="empty sm">Searching…</div>';
+    try {
+      await API.resolveChannel(platform, query);
+    } catch (e) {
+      modal.querySelector("#aw-result").innerHTML = `<div class="empty sm">Search failed: ${escape(e.message)}</div>`;
+    }
+  };
+  modal.querySelector("#aw-search")?.addEventListener("click", doSearch);
+  modal.querySelector("#aw-query")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") doSearch();
+  });
+}
+
+// Phase 2: render the resolved entity for confirmation (called from the
+// ChannelResolved SSE handler).
+function paintAddWizardConfirm(ev) {
+  const modal = document.getElementById("add-channel-modal");
+  if (!modal || !modal.classList.contains("open") || !addWizard) return;
+  if (ev.platform !== addWizard.platform || ev.query !== addWizard.query) return;
+  const result = modal.querySelector("#aw-result");
+  if (!result) return;
+  if (ev.error || !ev.channel_id) {
+    result.innerHTML = `<div class="empty sm">Not found: ${escape(ev.error || "no match")}</div>`;
+    return;
+  }
+  const name = ev.display_name || ev.channel_id;
+  result.innerHTML = `
+    <div class="wizard-confirm">
+      <p class="wizard-step">Step 2 of 2 — confirm</p>
+      <div class="task-row">
+        <div class="task-info">
+          <span class="task-name">${escape(name)}</span>
+          <span class="task-cadence">${escape(ev.platform)} · ${escape(ev.channel_id)}</span>
+        </div>
+      </div>
+      <button id="aw-confirm" class="primary" data-key="${escape(ev.platform)}:${escape(ev.channel_id)}">
+        Add &amp; enable auto-record
+      </button>
+    </div>`;
+  result.querySelector("#aw-confirm")?.addEventListener("click", async (e) => {
+    const key = e.currentTarget.dataset.key;
+    try {
+      await API.toggleAutoRecord(key, true);
+      Toast.success(`Added ${name} — auto-record on`);
+      modal.classList.remove("open");
+      addWizard = null;
+      if (currentRoute() === "library") render();
+    } catch (err) {
+      Toast.error(`Add failed: ${err.message}`);
+    }
+  });
 }
 
 function showPlaylistModal(opts) {
@@ -2213,6 +2318,11 @@ events.on((event) => {
       const platform = selectedChannelKey.split(":")[0];
       paintChannelVods(cv.channel_id, platform);
     }
+  }
+
+  // #19 — Add-Channel wizard resolve reply.
+  if (event.ChannelResolved) {
+    paintAddWizardConfirm(event.ChannelResolved);
   }
 
   // #74 / #73 — playlist list answers the picker request.

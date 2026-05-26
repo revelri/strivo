@@ -982,6 +982,15 @@ button.busy::after {
 .task-name { font-size: 0.85rem; font-weight: 600; }
 .task-cadence { font-size: 0.72rem; color: var(--muted); }
 .agenda-time { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--fg); }
+
+/* Add-Channel wizard (item 19). */
+.wizard-step { font-size: 0.72rem; color: var(--muted); margin: 0 0 0.6rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.wizard-row { display: flex; gap: 0.5rem; align-items: center; }
+.wizard-row #aw-query { flex: 1; }
+.wizard-row select { width: auto; }
+.wizard-result { margin-top: 0.8rem; }
+.wizard-confirm .task-row { border: none; }
+.wizard-confirm #aw-confirm { margin-top: 0.6rem; width: 100%; }
 .cfg-list dt { color: var(--muted); }
 .cfg-list dd {
   margin: 0;

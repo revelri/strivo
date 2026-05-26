@@ -120,13 +120,12 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   (Today/Tomorrow/date) sorted by server-computed `next_fire`, each with time +
   cron cadence; unparseable-cron entries bucketed separately. (Source = StriVo's
   own scheduled recordings; platform-side broadcast schedules aren't API-exposed.)
-- [~] **19. Add-Channel two-phase wizard** `[B]` — *(part 1 of 2: backend*
-  *resolve path — `ClientMessage::ResolveChannel` → bulk-manager*
-  *`resolve_channel` (Twitch login→id via lookup; YT/Patreon id pass-through)*
-  *→ `DaemonEvent::ChannelResolved` over SSE; `POST /api/v1/channels/resolve`.*
-  *Remaining: SPA two-phase wizard modal (search→confirm→enable auto-record)*
-  *— next fire.)* — type name → live search → pick
-  entity → *then* configure (profile, monitor, plugins). Defer config until confirmed.
+- [x] **19. Add-Channel two-phase wizard** `[B]` — backend resolve
+  (`ClientMessage::ResolveChannel` → bulk-manager `resolve_channel`: Twitch
+  login→id, YT/Patreon id pass-through → `DaemonEvent::ChannelResolved` over
+  SSE; `POST /api/v1/channels/resolve`) + SPA topbar "＋ Add" wizard modal:
+  phase 1 pick platform + search (live resolve), phase 2 confirm the resolved
+  entity → enable auto-record. Config deferred until the entity is confirmed.
 - [ ] **20. First-run wizard** `[B]` — gate the SPA behind connect platforms → pick
   channels → recording defaults → storage path; no half-configured dashboard.
 - [ ] **21. Named capture profiles + cutoff** `[B]` — define once

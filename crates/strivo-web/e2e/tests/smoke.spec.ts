@@ -101,6 +101,15 @@ test("history page renders durable jobs from the DB", async ({ page }) => {
   await expect(page.locator(".recordings-table")).toContainText("Finished");
 });
 
+test("add-channel wizard opens to phase 1 search", async ({ page }) => {
+  await page.goto("/app#/library");
+  await page.locator("#add-channel").click();
+  await expect(page.locator("#add-channel-modal.open")).toBeVisible();
+  await expect(page.locator("#aw-platform")).toBeVisible();
+  await expect(page.locator("#aw-query")).toBeVisible();
+  await expect(page.locator("#aw-search")).toBeVisible();
+});
+
 test("command palette opens with Ctrl+K and navigates", async ({ page }) => {
   await page.goto("/app#/library");
   await page.keyboard.press("Control+k");
