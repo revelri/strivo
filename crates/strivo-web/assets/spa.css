@@ -339,6 +339,27 @@ th[data-sort]:hover {
 .ch-plat {
   font-size: 0.7rem;
 }
+.ch-plat.twitch { color: var(--twitch); }
+.ch-plat.youtube { color: var(--youtube); }
+.ch-plat.patreon { color: var(--patreon); }
+/* Patreon rows: a patreon-tinted left accent so the section reads as
+   distinct from Twitch/YouTube at a glance (item 6). */
+.ch-row.patreon {
+  border-left-color: color-mix(in srgb, var(--patreon) 45%, transparent);
+}
+.ch-row.patreon.sel {
+  border-left-color: var(--patreon);
+}
+.ch-tier {
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: color-mix(in srgb, var(--patreon) 22%, transparent);
+  color: var(--patreon);
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
 .ch-name {
   flex: 1;
   overflow: hidden;

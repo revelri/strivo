@@ -418,6 +418,7 @@ function paintChannelList() {
   const row = (c) => {
     const key = `${c.platform}:${c.id}`;
     const sel = key === selectedChannelKey ? "sel" : "";
+    const isPatreon = c.platform === "Patreon";
     const rec = recordingChannelIds.has(c.id)
       ? '<span class="ch-rec" title="recording">●</span>'
       : "";
@@ -425,13 +426,18 @@ function paintChannelList() {
     const viewers = c.is_live && c.viewer_count
       ? `<span class="ch-viewers">${formatCount(c.viewer_count)}</span>`
       : "";
+    // Patreon rows are visually distinct (item 6): a pledged-tier chip
+    // (stored in stream_title) and a patreon-accented platform glyph.
+    const tier = isPatreon && c.stream_title
+      ? `<span class="ch-tier" title="pledged tier">${escape(c.stream_title)}</span>`
+      : "";
     return `
-      <a class="ch-row ${c.is_live ? "live" : ""} ${sel}"
+      <a class="ch-row ${c.is_live ? "live" : ""} ${isPatreon ? "patreon" : ""} ${sel}"
          data-channel-key="${key}" data-channel-id="${c.id}"
          data-platform="${c.platform}" href="#/library">
         <span class="ch-plat ${c.platform.toLowerCase()}" aria-hidden="true">${platformGlyph(c.platform)}</span>
         <span class="ch-name">${escape(c.display_name || c.name)}</span>
-        ${viewers}${liveDot}${rec}
+        ${tier}${viewers}${liveDot}${rec}
       </a>`;
   };
 
