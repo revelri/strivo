@@ -132,9 +132,13 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   dashboard; dismissable via Continue. (Platform auth + config writes stay in
   the TUI/CLI — the webui can't do device-code OAuth — so the wizard reports
   status and directs the user there rather than faking config it can't write.)
-- [ ] **21. Named capture profiles + cutoff** `[B]` — define once
-  ("1080p60+transcript", "audio-only"), attach to many channels, with a cutoff so
-  StriVo stops re-capturing once met. Warn on pathological perpetual-re-record configs.
+- [~] **21. Named capture profiles + cutoff** `[B]` — *(part 1 of 2: config*
+  *schema — `[[capture_profiles]]` (name, format, transcode, audio_only,*
+  *transcript, cutoff_episodes) + per-channel `profile` reference +*
+  *`config_warnings()` lint (unknown profile ref, cutoff=0, dup names,*
+  *auto-record+schedule perpetual re-capture) logged at daemon startup, with*
+  *tests. Remaining: apply profile settings to recordings + enforce cutoff +*
+  *web/SPA UI — next fire.)* — define once, attach to many, cutoff stops re-capture.
 - [ ] **22. Index density + mass-edit** `[B]` — switchable table/overview density over
   the recordings/channels dataset + multi-select mass-edit action bar (re-run plugins /
   delete / re-record).

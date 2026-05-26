@@ -31,6 +31,11 @@ pub struct AppConfig {
     #[serde(default)]
     pub auto_record_channels: Vec<AutoRecordEntry>,
 
+    /// Named capture profiles (roadmap item 21), referenced by
+    /// `AutoRecordEntry::profile`.
+    #[serde(default)]
+    pub capture_profiles: Vec<CaptureProfile>,
+
     /// Patreon creators whose new video posts should be auto-downloaded
     /// when the monitor sees them. Empty by default — the user has to
     /// opt in per creator (sidebar toggle); the monitor only refreshes
@@ -456,6 +461,44 @@ pub struct AutoRecordEntry {
     /// `recording.format` global when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub format: Option<RecordingFormat>,
+
+    /// Name of a `[[capture_profiles]]` entry to apply to this channel
+    /// (roadmap item 21). Falls back to the global `[recording]` defaults
+    /// when absent. Validated by `config_warnings`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+}
+
+/// A named, reusable capture profile (roadmap item 21) — define recording
+/// settings once ("1080p60+transcript", "audio-only") and attach to many
+/// channels via `AutoRecordEntry::profile`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CaptureProfile {
+    /// Unique profile name referenced by `AutoRecordEntry::profile`.
+    pub name: String,
+
+    /// Format/bitrate selection for channels using this profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<RecordingFormat>,
+
+    /// Transcode the finished capture (overrides the global default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcode: Option<bool>,
+
+    /// Capture audio only (no video).
+    #[serde(default)]
+    pub audio_only: bool,
+
+    /// Request a transcript for captures using this profile.
+    #[serde(default)]
+    pub transcript: bool,
+
+    /// Re-capture cutoff: once this many episodes are recorded for a channel
+    /// using this profile, StriVo stops auto-capturing it. `None` = no cutoff
+    /// (capture indefinitely). `Some(0)` is nonsensical and flagged by
+    /// `config_warnings`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cutoff_episodes: Option<u32>,
 }
 
 /// Per-creator opt-in to Patreon auto-download. Identifying by
@@ -595,6 +638,7 @@ impl Default for AppConfig {
             theme: ThemeRef::default(),
             ui: UiConfig::default(),
             auto_record_channels: Vec::new(),
+            capture_profiles: Vec::new(),
             auto_pull_creators: Vec::new(),
             schedule: Vec::new(),
             crunchr: CrunchrConfig::default(),
@@ -610,6 +654,57 @@ impl AppConfig {
         directories::ProjectDirs::from("", "", "strivo")
             .map(|d| d.config_dir().to_path_buf())
             .unwrap_or_else(|| PathBuf::from("."))
+    }
+
+    /// Lint the config for pathological capture-profile / auto-record setups
+    /// (roadmap item 21). Returns human-readable warnings; the daemon logs
+    /// them at startup. Pure (no I/O) so it's unit-testable.
+    pub fn config_warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+
+        // Duplicate profile names — the later one silently wins on lookup.
+        let mut seen = std::collections::HashSet::new();
+        for p in &self.capture_profiles {
+            if !seen.insert(p.name.as_str()) {
+                warnings.push(format!("capture profile '{}' is defined more than once", p.name));
+            }
+            // A zero cutoff would block all capture for attached channels.
+            if p.cutoff_episodes == Some(0) {
+                warnings.push(format!(
+                    "capture profile '{}' has cutoff_episodes = 0; it will never record",
+                    p.name
+                ));
+            }
+        }
+
+        // auto_record entries referencing a profile that doesn't exist.
+        for ch in &self.auto_record_channels {
+            if let Some(ref prof) = ch.profile {
+                if !self.capture_profiles.iter().any(|p| &p.name == prof) {
+                    warnings.push(format!(
+                        "channel '{}' references unknown capture profile '{}'",
+                        ch.channel_name, prof
+                    ));
+                }
+            }
+        }
+
+        // Perpetual re-record: a channel that is BOTH auto-recorded (every live
+        // session) AND on a cron schedule will double-capture the same content.
+        for ch in &self.auto_record_channels {
+            if self
+                .schedule
+                .iter()
+                .any(|s| s.channel.eq_ignore_ascii_case(&ch.channel_name))
+            {
+                warnings.push(format!(
+                    "channel '{}' is both auto-recorded and scheduled — likely perpetual re-capture",
+                    ch.channel_name
+                ));
+            }
+        }
+
+        warnings
     }
 
     pub fn config_path() -> PathBuf {
@@ -737,4 +832,75 @@ fn quarantine(path: &std::path::Path) -> std::io::Result<()> {
     let mut s = path.to_path_buf().into_os_string();
     s.push(".corrupt");
     std::fs::rename(path, PathBuf::from(s))
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::*;
+
+    fn arc(name: &str, profile: Option<&str>) -> AutoRecordEntry {
+        AutoRecordEntry {
+            platform: "Twitch".into(),
+            channel_id: "1".into(),
+            channel_name: name.into(),
+            format: None,
+            profile: profile.map(String::from),
+        }
+    }
+
+    #[test]
+    fn warns_on_unknown_profile_and_zero_cutoff_and_dupes() {
+        let mut cfg = AppConfig::default();
+        cfg.capture_profiles = vec![
+            CaptureProfile {
+                name: "hq".into(),
+                format: None,
+                transcode: None,
+                audio_only: false,
+                transcript: true,
+                cutoff_episodes: Some(0),
+            },
+            CaptureProfile {
+                name: "hq".into(), // duplicate
+                format: None,
+                transcode: None,
+                audio_only: false,
+                transcript: false,
+                cutoff_episodes: None,
+            },
+        ];
+        cfg.auto_record_channels = vec![arc("Foo", Some("nonexistent"))];
+        let w = cfg.config_warnings();
+        assert!(w.iter().any(|s| s.contains("defined more than once")), "{w:?}");
+        assert!(w.iter().any(|s| s.contains("never record")), "{w:?}");
+        assert!(w.iter().any(|s| s.contains("unknown capture profile")), "{w:?}");
+    }
+
+    #[test]
+    fn warns_on_auto_record_plus_schedule() {
+        let mut cfg = AppConfig::default();
+        cfg.auto_record_channels = vec![arc("LilAggy", None)];
+        cfg.schedule = vec![ScheduleEntry {
+            channel: "lilaggy".into(),
+            cron: "0 20 * * *".into(),
+            duration: "4h".into(),
+        }];
+        let w = cfg.config_warnings();
+        assert!(w.iter().any(|s| s.contains("perpetual re-capture")), "{w:?}");
+    }
+
+    #[test]
+    fn clean_config_has_no_warnings() {
+        let mut cfg = AppConfig::default();
+        cfg.capture_profiles = vec![CaptureProfile {
+            name: "hq".into(),
+            format: None,
+            transcode: Some(true),
+            audio_only: false,
+            transcript: true,
+            cutoff_episodes: Some(5),
+        }];
+        cfg.auto_record_channels = vec![arc("Foo", Some("hq"))];
+        assert!(cfg.config_warnings().is_empty());
+    }
 }

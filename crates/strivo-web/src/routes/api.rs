@@ -896,6 +896,7 @@ async fn put_auto_record(
                     channel_id: ch_id.to_string(),
                     channel_name: display_name,
                     format: None,
+                    profile: None,
                 });
         }
         (false, true) => {

@@ -3304,6 +3304,7 @@ impl AppState {
                     channel_id: id.clone(),
                     channel_name: name,
                     format: None,
+                    profile: None,
                 });
             self.status_message = format!("Monitor ON for {display}");
         } else {
@@ -3526,6 +3527,7 @@ impl AppState {
                             channel_id: channel_id.clone(),
                             channel_name,
                             format,
+                            profile: None,
                         });
                 } else {
                     self.config

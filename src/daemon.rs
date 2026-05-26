@@ -220,6 +220,9 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
     // Load config
     let config = AppConfig::load(None)?;
     tracing::info!("Config loaded");
+    for w in config.config_warnings() {
+        tracing::warn!("config: {w}");
+    }
 
     // W2 phase 2 — init plugins inside the daemon process. Plugins
     // are registered by the caller (strivo-bin's Command::Daemon

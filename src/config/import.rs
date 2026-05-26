@@ -43,6 +43,7 @@ impl Candidate {
             channel_id: self.channel_id.clone(),
             channel_name: self.channel_name,
             format: None,
+            profile: None,
         }
     }
 }
