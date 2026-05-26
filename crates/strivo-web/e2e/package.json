@@ -1,0 +1,15 @@
+{
+  "name": "strivo-web-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright E2E for the StriVo web UI (W7)",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "install-browser": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
+  }
+}
