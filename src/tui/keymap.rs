@@ -116,6 +116,7 @@ pub enum KeyAction {
     // Sidebar / Detail
     ToggleAutoRecord,
     ToggleBulkDownload,
+    ToggleBulkDownloadPlatform,
 
     // Detail
     StartRecording,
@@ -205,6 +206,7 @@ impl KeyAction {
             Self::NavActivate => "open / activate",
             Self::ToggleAutoRecord => "toggle auto-record",
             Self::ToggleBulkDownload => "start/stop bulk download",
+            Self::ToggleBulkDownloadPlatform => "start/stop bulk download (whole platform)",
             Self::StartRecording => "start recording",
             Self::StartRecordingFromStart => "record from start (YouTube)",
             Self::WatchStream => "watch in mpv",
@@ -271,6 +273,7 @@ impl KeyAction {
             Self::NavActivate => "NavActivate",
             Self::ToggleAutoRecord => "ToggleAutoRecord",
             Self::ToggleBulkDownload => "ToggleBulkDownload",
+            Self::ToggleBulkDownloadPlatform => "ToggleBulkDownloadPlatform",
             Self::StartRecording => "StartRecording",
             Self::StartRecordingFromStart => "StartRecordingFromStart",
             Self::WatchStream => "WatchStream",
@@ -339,6 +342,7 @@ impl KeyAction {
             "NavActivate" => Self::NavActivate,
             "ToggleAutoRecord" => Self::ToggleAutoRecord,
             "ToggleBulkDownload" => Self::ToggleBulkDownload,
+            "ToggleBulkDownloadPlatform" => Self::ToggleBulkDownloadPlatform,
             "StartRecording" => Self::StartRecording,
             "StartRecordingFromStart" => Self::StartRecordingFromStart,
             "WatchStream" => Self::WatchStream,
@@ -841,6 +845,15 @@ fn table() -> &'static [Chord] {
         ),
         c(
             Layer::Sidebar,
+            KeyPattern {
+                code: Char('B'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::ToggleBulkDownloadPlatform,
+            "bulk download whole platform",
+        ),
+        c(
+            Layer::Sidebar,
             KeyPattern::plain(Char('m')),
             KeyAction::MarkSetPrompt,
             "set mark on current",
@@ -887,6 +900,15 @@ fn table() -> &'static [Chord] {
             KeyPattern::plain(Char('b')),
             KeyAction::ToggleBulkDownload,
             "start/stop bulk download",
+        ),
+        c(
+            Layer::Detail,
+            KeyPattern {
+                code: Char('B'),
+                modifiers: M::SHIFT,
+            },
+            KeyAction::ToggleBulkDownloadPlatform,
+            "bulk download whole platform",
         ),
         c(
             Layer::Detail,

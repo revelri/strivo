@@ -2256,6 +2256,10 @@ impl AppState {
                 self.toggle_bulk_download_on_selected();
                 None
             }
+            A::ToggleBulkDownloadPlatform => {
+                self.toggle_bulk_download_platform();
+                None
+            }
             // Default action records from the start of the stream:
             // YouTube via yt-dlp --live-from-start, Twitch via ffmpeg
             // -live_start_index 0 (~5min DVR window).
@@ -3065,6 +3069,60 @@ impl AppState {
             action,
         });
         self.status_message = format!("{verb} bulk download for {channel_name}…");
+    }
+
+    /// Per-platform bulk-DL master switch (task #72): start (or stop)
+    /// bulk back-catalog downloads for every channel of the selected
+    /// channel's platform at once. If any channel of that platform is
+    /// currently downloading, the switch stops them all; otherwise it
+    /// starts them all. Fans the per-channel IPC command (#71) across
+    /// the platform — the daemon dedups already-running channels.
+    fn toggle_bulk_download_platform(&mut self) {
+        let Some(ch) = self.channels.get(self.selected_channel) else {
+            return;
+        };
+        let platform = ch.platform;
+
+        let Some(tx) = self.daemon_tx.clone() else {
+            self.status_message =
+                "Bulk download needs the daemon — run `strivo daemon`".to_string();
+            return;
+        };
+
+        let targets: Vec<(String, String)> = self
+            .channels
+            .iter()
+            .filter(|c| c.platform == platform)
+            .map(|c| (c.id.clone(), c.display_name.clone()))
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+
+        // Stop-all if any target is active; otherwise start-all.
+        let any_active = targets
+            .iter()
+            .any(|(id, _)| self.bulk_downloads.get(id).is_some_and(|s| s.active));
+        let action = if any_active {
+            crate::ipc::BulkAction::Stop
+        } else {
+            crate::ipc::BulkAction::Start
+        };
+
+        for (channel_id, channel_name) in &targets {
+            let _ = tx.send(crate::ipc::ClientMessage::BulkDownload {
+                channel_id: channel_id.clone(),
+                channel_name: channel_name.clone(),
+                platform,
+                action: action.clone(),
+            });
+        }
+        let verb = if any_active { "Stopping" } else { "Starting" };
+        self.status_message = format!(
+            "{verb} bulk download for all {} {} channels…",
+            targets.len(),
+            platform
+        );
     }
 
     fn toggle_auto_record_on_selected(&mut self) {
