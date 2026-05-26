@@ -87,6 +87,13 @@ test("logs page renders with level selector and lines", async ({ page }) => {
   await expect(page.locator("#logs-output")).toContainText("StriVo daemon starting");
 });
 
+test("schedule page renders the upcoming agenda", async ({ page }) => {
+  await page.goto("/app#/schedule");
+  await expect(page.getByRole("heading", { name: "Schedule" })).toBeVisible();
+  await expect(page.locator(".cfg-grid")).toContainText("Alpha");
+  await expect(page.locator(".agenda-time").first()).toBeVisible();
+});
+
 test("history page renders durable jobs from the DB", async ({ page }) => {
   await page.goto("/app#/history");
   await expect(page.getByRole("heading", { name: "History" })).toBeVisible();

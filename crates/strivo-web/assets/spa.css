@@ -981,6 +981,7 @@ button.busy::after {
 .task-info { display: flex; flex-direction: column; gap: 0.1rem; }
 .task-name { font-size: 0.85rem; font-weight: 600; }
 .task-cadence { font-size: 0.72rem; color: var(--muted); }
+.agenda-time { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--fg); }
 .cfg-list dt { color: var(--muted); }
 .cfg-list dd {
   margin: 0;

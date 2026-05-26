@@ -330,7 +330,7 @@ async function render() {
       await renderRecordings();
       break;
     case "schedule":
-      renderStub("Schedule", "Calendar view — webui parity follow-up.");
+      await renderSchedule();
       break;
     case "pipelines":
       renderPipelines();
@@ -1761,6 +1761,84 @@ async function renderLogs() {
   });
   document.getElementById("logs-refresh")?.addEventListener("click", load);
   await load();
+}
+
+// ── Upcoming agenda (item 18) — first-class calendar of known upcoming
+// recordings. Source = scheduled (cron) entries with their server-computed
+// next_fire. (Platform-side scheduled broadcasts aren't available via API.) ──
+function dayBucket(d) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const that = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = Math.round((that - today) / 86400000);
+  if (diff === 0) return "Today";
+  if (diff === 1) return "Tomorrow";
+  return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
+
+async function renderSchedule() {
+  let entries = [];
+  try {
+    const r = await API.schedule();
+    entries = r.schedule || [];
+  } catch (_) {}
+  root.removeAttribute("aria-busy");
+
+  const dated = entries
+    .filter((e) => e.next_fire)
+    .map((e) => ({ ...e, when: new Date(e.next_fire) }))
+    .sort((a, b) => a.when - b.when);
+  const undated = entries.filter((e) => !e.next_fire);
+
+  // Group by day bucket, preserving sorted order.
+  const groups = [];
+  for (const e of dated) {
+    const label = dayBucket(e.when);
+    let g = groups.find((x) => x.label === label);
+    if (!g) {
+      g = { label, items: [] };
+      groups.push(g);
+    }
+    g.items.push(e);
+  }
+
+  const row = (e) => `
+    <div class="task-row">
+      <div class="task-info">
+        <span class="task-name">${escape(e.channel || "scheduled")}</span>
+        <span class="task-cadence">${escape(e.cron || "")}${e.duration ? ` · ${escape(e.duration)}` : ""}</span>
+      </div>
+      <span class="agenda-time">${e.when ? e.when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>
+    </div>`;
+
+  const groupsHtml = groups
+    .map(
+      (g) => `
+    <section class="cfg-card">
+      <h2 class="cfg-title">${escape(g.label)}</h2>
+      ${g.items.map(row).join("")}
+    </section>`,
+    )
+    .join("");
+
+  const undatedHtml = undated.length
+    ? `<section class="cfg-card">
+         <h2 class="cfg-title">Unscheduled</h2>
+         ${undated.map((e) => `<div class="task-row"><div class="task-info"><span class="task-name">${escape(e.channel || "")}</span><span class="task-cadence">${escape(e.cron || "")} · unparsed cron</span></div></div>`).join("")}
+       </section>`
+    : "";
+
+  const empty = !entries.length
+    ? '<div class="empty">No scheduled recordings. Add a schedule entry in config.toml.</div>'
+    : "";
+
+  root.innerHTML = chrome(`
+    <h1 class="page-title">Schedule</h1>
+    <p class="page-subtitle">Upcoming scheduled recordings · ${dated.length} upcoming</p>
+    ${empty}
+    <div class="cfg-grid">${groupsHtml}${undatedHtml}</div>
+  `);
+  setupChromeHandlers();
 }
 
 // ── Durable History (item 17) — completed/failed audit from the jobs DB,

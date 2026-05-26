@@ -115,8 +115,11 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   (list/unblock) + channel-detail Block button. History: `GET /api/v1/history`
   over the jobs DB + a History route (🗂) rendering the durable completed/failed
   audit (survives restart, unlike the in-memory /recordings snapshot).
-- [ ] **18. Upcoming calendar/agenda** `[B]` — first-class view of known upcoming
-  broadcasts (scheduled Twitch/YT, Patreon drops).
+- [x] **18. Upcoming calendar/agenda** `[B]` — the Schedule route (was a stub)
+  is now a first-class agenda: `/schedule` entries grouped by day
+  (Today/Tomorrow/date) sorted by server-computed `next_fire`, each with time +
+  cron cadence; unparseable-cron entries bucketed separately. (Source = StriVo's
+  own scheduled recordings; platform-side broadcast schedules aren't API-exposed.)
 - [ ] **19. Add-Channel two-phase wizard** `[B]` — type name → live search → pick
   entity → *then* configure (profile, monitor, plugins). Defer config until confirmed.
 - [ ] **20. First-run wizard** `[B]` — gate the SPA behind connect platforms → pick
