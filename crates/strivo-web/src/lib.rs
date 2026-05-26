@@ -8,6 +8,7 @@ pub mod assets;
 pub mod auth;
 pub mod csrf;
 pub mod ipc_client;
+pub mod problem;
 pub mod ratelimit;
 pub mod routes;
 pub mod server;

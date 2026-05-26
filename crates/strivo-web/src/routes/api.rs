@@ -40,8 +40,8 @@ fn check_key(headers: &HeaderMap, state: &AppState) -> Result<(), StatusCode> {
 }
 
 async fn channels(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match state.ipc.snapshot().await {
         Ok(ServerMessage::StateSnapshot { channels, .. }) => {
@@ -61,8 +61,8 @@ async fn channels(headers: HeaderMap, State(state): State<AppState>) -> impl Int
 /// on load instead of waiting up to a full poll interval for the next
 /// patreon-state SSE event.
 async fn patreon(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match state.ipc.snapshot().await {
         Ok(ServerMessage::StateSnapshot {
@@ -81,8 +81,8 @@ async fn patreon(headers: HeaderMap, State(state): State<AppState>) -> impl Into
 }
 
 async fn recordings(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match state.ipc.snapshot().await {
         Ok(ServerMessage::StateSnapshot { recordings, .. }) => {
@@ -106,8 +106,8 @@ async fn recording_one(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match state.ipc.snapshot().await {
         Ok(ServerMessage::StateSnapshot { recordings, .. }) => match recordings.get(&id) {
@@ -129,8 +129,8 @@ async fn recording_one(
 }
 
 async fn schedule(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match strivo_core::config::AppConfig::load(None) {
         Ok(cfg) => {
@@ -169,8 +169,8 @@ async fn schedule(headers: HeaderMap, State(state): State<AppState>) -> impl Int
 }
 
 async fn settings(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match strivo_core::config::AppConfig::load(None) {
         Ok(cfg) => {
@@ -208,8 +208,8 @@ async fn health() -> impl IntoResponse {
 /// filesystem the recording dir lives on, plus per-platform totals
 /// computed by walking the recording-dir tree.
 async fn storage(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     let cfg = match strivo_core::config::AppConfig::load(None) {
         Ok(c) => c,
@@ -280,8 +280,8 @@ async fn gantt(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match state.ipc.snapshot().await {
         Ok(ServerMessage::StateSnapshot { recordings, .. }) => {
@@ -340,8 +340,8 @@ async fn start_recording(
     State(state): State<AppState>,
     Json(body): Json<StartRecordingPayload>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     let cmd = ClientMessage::Recording(RecordingCommand::Start {
         channel_id: body.channel_id,
@@ -371,8 +371,8 @@ async fn stop_recording(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     let cmd = ClientMessage::Recording(RecordingCommand::Stop { job_id: id });
     match state.ipc.send_command(cmd).await {
@@ -395,8 +395,8 @@ async fn stop_all_recordings(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match state.ipc.send_command(ClientMessage::Recording(RecordingCommand::StopAll)).await {
         Ok(()) => (StatusCode::ACCEPTED, Json(json!({"status": "stop_all sent"}))).into_response(),
@@ -411,8 +411,8 @@ async fn stop_all_recordings(
 /// `POST /api/v1/poll_now` — pokes the channel monitor (TUI sends
 /// `ClientMessage::PollNow` via the same path).
 async fn poll_now(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match state.ipc.send_command(ClientMessage::PollNow).await {
         Ok(()) => (StatusCode::ACCEPTED, Json(json!({"status": "polled"}))).into_response(),
@@ -437,8 +437,8 @@ async fn put_auto_record(
     Path(channel_key): Path<String>,
     Json(body): Json<AutoRecordPayload>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     let mut cfg = match strivo_core::config::AppConfig::load(None) {
         Ok(c) => c,
@@ -538,8 +538,8 @@ async fn plugin_rpc(
     Path((plugin, verb)): Path<(String, String)>,
     body: Option<Json<PluginRpcPayload>>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     let Json(body) = body.unwrap_or(Json(PluginRpcPayload::default()));
     let cmd = ClientMessage::PluginRpc {
@@ -587,8 +587,8 @@ async fn bulk_download(
     Path(channel_id): Path<String>,
     Json(body): Json<BulkDownloadPayload>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     let action = match body.action.as_str() {
         "start" => BulkAction::Start,
@@ -626,8 +626,8 @@ async fn request_playlists(
     State(state): State<AppState>,
     Path(channel_id): Path<String>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match state
         .ipc
@@ -661,8 +661,8 @@ async fn request_channel_vods(
     Path(channel_id): Path<String>,
     Json(body): Json<ChannelVodsPayload>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     match state
         .ipc
@@ -700,8 +700,8 @@ async fn patreon_pull(
     State(state): State<AppState>,
     Json(body): Json<PatreonPullPayload>,
 ) -> impl IntoResponse {
-    if let Err(code) = check_key(&headers, &state) {
-        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
     }
     let cmd = ClientMessage::PatreonPull {
         embed_url: body.embed_url,

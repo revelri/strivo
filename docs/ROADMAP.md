@@ -37,7 +37,10 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
 
 ## Phase 2 — API correctness & robustness
 
-- [ ] **7. RFC 9457 Problem Details envelope** `[A]` — one axum `IntoResponse` error
+- [~] **7. RFC 9457 Problem Details envelope** `[A]` — *(part 1 of 2:*
+  *`Problem` type (application/problem+json) + the 18 unauthorized blocks*
+  *converted; remaining varied-status daemon/validation error returns in*
+  *api.rs convert next fire.)* — one axum `IntoResponse` error
   type (`type,title,status,detail,instance`); replace ad-hoc JSON error shapes.
 - [ ] **8. Bound the recordings map** `[review]` — evict finished/failed jobs past a
   cap or age so `app.recordings` doesn't grow unbounded for the process lifetime.
