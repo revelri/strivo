@@ -52,7 +52,26 @@ CREATE TABLE IF NOT EXISTS crunchr_queue (
     last_error   TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_crunchr_state ON crunchr_queue(state);
+
+CREATE TABLE IF NOT EXISTS blocklist (
+    platform    TEXT NOT NULL,
+    channel_id  TEXT NOT NULL,
+    vod_id      TEXT NOT NULL DEFAULT '',  -- '' = whole channel blocked
+    reason      TEXT,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (platform, channel_id, vod_id)
+);
 "#;
+
+/// One blocklist row. `vod_id` is empty for a whole-channel block.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct BlockEntry {
+    pub platform: String,
+    pub channel_id: String,
+    pub vod_id: String,
+    pub reason: Option<String>,
+    pub created_at: String,
+}
 
 #[derive(Clone)]
 pub struct PersistDb {
@@ -135,6 +154,85 @@ impl PersistDb {
             ],
         )?;
         Ok(())
+    }
+
+    // ── Blocklist (roadmap item 17) — skip-this-VOD / skip-this-channel. ──
+
+    /// Block a VOD (`vod_id = Some`) or a whole channel (`vod_id = None`) so
+    /// the catalog/auto-record path stops grabbing it. Idempotent.
+    pub async fn add_blocklist(
+        &self,
+        platform: PlatformKind,
+        channel_id: &str,
+        vod_id: Option<&str>,
+        reason: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "INSERT OR REPLACE INTO blocklist (platform, channel_id, vod_id, reason, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                platform.to_string(),
+                channel_id,
+                vod_id.unwrap_or(""),
+                reason,
+                chrono::Utc::now().to_rfc3339(),
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Remove a blocklist entry (channel-level when `vod_id = None`).
+    pub async fn remove_blocklist(
+        &self,
+        platform: PlatformKind,
+        channel_id: &str,
+        vod_id: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.inner.lock().await;
+        conn.execute(
+            "DELETE FROM blocklist WHERE platform=?1 AND channel_id=?2 AND vod_id=?3",
+            params![platform.to_string(), channel_id, vod_id.unwrap_or("")],
+        )?;
+        Ok(())
+    }
+
+    /// True if this VOD is blocked directly OR its whole channel is blocked.
+    pub async fn is_blocked(
+        &self,
+        platform: PlatformKind,
+        channel_id: &str,
+        vod_id: &str,
+    ) -> Result<bool> {
+        let conn = self.inner.lock().await;
+        let n: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM blocklist
+             WHERE platform=?1 AND channel_id=?2 AND (vod_id=?3 OR vod_id='')",
+            params![platform.to_string(), channel_id, vod_id],
+            |row| row.get(0),
+        )?;
+        Ok(n > 0)
+    }
+
+    /// All blocklist entries as `(platform, channel_id, vod_id, reason, created_at)`.
+    pub async fn list_blocklist(&self) -> Result<Vec<BlockEntry>> {
+        let conn = self.inner.lock().await;
+        let mut stmt = conn.prepare(
+            "SELECT platform, channel_id, vod_id, reason, created_at
+             FROM blocklist ORDER BY created_at DESC",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(BlockEntry {
+                    platform: r.get(0)?,
+                    channel_id: r.get(1)?,
+                    vod_id: r.get(2)?,
+                    reason: r.get(3)?,
+                    created_at: r.get(4)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
     }
 
     /// Mark a VOD as transcribed (after Crunchr finishes its pipeline).
@@ -411,6 +509,30 @@ mod tests {
             .is_vod_recorded(PlatformKind::YouTube, "UC123", "abc")
             .await
             .unwrap());
+    }
+
+    #[tokio::test]
+    async fn blocklist_vod_and_channel() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = PersistDb::open(&dir.path().join("jobs.db")).unwrap();
+        let p = PlatformKind::Twitch;
+
+        assert!(!db.is_blocked(p, "ch1", "v1").await.unwrap());
+
+        // Block one VOD.
+        db.add_blocklist(p, "ch1", Some("v1"), Some("dupe")).await.unwrap();
+        assert!(db.is_blocked(p, "ch1", "v1").await.unwrap());
+        assert!(!db.is_blocked(p, "ch1", "v2").await.unwrap());
+
+        // Block the whole channel → any VOD on it is blocked.
+        db.add_blocklist(p, "ch2", None, None).await.unwrap();
+        assert!(db.is_blocked(p, "ch2", "anything").await.unwrap());
+
+        // List + remove.
+        assert_eq!(db.list_blocklist().await.unwrap().len(), 2);
+        db.remove_blocklist(p, "ch1", Some("v1")).await.unwrap();
+        assert!(!db.is_blocked(p, "ch1", "v1").await.unwrap());
+        assert_eq!(db.list_blocklist().await.unwrap().len(), 1);
     }
 
     #[tokio::test]

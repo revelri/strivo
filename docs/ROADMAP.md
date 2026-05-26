@@ -110,7 +110,12 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
 
 ## Phase 4 — Information architecture & journey
 
-- [ ] **17. Durable History + Blocklist** `[B]` — completed/failed audit trail that
+- [~] **17. Durable History + Blocklist** `[B]` — *(part 1 of 2: blocklist*
+  *storage landed — `blocklist` table + PersistDb add/remove/list/is_blocked*
+  *(VOD- or whole-channel), wired into the catalog/auto-record skip path so*
+  *blocked items are never grabbed; round-trip test. Remaining: web endpoints*
+  *+ SPA blocklist UI and a durable History view over the jobs table — next.)*
+  — completed/failed audit trail that
   survives restart (not toast-and-forget) + skip-this-VOD/channel feedback.
 - [ ] **18. Upcoming calendar/agenda** `[B]` — first-class view of known upcoming
   broadcasts (scheduled Twitch/YT, Patreon drops).

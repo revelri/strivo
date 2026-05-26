@@ -98,6 +98,18 @@ pub async fn run_pull(
         }
 
         if !opts.force {
+            // Blocklist (item 17): skip VODs the user blocked, or any VOD on a
+            // blocked channel — feedback that changes future grabs.
+            if let Ok(true) = db.is_blocked(vod.platform, &vod.channel_id, &vod.id).await {
+                report.skipped_existing += 1;
+                let _ = progress.as_ref().map(|p| {
+                    p.send(CatalogProgress::Skipped {
+                        vod_id: vod.id.clone(),
+                        title: vod.title.clone(),
+                    })
+                });
+                continue;
+            }
             match db
                 .is_vod_recorded(vod.platform, &vod.channel_id, &vod.id)
                 .await
