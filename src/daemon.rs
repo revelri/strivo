@@ -569,19 +569,12 @@ async fn handle_client(
     let mut buf_reader = BufReader::new(reader);
     let mut line = String::new();
 
-    // Read Hello
-    line.clear();
-    buf_reader.read_line(&mut line).await?;
-    let msg: ClientMessage = serde_json::from_str(line.trim())?;
-    match msg {
-        ClientMessage::Hello => {
-            let encoded = ipc::encode_message(&snapshot)?;
-            writer.write_all(encoded.as_bytes()).await?;
-        }
-        _ => {
-            anyhow::bail!("Expected Hello, got {:?}", msg);
-        }
-    }
+    // Note: the first message is NOT required to be Hello. The TUI opens
+    // a long-lived connection with Hello (→ snapshot) and then streams
+    // commands; the webui's send_command opens a short-lived connection
+    // and writes a single command with no Hello. Both are handled in the
+    // read loop below (Hello → snapshot via the writer task), so a
+    // command-first connection is dispatched rather than dropped.
 
     // Spawn a writer task that sends broadcast events
     let (write_tx, mut write_rx) = mpsc::unbounded_channel::<String>();
@@ -640,9 +633,12 @@ async fn handle_client(
 
         match msg {
             ClientMessage::Hello => {
-                // Re-sync: send fresh snapshot would require state access
-                // For now just acknowledge
-                tracing::debug!("Client re-sent Hello");
+                // Send the state snapshot through the writer task. (The
+                // snapshot is captured at connect time; good enough — the
+                // client also receives live events thereafter.)
+                if let Ok(encoded) = ipc::encode_message(&snapshot) {
+                    let _ = write_tx.send(encoded);
+                }
             }
             ClientMessage::Recording(cmd) => {
                 let _ = recording_tx.send(cmd);
