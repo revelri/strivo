@@ -102,20 +102,25 @@ button.danger:hover {
 }
 
 input[type="text"],
-input[type="password"] {
-  background: var(--bg);
-  border: 1px solid var(--border);
+input[type="password"],
+select,
+textarea {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-light);
   color: var(--fg);
   padding: 0.5rem 0.75rem;
-  border-radius: 6px;
+  border-radius: var(--radius);
   font-family: inherit;
   font-size: 0.875rem;
   width: 100%;
 }
 input[type="text"]:focus,
-input[type="password"]:focus {
+input[type="password"]:focus,
+select:focus,
+textarea:focus {
   outline: none;
-  border-color: var(--primary);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(119, 91, 244, 0.25);
 }
 
 /* Boot splash */
@@ -242,8 +247,11 @@ input:focus-visible {
 .kbd-help.open { display: flex; }
 .kbd-help .card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
   padding: 1.5rem 2rem;
   width: 480px;
   max-width: 92vw;
@@ -542,8 +550,11 @@ th[data-sort]:hover {
 .rec-card {
   flex: 0 0 220px;
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
   padding: 0.75rem;
 }
 .rec-card.recording {
@@ -615,8 +626,11 @@ button.sm {
 }
 .channel-card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
   padding: 1rem;
   transition: border-color 0.15s;
 }
@@ -685,8 +699,11 @@ button.sm {
 /* Recordings table */
 .recordings-table {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
   overflow: hidden;
   width: 100%;
   border-collapse: collapse;
@@ -836,9 +853,11 @@ button.sm {
   align-items: flex-start;
   gap: 0.6rem;
   padding: 0.6rem 0.75rem;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--surface);
-  border: 1px solid var(--border);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border-light);
   border-left: 3px solid var(--muted);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
   font-size: 0.85rem;
@@ -929,8 +948,11 @@ button.busy::after {
 }
 .cfg-card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
   padding: 1rem 1.1rem;
 }
 .cfg-title {
