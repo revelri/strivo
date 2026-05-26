@@ -148,11 +148,13 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
 
 ## Phase 5 — Live preview & micro-UX
 
-- [ ] **23. Hover/detail live preview** `[C]` — card static refreshing thumbnail →
-  upgrade to `<video muted playsinline autoplay poster>` on detail-open / scroll-into-
-  view → teardown off-screen → tap-to-play on mobile. Path A self-proxied HLS (hls.js,
-  `autoStartLoad:false` + IntersectionObserver) for recordings + Twitch rewind; Path B
-  iframe for un-proxyable live Twitch/YT; Patreon thumbnail-only.
+- [x] **23. Hover/detail live preview** `[C]` — progressive live preview on
+  channel-detail: refreshing thumbnail poster (Twitch/YT `thumbnail_url`,
+  cache-busted every 30s) → click/tap-to-upgrade to the platform embed player
+  (Path B iframe), with timer teardown on detail close/re-render and an
+  on-screen guard; Patreon thumbnail-only. (Path A self-proxied HLS playback of
+  recordings + Twitch rewind deferred — needs a range-serving recording-stream
+  endpoint + vendored hls.js, a separate large feature.)
 - [ ] **24. Toast + ARIA live regions** `[D]` — singleton with two pre-created regions
   (`polite/status`, `assertive/alert`); success ≥5s, errors sticky + dismissible,
   pause-on-hover, cap ~3–4, `prefers-reduced-motion`, 4.5:1 contrast, non-interactive.

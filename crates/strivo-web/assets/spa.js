@@ -893,34 +893,96 @@ function channelDetailHtml(c) {
     </div>`;
 }
 
-// Live, muted preview when a live channel is opened (item 4). Uses the
-// platform's own embed player (loopback-robust, no proxy/CORS): Twitch
-// player.twitch.tv with parent=<host>, YouTube embed/live_stream?channel.
-// Muted + autoplay so it plays without a gesture on desktop; the player's
-// own controls cover mobile. Patreon has no live concept.
-function livePreviewHtml(c) {
-  if (!c.is_live) return "";
+// Live preview when a live channel is opened (items 4 + 23). Progressive
+// model: show a refreshing thumbnail poster first, upgrade to the platform's
+// embed player on click (tap-to-play — avoids auto-spinning a player for every
+// open and works on mobile). Patreon has no live concept (thumbnail-only).
+function liveEmbedSrc(c) {
   const host = location.hostname || "127.0.0.1";
-  let src = null;
   if (c.platform === "Twitch") {
-    src = `https://player.twitch.tv/?channel=${encodeURIComponent(c.name)}` +
+    return `https://player.twitch.tv/?channel=${encodeURIComponent(c.name)}` +
       `&parent=${encodeURIComponent(host)}&muted=true&autoplay=true`;
-  } else if (c.platform === "YouTube") {
-    src = `https://www.youtube.com/embed/live_stream?channel=${encodeURIComponent(c.id)}` +
+  }
+  if (c.platform === "YouTube") {
+    return `https://www.youtube.com/embed/live_stream?channel=${encodeURIComponent(c.id)}` +
       `&autoplay=1&mute=1&playsinline=1`;
   }
-  if (!src) return "";
-  return `<div class="cd-preview">
-    <iframe src="${src}" title="Live preview" loading="lazy"
-            allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>
+  return null;
+}
+
+// Substitute Twitch's {width}x{height} placeholders and cache-bust so the
+// poster refreshes to a near-live frame.
+function liveThumbUrl(c) {
+  if (!c.thumbnail_url) return null;
+  const sized = c.thumbnail_url
+    .replace("{width}", "440")
+    .replace("{height}", "248");
+  return `${sized}${sized.includes("?") ? "&" : "?"}t=${Date.now()}`;
+}
+
+function livePreviewHtml(c) {
+  if (!c.is_live) return "";
+  const src = liveEmbedSrc(c);
+  const thumb = liveThumbUrl(c);
+  // No thumbnail but we have an embed → mount the player directly.
+  if (!thumb && src) {
+    return `<div class="cd-preview" data-embed-src="${escape(src)}">
+      <iframe src="${escape(src)}" title="Live preview" loading="lazy"
+              allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>
+    </div>`;
+  }
+  if (!thumb) return "";
+  // Poster + (if embeddable) a play overlay to upgrade to the player.
+  return `<div class="cd-preview poster" ${src ? `data-embed-src="${escape(src)}"` : ""}>
+    <img id="cd-poster-img" src="${escape(thumb)}" alt="Live thumbnail" />
+    ${src ? `<button class="cd-play" id="cd-play" aria-label="Play live preview">▶</button>` : ""}
   </div>`;
 }
 
+let cdPosterTimer = null;
+function teardownLivePreview() {
+  if (cdPosterTimer) {
+    clearInterval(cdPosterTimer);
+    cdPosterTimer = null;
+  }
+}
+
 function wireChannelDetail() {
+  // Clear any preview refresh timer from a previously-open detail (item 23).
+  teardownLivePreview();
   document.querySelector('[data-action="cd-close"]')?.addEventListener("click", () => {
+    teardownLivePreview();
     selectedChannelKey = null;
     render();
   });
+
+  // Live preview: refresh the poster thumbnail every 30s, and upgrade to the
+  // embed player on click (tap-to-play). Tears down when detail re-renders.
+  const poster = document.querySelector(".cd-preview.poster");
+  if (poster) {
+    const img = poster.querySelector("#cd-poster-img");
+    if (img) {
+      const base = img.src.split(/[?&]t=/)[0];
+      cdPosterTimer = setInterval(() => {
+        // Only refresh while still on-screen (cheap visibility guard).
+        if (!document.body.contains(img)) {
+          teardownLivePreview();
+          return;
+        }
+        img.src = `${base}${base.includes("?") ? "&" : "?"}t=${Date.now()}`;
+      }, 30000);
+    }
+    const playBtn = poster.querySelector("#cd-play");
+    const src = poster.dataset.embedSrc;
+    if (playBtn && src) {
+      playBtn.addEventListener("click", () => {
+        teardownLivePreview();
+        poster.classList.remove("poster");
+        poster.innerHTML = `<iframe src="${escape(src)}" title="Live preview"
+          allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+      });
+    }
+  }
   document.querySelectorAll("[data-action=record]").forEach((btn) =>
     btn.addEventListener("click", () => startRecordingFromCard(btn.dataset)),
   );
