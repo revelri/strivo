@@ -610,6 +610,123 @@ async fn logs(
     .into_response()
 }
 
+// ── Config/DB backup + restore (roadmap item 16) ─────────────────────
+// Dep-free: a backup is a directory `data_dir/backups/<timestamp>/`
+// holding copies of config.toml + jobs.db.
+
+fn backups_dir() -> std::path::PathBuf {
+    strivo_core::config::AppConfig::data_dir().join("backups")
+}
+
+/// Validate a user-supplied backup name: plain filename, no path parts.
+/// Prevents traversal on the restore/download path.
+fn safe_backup_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && name != "."
+        && name != ".."
+}
+
+async fn backup_create(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let name = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%SZ").to_string();
+    let dest = backups_dir().join(&name);
+    if let Err(e) = std::fs::create_dir_all(&dest) {
+        return crate::problem::Problem::internal(format!("create backup dir: {e}")).into_response();
+    }
+    let cfg = strivo_core::config::AppConfig::config_path();
+    let db = strivo_core::config::AppConfig::data_dir().join("jobs.db");
+    let mut copied = Vec::new();
+    if cfg.exists() {
+        if let Err(e) = std::fs::copy(&cfg, dest.join("config.toml")) {
+            return crate::problem::Problem::internal(format!("copy config: {e}")).into_response();
+        }
+        copied.push("config.toml");
+    }
+    if db.exists() {
+        if let Err(e) = std::fs::copy(&db, dest.join("jobs.db")) {
+            return crate::problem::Problem::internal(format!("copy jobs.db: {e}")).into_response();
+        }
+        copied.push("jobs.db");
+    }
+    (
+        StatusCode::CREATED,
+        Json(json!({ "name": name, "files": copied, "bytes": walk_dir_bytes(&dest).unwrap_or(0) })),
+    )
+        .into_response()
+}
+
+async fn backups_list(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let dir = backups_dir();
+    let mut sets: Vec<serde_json::Value> = std::fs::read_dir(&dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .map(|e| {
+            let p = e.path();
+            let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+            json!({
+                "name": name,
+                "bytes": walk_dir_bytes(&p).unwrap_or(0),
+                "files": std::fs::read_dir(&p)
+                    .into_iter().flatten().flatten()
+                    .filter_map(|f| f.file_name().to_str().map(String::from))
+                    .collect::<Vec<_>>(),
+            })
+        })
+        .collect();
+    // Newest first (names are sortable timestamps).
+    sets.sort_by(|a, b| b["name"].as_str().cmp(&a["name"].as_str()));
+    Json(json!({ "backups": sets })).into_response()
+}
+
+async fn backup_restore(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    if !safe_backup_name(&name) {
+        return crate::problem::Problem::bad_request("invalid backup name").into_response();
+    }
+    let src = backups_dir().join(&name);
+    if !src.is_dir() {
+        return crate::problem::Problem::not_found("backup not found").into_response();
+    }
+    let mut restored = Vec::new();
+    let cfg_src = src.join("config.toml");
+    if cfg_src.exists() {
+        if let Err(e) = std::fs::copy(&cfg_src, strivo_core::config::AppConfig::config_path()) {
+            return crate::problem::Problem::internal(format!("restore config: {e}")).into_response();
+        }
+        restored.push("config.toml");
+    }
+    let db_src = src.join("jobs.db");
+    if db_src.exists() {
+        let db_dest = strivo_core::config::AppConfig::data_dir().join("jobs.db");
+        if let Err(e) = std::fs::copy(&db_src, &db_dest) {
+            return crate::problem::Problem::internal(format!("restore jobs.db: {e}")).into_response();
+        }
+        restored.push("jobs.db");
+    }
+    Json(json!({
+        "restored": restored,
+        "note": "Restart the daemon for the restored config/DB to take effect.",
+    }))
+    .into_response()
+}
+
 #[derive(Debug, Deserialize)]
 struct AutoRecordPayload {
     enabled: bool,
@@ -885,6 +1002,9 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/settings", get(settings))
         .route("/api/v1/poll_now", post(poll_now))
         .route("/api/v1/logs", get(logs))
+        .route("/api/v1/backup", post(backup_create))
+        .route("/api/v1/backups", get(backups_list))
+        .route("/api/v1/backups/{name}/restore", post(backup_restore))
         .route(
             "/api/v1/channels/{channel_key}/auto_record",
             put(put_auto_record),
@@ -910,6 +1030,17 @@ pub fn router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backup_name_rejects_traversal() {
+        assert!(safe_backup_name("2026-05-26T22-30-00Z"));
+        assert!(safe_backup_name("snapshot_1.bak"));
+        assert!(!safe_backup_name(""));
+        assert!(!safe_backup_name(".."));
+        assert!(!safe_backup_name("../etc"));
+        assert!(!safe_backup_name("a/b"));
+        assert!(!safe_backup_name("with space"));
+    }
 
     #[test]
     fn log_level_parse_and_rank() {
