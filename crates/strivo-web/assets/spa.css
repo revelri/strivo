@@ -649,28 +649,28 @@ button.sm {
   gap: 0.5rem;
   margin-bottom: 0.5rem;
 }
-.channel-card .platform-icon {
+:is(.channel-card, .channel-detail) .platform-icon {
   font-weight: 700;
   font-size: 0.625rem;
   padding: 0.15rem 0.4rem;
   border-radius: 4px;
   letter-spacing: 0.05em;
 }
-.channel-card .platform-icon.twitch { background: var(--twitch); color: white; }
-.channel-card .platform-icon.youtube { background: var(--youtube); color: white; }
-.channel-card .platform-icon.patreon { background: var(--patreon); color: white; }
+:is(.channel-card, .channel-detail) .platform-icon.twitch { background: var(--twitch); color: white; }
+:is(.channel-card, .channel-detail) .platform-icon.youtube { background: var(--youtube); color: white; }
+:is(.channel-card, .channel-detail) .platform-icon.patreon { background: var(--patreon); color: white; }
 .channel-card .name {
   font-weight: 600;
   flex: 1;
 }
-.channel-card .status {
+:is(.channel-card, .channel-detail) .status {
   font-size: 0.75rem;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
   background: var(--overlay);
   color: var(--muted);
 }
-.channel-card .status.live {
+:is(.channel-card, .channel-detail) .status.live {
   background: var(--live);
   color: var(--bg);
   font-weight: 600;
@@ -691,9 +691,10 @@ button.sm {
   color: var(--dim);
   margin-bottom: 0.75rem;
 }
-.channel-card .actions {
+:is(.channel-card, .channel-detail) .actions {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
 
 /* Recordings table */

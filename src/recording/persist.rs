@@ -167,6 +167,12 @@ impl PersistDb {
         vod_id: Option<&str>,
         reason: Option<&str>,
     ) -> Result<()> {
+        // An empty vod_id is the channel-level sentinel; callers must pass
+        // None for that, never Some(""), or it would be indistinguishable
+        // from a whole-channel block.
+        if matches!(vod_id, Some("")) {
+            anyhow::bail!("vod_id must be non-empty; pass None to block the whole channel");
+        }
         let conn = self.inner.lock().await;
         conn.execute(
             "INSERT OR REPLACE INTO blocklist (platform, channel_id, vod_id, reason, created_at)

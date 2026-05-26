@@ -557,7 +557,7 @@ fn newest_log_file(dir: &std::path::Path) -> Option<std::path::PathBuf> {
         .filter(|p| {
             p.file_name()
                 .and_then(|n| n.to_str())
-                .is_some_and(|n| n.starts_with("strivo") && n.ends_with("log"))
+                .is_some_and(|n| n.starts_with("strivo") && n.ends_with(".log"))
         })
         .max_by_key(|p| {
             std::fs::metadata(p)
@@ -623,11 +623,10 @@ fn backups_dir() -> std::path::PathBuf {
 fn safe_backup_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
+        && !name.starts_with('.')
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-        && name != "."
-        && name != ".."
 }
 
 async fn backup_create(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {

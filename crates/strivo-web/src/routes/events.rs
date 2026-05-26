@@ -14,6 +14,7 @@ use std::convert::Infallible;
 use std::time::Duration;
 
 use axum::extract::State;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
 use axum::routing::get;
@@ -22,7 +23,14 @@ use futures::stream::StreamExt;
 
 use crate::server::AppState;
 
-async fn events(State(state): State<AppState>) -> impl IntoResponse {
+async fn events(headers: HeaderMap, State(state): State<AppState>) -> axum::response::Response {
+    // The SSE stream carries every daemon event (channel names, recording
+    // progress, errors) — gate it behind the same dual auth (X-Api-Key OR
+    // session cookie) as the rest of the API. EventSource sends the cookie
+    // via withCredentials, so the browser stays authorized.
+    if crate::routes::login::check_dual(&headers, &state.api_key, &state.session_secret).is_err() {
+        return (StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+    }
     let mut event_stream = state.ipc.events();
     let stream = async_stream::stream! {
         while let Some(item) = event_stream.next().await {
@@ -63,7 +71,7 @@ async fn events(State(state): State<AppState>) -> impl IntoResponse {
     // behind `tailscale serve`) not to buffer the response, so SSE frames
     // reach the browser immediately instead of the connection going silently
     // stale. Harmless on a direct loopback connection.
-    ([("X-Accel-Buffering", "no")], sse)
+    ([("X-Accel-Buffering", "no")], sse).into_response()
 }
 
 pub fn router() -> Router<AppState> {

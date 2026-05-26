@@ -315,6 +315,14 @@ impl YouTubePlatform {
                 tokio::time::sleep(backoff).await;
                 continue;
             }
+            // Fail on any other non-success status. Without this an error body
+            // (e.g. 403 quotaExceeded) deserializes into a struct of all-Option
+            // fields as an empty result — silently dropping every channel with
+            // no logged error (the "YouTube vanished from the side rail" bug).
+            if !(200..300).contains(&status) {
+                let body = resp.text().await.unwrap_or_default();
+                bail!("YouTube API {status} for {url}: {}", body.trim());
+            }
             return Ok(resp.json().await?);
         }
         bail!("YouTube API exhausted retries for {url}")

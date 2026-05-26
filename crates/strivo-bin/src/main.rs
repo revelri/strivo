@@ -408,7 +408,7 @@ async fn handle_twitch_rewind(
         .await
         .context("load twitch tokens (run `strivo` once to authenticate)")?;
 
-    let channel_id = tw
+    let (channel_id, _display_name) = tw
         .lookup_channel_id_by_login(channel)
         .await
         .context("lookup channel id")?;

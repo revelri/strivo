@@ -108,10 +108,12 @@ impl ApiKey {
     pub fn matches(&self, candidate: &str) -> bool {
         let a = self.0.as_bytes();
         let b = candidate.as_bytes();
-        let mut diff: u8 = (a.len() as u8) ^ (b.len() as u8);
+        // Use usize for the length diff: casting to u8 would alias lengths that
+        // are congruent mod 256 (e.g. 32 vs 288), defeating the length guard.
+        let mut diff: usize = a.len() ^ b.len();
         let n = a.len().min(b.len());
         for i in 0..n {
-            diff |= a[i] ^ b[i];
+            diff |= (a[i] ^ b[i]) as usize;
         }
         diff == 0
     }

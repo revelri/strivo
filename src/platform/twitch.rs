@@ -163,7 +163,10 @@ impl TwitchPlatform {
     /// Resolve a channel login (e.g. "xqc") to its numeric user_id via
     /// helix `/users?login=…`. Requires either a stored user OAuth token
     /// or a valid app token in `access_token`.
-    pub async fn lookup_channel_id_by_login(&self, login: &str) -> Result<String> {
+    /// Resolve a Twitch login to its `(numeric id, display_name)`. The login
+    /// is passed as a properly-encoded query parameter (not string-interpolated)
+    /// so odd input can't corrupt the URL.
+    pub async fn lookup_channel_id_by_login(&self, login: &str) -> Result<(String, String)> {
         let token = self
             .access_token
             .read()
@@ -172,7 +175,8 @@ impl TwitchPlatform {
             .context("no twitch access_token loaded; authenticate first")?;
         let resp: UsersResponse = self
             .client
-            .get(format!("{TWITCH_API_URL}/users?login={login}"))
+            .get(format!("{TWITCH_API_URL}/users"))
+            .query(&[("login", login)])
             .header("Authorization", format!("Bearer {token}"))
             .header("Client-Id", &self.client_id)
             .send()
@@ -182,7 +186,7 @@ impl TwitchPlatform {
         resp.data
             .into_iter()
             .find(|u| u.login.eq_ignore_ascii_case(login))
-            .map(|u| u.id)
+            .map(|u| (u.id, u.display_name))
             .with_context(|| format!("no such twitch channel: {login}"))
     }
 
@@ -282,12 +286,18 @@ impl TwitchPlatform {
                 return Ok(());
             }
 
-            // Check if still pending (authorization_pending) or an actual error
-            if let Ok(err) = serde_json::from_str::<TokenErrorResponse>(&body) {
-                if err.status == Some(400) {
-                    // Still pending, continue polling
-                    continue;
-                }
+            // Check if still pending (authorization_pending) or an actual error.
+            // Twitch returns 400 while the user hasn't authorized yet; any other
+            // status (401 revoked, 403, 5xx) is fatal — bail instead of spinning
+            // silently until the device code expires.
+            match serde_json::from_str::<TokenErrorResponse>(&body) {
+                Ok(err) if err.status == Some(400) => continue,
+                Ok(err) => bail!(
+                    "Twitch device-code auth failed: {} {}",
+                    err.status.map(|s| s.to_string()).unwrap_or_default(),
+                    err.message.unwrap_or_default()
+                ),
+                Err(_) => bail!("Twitch device-code auth failed: HTTP {status}: {body}"),
             }
         }
     }

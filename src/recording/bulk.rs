@@ -221,11 +221,11 @@ async fn resolve_channel(
                 .context("twitch section missing in config")?;
             let tw = crate::platform::twitch::TwitchPlatform::new(cfg.client_id, cfg.client_secret);
             tw.load_stored_tokens().await.context("twitch auth")?;
-            let id = tw
+            let (id, display_name) = tw
                 .lookup_channel_id_by_login(query)
                 .await
                 .with_context(|| format!("no Twitch channel for login '{query}'"))?;
-            Ok((id, query.to_string()))
+            Ok((id, display_name))
         }
         PlatformKind::YouTube | PlatformKind::Patreon => {
             Ok((query.to_string(), query.to_string()))

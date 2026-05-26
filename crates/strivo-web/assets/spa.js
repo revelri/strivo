@@ -111,9 +111,17 @@ const events = {
     this.source.onerror = () => {
       // Make the stale-data state VISIBLE (research §A/§5: silent
       // real-time breakage is the #1 cited gotcha). The browser
-      // auto-reconnects; meanwhile we show a pill and degrade to a
-      // slow poll so list views don't go stale.
+      // auto-reconnects on transient errors; meanwhile we show a pill
+      // and degrade to a slow poll so list views don't go stale.
       this.setConnected(false);
+      // On a hard close (e.g. a 401 before login — /events is now
+      // authenticated), EventSource will NOT auto-reconnect. Recreate it on
+      // a timer so the stream comes back once the session cookie is set.
+      if (this.source && this.source.readyState === EventSource.CLOSED) {
+        this.source.close();
+        this.source = null;
+        setTimeout(() => this.start(), 3000);
+      }
     };
   },
   // Show/hide the topbar "reconnecting…" pill and arm/disarm a 10s
@@ -335,10 +343,10 @@ async function render() {
       await renderSchedule();
       break;
     case "pipelines":
-      renderPipelines();
+      await renderPipelines();
       break;
     case "plugins":
-      renderPlugins();
+      await renderPlugins();
       break;
     case "settings":
       await renderSettings();
@@ -619,6 +627,7 @@ function renderLogin(errorMsg) {
     if (!key) return;
     try {
       await API.login(key);
+      events.start(); // (re)connect the now-authorized SSE stream
       route("library");
     } catch (err) {
       renderLogin("Invalid API key");
@@ -934,7 +943,7 @@ function vodSectionHtml(title, vods) {
   const rows = vods
     .map(
       (v) => `
-    <a class="vod-row" href="${escape(v.url)}" target="_blank" rel="noopener">
+    <a class="vod-row" href="${/^https?:\/\//i.test(v.url || "") ? escape(v.url) : "#"}" target="_blank" rel="noopener">
       <span class="vod-date">${escape((v.published_at || "").slice(0, 10))}</span>
       <span class="vod-title">${escape(v.title)}</span>
     </a>`,
@@ -1060,7 +1069,7 @@ function paintAddWizardSearch(modal, opts = {}) {
                value="${escape(opts.query || "")}" autofocus />
         <button id="aw-search" class="primary">Search</button>
       </div>
-      <div id="aw-result" class="wizard-result">${opts.message || ""}</div>
+      <div id="aw-result" class="wizard-result">${escape(opts.message || "")}</div>
     </div>`;
   const doSearch = async () => {
     const platform = modal.querySelector("#aw-platform").value;
@@ -1281,7 +1290,7 @@ async function renderRecordings() {
       } else {
         recSort = { col, dir: "asc" };
       }
-      renderRecordings(); // re-render header arrows + body
+      renderRecordings().catch((e) => Toast.error(e.message)); // re-render header arrows + body
     });
   });
 }
@@ -1798,7 +1807,7 @@ async function paintBackups() {
       <div class="task-row">
         <div class="task-info">
           <span class="task-name">${escape(b.name)}</span>
-          <span class="task-cadence">${formatBytes(b.bytes || 0)} · ${(b.files || []).join(", ")}</span>
+          <span class="task-cadence">${formatBytes(b.bytes || 0)} · ${(b.files || []).map(escape).join(", ")}</span>
         </div>
         <button class="sm restore-backup" data-name="${escape(b.name)}">Restore</button>
       </div>`,
