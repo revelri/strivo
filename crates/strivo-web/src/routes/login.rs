@@ -25,9 +25,43 @@ use crate::auth::{ApiKey, SessionToken};
 use crate::server::AppState;
 
 pub const SESSION_COOKIE: &str = "strivo_session";
+/// `__Host-` prefixed name used over HTTPS (e.g. behind `tailscale serve`).
+/// The prefix is browser-enforced: the cookie MUST carry `Secure` and
+/// `Path=/` with no `Domain`, so it can't be set by a non-secure or
+/// differently-scoped origin. Plain loopback HTTP can't use it (no
+/// `Secure`), so we fall back to the unprefixed name there.
+pub const SESSION_COOKIE_HOST: &str = "__Host-strivo_session";
 
 /// 7 days in seconds — rolling expiry on every login.
 const SESSION_TTL_SECS: u64 = 7 * 24 * 60 * 60;
+
+/// True when the request reached us over HTTPS. The strivo process always
+/// terminates plain HTTP (loopback, or behind `tailscale serve` which
+/// terminates TLS and forwards), so the only HTTPS signal is the proxy's
+/// `X-Forwarded-Proto`. Trusting it here is safe: it can only make the
+/// cookie *more* restrictive (`Secure` + `__Host-`); a spoofed `https`
+/// over real HTTP just means the browser declines to store the cookie.
+fn is_secure_request(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|p| p.eq_ignore_ascii_case("https"))
+}
+
+/// Build the Set-Cookie string. Over HTTPS use the hardened `__Host-` +
+/// `Secure` form; over plain HTTP drop both (the prefix requires `Secure`).
+/// `SameSite=Lax` (was Strict) blocks cross-site sub-request CSRF while
+/// allowing top-level navigation; the custom-header CSRF check (item 5)
+/// covers the rest.
+fn build_session_cookie(value: &str, max_age: u64, secure: bool) -> String {
+    if secure {
+        format!(
+            "{SESSION_COOKIE_HOST}={value}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age={max_age}"
+        )
+    } else {
+        format!("{SESSION_COOKIE}={value}; HttpOnly; SameSite=Lax; Path=/; Max-Age={max_age}")
+    }
+}
 
 #[derive(Debug, Deserialize)]
 struct LoginPayload {
@@ -39,6 +73,7 @@ struct LoginPayload {
 async fn login(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    req_headers: HeaderMap,
     Json(body): Json<LoginPayload>,
 ) -> impl IntoResponse {
     let ip = peer.ip();
@@ -89,9 +124,7 @@ async fn login(
 
     let token = SessionToken::new(SESSION_TTL_SECS);
     let cookie_value = token.encode(&secret);
-    let cookie = format!(
-        "{SESSION_COOKIE}={cookie_value}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_TTL_SECS}"
-    );
+    let cookie = build_session_cookie(&cookie_value, SESSION_TTL_SECS, is_secure_request(&req_headers));
 
     let cookie_header = match HeaderValue::from_str(&cookie) {
         Ok(h) => h,
@@ -113,14 +146,21 @@ async fn login(
         .into_response()
 }
 
-/// `POST /api/v1/auth/logout` — clears the cookie.
+/// `POST /api/v1/auth/logout` — clears the cookie. We don't know which name
+/// the browser holds (depends whether login happened over HTTPS), so clear
+/// both: the plain name and the `__Host-` name (the latter with `Secure`, as
+/// the prefix requires). Each is appended as its own Set-Cookie header.
 async fn logout() -> impl IntoResponse {
-    let cookie = format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+    let clears = [
+        format!("{SESSION_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0"),
+        format!("{SESSION_COOKIE_HOST}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"),
+    ];
     let mut headers = HeaderMap::new();
-    // Clearing cookie is a fixed string; fall back to a no-cookie 200 rather
-    // than panic if it somehow fails to parse.
-    if let Ok(h) = HeaderValue::from_str(&cookie) {
-        headers.insert(SET_COOKIE, h);
+    for c in &clears {
+        // Fixed strings; skip rather than panic if one fails to parse.
+        if let Ok(h) = HeaderValue::from_str(c) {
+            headers.append(SET_COOKIE, h);
+        }
     }
     (StatusCode::OK, headers, Json(json!({"status": "logged out"}))).into_response()
 }
@@ -135,12 +175,18 @@ pub fn session_from_headers(
 ) -> Option<SessionToken> {
     let secret = session_secret?;
     let cookie_header = headers.get("cookie").and_then(|v| v.to_str().ok())?;
-    let session_pair = cookie_header
-        .split(';')
-        .map(|s| s.trim())
-        .find(|s| s.starts_with(&format!("{SESSION_COOKIE}=")))?;
-    let (_, value) = session_pair.split_once('=')?;
-    SessionToken::decode_verify(value, secret)
+    // Accept either the plain (HTTP) or the `__Host-` (HTTPS) name.
+    for pair in cookie_header.split(';').map(|s| s.trim()) {
+        let value = pair
+            .strip_prefix(&format!("{SESSION_COOKIE_HOST}="))
+            .or_else(|| pair.strip_prefix(&format!("{SESSION_COOKIE}=")));
+        if let Some(value) = value {
+            if let Some(tok) = SessionToken::decode_verify(value, secret) {
+                return Some(tok);
+            }
+        }
+    }
+    None
 }
 
 /// Dual-auth check — accepts either a valid cookie session OR the
@@ -172,4 +218,67 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/auth/login", post(login))
         .route("/api/v1/auth/logout", post(logout))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::{generate_session_secret, SessionToken};
+
+    #[test]
+    fn secure_request_uses_host_prefixed_secure_cookie() {
+        let c = build_session_cookie("abc.def", 60, true);
+        assert!(c.starts_with(&format!("{SESSION_COOKIE_HOST}=abc.def")));
+        assert!(c.contains("; Secure"));
+        assert!(c.contains("; SameSite=Lax"));
+        assert!(c.contains("; Path=/"));
+    }
+
+    #[test]
+    fn insecure_request_uses_plain_cookie_without_secure() {
+        let c = build_session_cookie("abc.def", 60, false);
+        assert!(c.starts_with(&format!("{SESSION_COOKIE}=abc.def")));
+        assert!(!c.contains("Secure"));
+        assert!(!c.contains("__Host-"));
+        assert!(c.contains("; SameSite=Lax"));
+    }
+
+    #[test]
+    fn is_secure_request_reads_forwarded_proto() {
+        let mut h = HeaderMap::new();
+        assert!(!is_secure_request(&h));
+        h.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+        assert!(is_secure_request(&h));
+        h.insert("x-forwarded-proto", HeaderValue::from_static("http"));
+        assert!(!is_secure_request(&h));
+    }
+
+    #[test]
+    fn session_read_accepts_both_cookie_names() {
+        let secret = generate_session_secret();
+        let value = SessionToken::new(60).encode(&secret);
+
+        for name in [SESSION_COOKIE, SESSION_COOKIE_HOST] {
+            let mut h = HeaderMap::new();
+            h.insert(
+                "cookie",
+                HeaderValue::from_str(&format!("foo=bar; {name}={value}")).unwrap(),
+            );
+            assert!(
+                session_from_headers(&h, Some(&secret)).is_some(),
+                "cookie name {name} should verify"
+            );
+        }
+    }
+
+    #[test]
+    fn session_read_rejects_bad_value_under_valid_name() {
+        let secret = generate_session_secret();
+        let mut h = HeaderMap::new();
+        h.insert(
+            "cookie",
+            HeaderValue::from_str(&format!("{SESSION_COOKIE}=not-a-token")).unwrap(),
+        );
+        assert!(session_from_headers(&h, Some(&secret)).is_none());
+    }
 }

@@ -22,7 +22,9 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   path against the recordings root; reject traversal (`..`, symlink escape) with 403.
 - [x] **3. `login.rs` Set-Cookie hardening** `[review]` — replace `.parse().unwrap()`
   with graceful error; never panic the handler on a malformed header value.
-- [ ] **4. Cookie attributes + idle refresh** `[F]` — `__Host-strivo_session; HttpOnly;
+- [~] **4. Cookie attributes + idle refresh** `[F]` — *(part 1 of 2 done:*
+  *adaptive `__Host-`/`Secure`/`SameSite=Lax` + dual-name read landed; idle*
+  *session refresh on activity still pending — next fire.)* — `__Host-strivo_session; HttpOnly;
   Secure; SameSite=Lax; Path=/`; rotate HMAC session on activity; expired/invalid HMAC
   ⇒ logged-out (302/401), never 500. Must still work on `*.ts.net` over HTTPS.
 - [ ] **5. CSRF custom-header on cookie mutations** `[F]` — require `X-Strivo-CSRF`
