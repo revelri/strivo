@@ -12,13 +12,36 @@ async fn asset(Path(path): Path<String>) -> Response {
         Some(content) => {
             let mime = mime_for(&path);
             (
-                [(header::CONTENT_TYPE, mime)],
+                [
+                    (header::CONTENT_TYPE, mime),
+                    // Asset URLs are content-versioned by the shell
+                    // (`?v=<hash>`), so a given URL is safe to cache
+                    // forever — a deploy changes the hash and the URL.
+                    (
+                        header::CACHE_CONTROL,
+                        "public, max-age=31536000, immutable",
+                    ),
+                ],
                 content.data.into_owned(),
             )
                 .into_response()
         }
         None => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+/// Short content hash of the SPA assets, used to cache-bust the shell's
+/// asset URLs on every deploy that changes them. Cheap std hash over the
+/// embedded bytes — no extra crate, and the bytes are fixed at build time.
+fn assets_version() -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for name in ["spa.js", "spa.css"] {
+        if let Some(c) = Assets::get(name) {
+            c.data.hash(&mut h);
+        }
+    }
+    format!("{:x}", h.finish())
 }
 
 fn mime_for(path: &str) -> &'static str {
@@ -37,11 +60,22 @@ fn mime_for(path: &str) -> &'static str {
 
 async fn spa_shell() -> Response {
     match Assets::get("spa.html") {
-        Some(content) => (
-            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-            content.data.into_owned(),
-        )
-            .into_response(),
+        Some(content) => {
+            let v = assets_version();
+            let html = String::from_utf8_lossy(&content.data)
+                .replace("/assets/spa.css", &format!("/assets/spa.css?v={v}"))
+                .replace("/assets/spa.js", &format!("/assets/spa.js?v={v}"));
+            (
+                [
+                    (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                    // The shell itself must always be revalidated so the
+                    // freshly-hashed asset URLs reach the browser.
+                    (header::CACHE_CONTROL, "no-cache"),
+                ],
+                html,
+            )
+                .into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
