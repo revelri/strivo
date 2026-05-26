@@ -83,8 +83,8 @@ async fn spa_shell() -> Response {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/assets/{*path}", get(asset))
-        // W4 MVP — SPA shell served at /. The askama templates remain
-        // mounted by their own routers (legacy htmx surface); the SPA
-        // is a parallel entry point at the bare root.
+        // The SPA is the webui. Served at both `/` and `/app`; the legacy
+        // askama/htmx page routers are no longer mounted (see server.rs).
+        .route("/", get(spa_shell))
         .route("/app", get(spa_shell))
 }

@@ -48,14 +48,13 @@ pub async fn serve(cfg: ServeConfig) -> Result<()> {
         session_secret,
     };
 
+    // The SPA (served by assets::router at / and /app) is the webui; it
+    // talks to the daemon exclusively through the JSON api + events + auth
+    // routers. The legacy askama/htmx page routers (dashboard, channels,
+    // recordings, schedule, settings, logs, system) are retired — they
+    // served the old server-rendered UI at /, /channels, … and were the
+    // reason the bare root showed the pre-redesign dashboard.
     let app = Router::new()
-        .merge(routes::dashboard::router())
-        .merge(routes::channels::router())
-        .merge(routes::recordings::router())
-        .merge(routes::schedule::router())
-        .merge(routes::settings::router())
-        .merge(routes::logs::router())
-        .merge(routes::system::router())
         .merge(routes::events::router())
         .merge(routes::api::router())
         .merge(routes::login::router())
