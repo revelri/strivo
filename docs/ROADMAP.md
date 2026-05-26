@@ -100,12 +100,13 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   (daily rotation, keep 7 via tracing-appender); `GET /api/v1/logs?level=&lines=`
   tails the newest file with min-level filtering; SPA Logs route (📜) renders
   the tail in a mono pane with a level-selector dropdown + refresh. e2e covers it.
-- [~] **16. Config/DB backup + restore** `[E]` — *(part 1 of 2: backend —*
-  *dep-free backup sets under `data_dir/backups/<ts>/` (config.toml + jobs.db);*
-  *`POST /api/v1/backup` (create), `GET /api/v1/backups` (list),*
-  *`POST /api/v1/backups/{name}/restore` (name-sanitized, restart-to-apply).*
-  *Remaining: SPA backup/restore UI on System page — next fire.)* — scheduled + on-demand backup of
-  config + jobs DB with a restore path.
+- [x] **16. Config/DB backup + restore** `[E]` — dep-free backup sets under
+  `data_dir/backups/<ts>/` (config.toml + jobs.db); `POST /api/v1/backup`,
+  `GET /api/v1/backups`, `POST /api/v1/backups/{name}/restore` (name-sanitized,
+  restart-to-apply); SPA System "Backup" card with Backup-now + list + restore
+  (confirm dialog). On-demand only; scheduled/automatic backups deferred (the
+  manual snapshot + restore path covers the high-trust "irreplaceable config"
+  need from research §E).
 
 ## Phase 4 — Information architecture & journey
 

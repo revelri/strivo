@@ -116,6 +116,11 @@ const server = createServer(async (req, res) => {
   if (path.startsWith("/api/v1/")) {
     const p = path.slice("/api/v1".length);
     if (p === "/health") return json(res, 200, { status: "ok" });
+    if (p === "/backup") return json(res, 201, { name: "2026-05-26T00-00-00Z", files: ["config.toml", "jobs.db"], bytes: 1234 });
+    if (p === "/backups")
+      return json(res, 200, {
+        backups: [{ name: "2026-05-26T00-00-00Z", bytes: 1234, files: ["config.toml", "jobs.db"] }],
+      });
     if (p.startsWith("/logs"))
       return json(res, 200, {
         file: "strivo.2026-05-26.log",

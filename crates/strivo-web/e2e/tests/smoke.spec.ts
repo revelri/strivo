@@ -73,6 +73,9 @@ test("system page renders health + tasks", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "System" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Health" })).toBeVisible();
   await expect(page.locator(".sys-check").first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Backup" })).toBeVisible();
+  await expect(page.locator("#backup-now")).toBeVisible();
+  await expect(page.locator(".restore-backup").first()).toBeVisible();
 });
 
 test("logs page renders with level selector and lines", async ({ page }) => {

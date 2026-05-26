@@ -51,6 +51,10 @@ const API = {
   healthChecks: () => API._fetch("/health/checks"),
   logs: (level, lines = 300) =>
     API._fetch(`/logs?level=${encodeURIComponent(level || "trace")}&lines=${lines}`),
+  backupCreate: () => API._fetch("/backup", { method: "POST" }),
+  backups: () => API._fetch("/backups"),
+  backupRestore: (name) =>
+    API._fetch(`/backups/${encodeURIComponent(name)}/restore`, { method: "POST" }),
   storage: () => API._fetch("/storage"),
   settings: () => API._fetch("/settings"),
   patreon: () => API._fetch("/patreon"),
@@ -1523,6 +1527,17 @@ async function renderSystem() {
         <h2 class="cfg-title">Storage</h2>
         ${gauge}
       </section>
+      <section class="cfg-card" id="backup-card">
+        <h2 class="cfg-title">Backup</h2>
+        <div class="task-row">
+          <div class="task-info">
+            <span class="task-name">Config + jobs DB</span>
+            <span class="task-cadence">on-demand snapshot</span>
+          </div>
+          <button id="backup-now" class="sm">＋ Backup now</button>
+        </div>
+        <div id="backup-list"><div class="empty sm">Loading backups…</div></div>
+      </section>
       <section class="cfg-card">
         <h2 class="cfg-title">Tasks</h2>
         <div class="task-row">
@@ -1570,6 +1585,60 @@ async function renderSystem() {
       btn.disabled = false;
     }
   });
+  // Backup/restore (item 16).
+  document.getElementById("backup-now")?.addEventListener("click", async (e) => {
+    await withBusy(e.currentTarget, "Backing up…", async () => {
+      const r = await API.backupCreate();
+      Toast.success(`Backup created — ${r.name}`);
+      await paintBackups();
+    }).catch((err) => Toast.error(`Backup failed: ${err.message}`));
+  });
+  paintBackups();
+}
+
+async function paintBackups() {
+  const el = document.getElementById("backup-list");
+  if (!el) return;
+  try {
+    const r = await API.backups();
+    const rows = r.backups || [];
+    if (!rows.length) {
+      el.innerHTML = '<div class="empty sm">No backups yet.</div>';
+      return;
+    }
+    el.innerHTML = rows
+      .map(
+        (b) => `
+      <div class="task-row">
+        <div class="task-info">
+          <span class="task-name">${escape(b.name)}</span>
+          <span class="task-cadence">${formatBytes(b.bytes || 0)} · ${(b.files || []).join(", ")}</span>
+        </div>
+        <button class="sm restore-backup" data-name="${escape(b.name)}">Restore</button>
+      </div>`,
+      )
+      .join("");
+    el.querySelectorAll(".restore-backup").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const name = btn.dataset.name;
+        if (
+          !(await confirmDialog(
+            `Restore config + jobs DB from ${name}? This overwrites the current files; restart the daemon to apply.`,
+            { ok: "Restore", danger: true },
+          ))
+        )
+          return;
+        try {
+          const res = await API.backupRestore(name);
+          Toast.success(`Restored ${(res.restored || []).join(", ")} — restart the daemon to apply`);
+        } catch (err) {
+          Toast.error(`Restore failed: ${err.message}`);
+        }
+      });
+    });
+  } catch (e) {
+    el.innerHTML = `<div class="empty sm">Could not load backups: ${escape(e.message)}</div>`;
+  }
 }
 
 // ── Logs viewer (item 15) — tails the rolling log with a level selector. ──
