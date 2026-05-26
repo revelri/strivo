@@ -79,6 +79,30 @@ async fn channels(headers: HeaderMap, State(state): State<AppState>) -> impl Int
     }
 }
 
+/// `GET /api/v1/patreon` — current Patreon creators + their video posts,
+/// cached in the daemon snapshot so the SPA can seed its Patreon section
+/// on load instead of waiting up to a full poll interval for the next
+/// patreon-state SSE event.
+async fn patreon(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
+    if let Err(code) = check_key(&headers, &state) {
+        return (code, Json(json!({"error": "unauthorized"}))).into_response();
+    }
+    match state.ipc.snapshot().await {
+        Ok(ServerMessage::StateSnapshot {
+            patreon_creators,
+            patreon_posts,
+            ..
+        }) => Json(json!({ "creators": patreon_creators, "posts": patreon_posts }))
+            .into_response(),
+        Ok(_) => Json(json!({ "creators": [], "posts": [] })).into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
 async fn recordings(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
     if let Err(code) = check_key(&headers, &state) {
         return (code, Json(json!({"error": "unauthorized"}))).into_response();
@@ -721,6 +745,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/channels", get(channels))
+        .route("/api/v1/patreon", get(patreon))
         .route("/api/v1/recordings", get(recordings).post(start_recording))
         .route(
             "/api/v1/recordings/{id}",

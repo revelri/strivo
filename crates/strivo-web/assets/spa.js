@@ -43,6 +43,7 @@ const API = {
   health: () => API._fetch("/health"),
   storage: () => API._fetch("/storage"),
   settings: () => API._fetch("/settings"),
+  patreon: () => API._fetch("/patreon"),
   gantt: () => API._fetch("/gantt"),
   pluginRpc: (plugin, verb, body) =>
     API._fetch(`/plugins/${encodeURIComponent(plugin)}/${encodeURIComponent(verb)}`, {
@@ -501,6 +502,25 @@ function platformGlyph(p) {
   return p === "Twitch" ? "🟣" : p === "YouTube" ? "🔴" : "◈";
 }
 
+// Seed patreonState from the daemon snapshot (/patreon) so Patreon shows
+// immediately on load, instead of only after the next ~5-min poll's
+// patreon-state SSE event. Idempotent; refreshed live by SSE thereafter.
+async function seedPatreon() {
+  try {
+    const p = await API.patreon();
+    patreonState.creators = p.creators || [];
+    patreonState.posts = {};
+    for (const post of p.posts || []) {
+      (patreonState.posts[post.campaign_id] ||= []).push(post);
+    }
+    for (const list of Object.values(patreonState.posts)) {
+      list.sort((a, b) => (b.published_at || "").localeCompare(a.published_at || ""));
+    }
+  } catch (_) {
+    /* non-fatal — SSE still refreshes it */
+  }
+}
+
 function selectChannel(key) {
   selectedChannelKey = key;
   if (currentRoute() !== "library") {
@@ -555,6 +575,7 @@ async function renderHome() {
   } catch (e) {
     if (e.message.includes("unauthorized")) return;
   }
+  await seedPatreon();
   try {
     dashSchedule = (await API.schedule()).schedule || [];
   } catch (_) {
@@ -1788,4 +1809,6 @@ events.on((event) => {
 });
 events.start();
 injectKeyboardHelp();
-render();
+// Seed Patreon from the daemon snapshot before first paint, then render,
+// so the Patreon section is populated on load (not after the next poll).
+seedPatreon().finally(render);

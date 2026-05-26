@@ -40,6 +40,14 @@ test("clicking a YouTube channel shows detail with streams + uploads", async ({ 
   await expect(page.locator(".cd-section-title", { hasText: "Recent uploads" })).toBeVisible();
 });
 
+test("patreon creators appear in the left rail (seeded from /patreon)", async ({ page }) => {
+  await page.goto("/app#/library");
+  // Seeded on boot from /patreon — no waiting on a poll-driven SSE event.
+  await expect(page.locator(".ch-section-title", { hasText: "Patreon" })).toBeVisible();
+  await expect(page.getByText("Cool Creator")).toBeVisible();
+  await expect(page.locator(".ch-tier", { hasText: "Premium Tier" })).toBeVisible();
+});
+
 test("no Activity surface anywhere", async ({ page }) => {
   await page.goto("/app#/library");
   await expect(page.locator(".activity-rail")).toHaveCount(0);

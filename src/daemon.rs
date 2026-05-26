@@ -25,6 +25,10 @@ struct DaemonState {
     patreon_connected: bool,
     pending_auth: Option<(PlatformKind, String, String)>,
     auth_queue: std::collections::VecDeque<(PlatformKind, String, String)>,
+    // Latest Patreon snapshot, cached so a client connecting between polls
+    // sees Patreon immediately (not after up to a full poll interval).
+    patreon_creators: Vec<ChannelEntry>,
+    patreon_posts: Vec<crate::platform::patreon::PatreonPost>,
 }
 
 impl DaemonState {
@@ -36,6 +40,8 @@ impl DaemonState {
             youtube_connected: self.youtube_connected,
             patreon_connected: self.patreon_connected,
             pending_auth: self.pending_auth.clone(),
+            patreon_creators: self.patreon_creators.clone(),
+            patreon_posts: self.patreon_posts.clone(),
         }
     }
 
@@ -43,6 +49,10 @@ impl DaemonState {
         match event {
             DaemonEvent::ChannelsUpdated(channels) => {
                 self.channels = channels.clone();
+            }
+            DaemonEvent::PatreonState { creators, posts } => {
+                self.patreon_creators = creators.clone();
+                self.patreon_posts = posts.clone();
             }
             DaemonEvent::RecordingStarted { job } => {
                 self.recordings.insert(job.id, job.clone());
@@ -389,6 +399,8 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
         patreon_connected: false,
         pending_auth: None,
         auth_queue: std::collections::VecDeque::new(),
+        patreon_creators: Vec::new(),
+        patreon_posts: Vec::new(),
     };
     for job in scanned {
         state.recordings.insert(job.id, job);

@@ -119,6 +119,34 @@ const server = createServer(async (req, res) => {
     if (p === "/auth/login") return json(res, 200, { status: "ok" });
     if (p === "/auth/logout") return json(res, 200, { status: "ok" });
     if (p === "/channels") return json(res, 200, { channels: CHANNELS });
+    if (p === "/patreon")
+      return json(res, 200, {
+        creators: [
+          {
+            id: "camp123",
+            platform: "Patreon",
+            name: "creatorslug",
+            display_name: "Cool Creator",
+            is_live: false,
+            stream_title: "Premium Tier",
+            game_or_category: null,
+            viewer_count: null,
+            started_at: null,
+            thumbnail_url: null,
+            auto_record: false,
+          },
+        ],
+        posts: [
+          {
+            id: "post1",
+            campaign_id: "camp123",
+            title: "Behind the scenes",
+            url: "https://patreon.com/posts/post1",
+            published_at: "2026-05-25T00:00:00Z",
+            embed_url: "https://example.com/embed/post1",
+          },
+        ],
+      });
     if (p === "/recordings" && req.method === "GET") return json(res, 200, RECORDINGS);
     if (p === "/storage")
       return json(res, 200, {

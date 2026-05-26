@@ -83,6 +83,14 @@ pub enum ServerMessage {
         youtube_connected: bool,
         patreon_connected: bool,
         pending_auth: Option<(PlatformKind, String, String)>,
+        /// Latest Patreon snapshot (creators + their video posts), cached
+        /// from the most recent PatreonState event so a client connecting
+        /// between polls sees Patreon immediately instead of waiting up to
+        /// a full poll interval. Defaults empty for older clients.
+        #[serde(default)]
+        patreon_creators: Vec<ChannelEntry>,
+        #[serde(default)]
+        patreon_posts: Vec<crate::platform::patreon::PatreonPost>,
     },
     /// Incremental update event
     Event(DaemonEvent),

@@ -23,6 +23,8 @@ fn snapshot_stub() -> ServerMessage {
         youtube_connected: false,
         patreon_connected: false,
         pending_auth: None,
+        patreon_creators: Vec::new(),
+        patreon_posts: Vec::new(),
     }
 }
 
