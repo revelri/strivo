@@ -90,11 +90,7 @@ async fn login(
 
     if !state.api_key.matches(&body.api_key) {
         state.login_limiter.record_failure(ip);
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "invalid api_key"})),
-        )
-            .into_response();
+        return crate::problem::Problem::unauthorized().into_response();
     }
     state.login_limiter.record_success(ip);
 
@@ -107,10 +103,7 @@ async fn login(
             let mut cfg = match strivo_core::config::AppConfig::load(None) {
                 Ok(c) => c,
                 Err(e) => {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({"error": format!("config load: {e}")})),
-                    )
+                    return crate::problem::Problem::internal(format!("config load: {e}"))
                         .into_response();
                 }
             };
@@ -129,10 +122,7 @@ async fn login(
     let cookie_header = match HeaderValue::from_str(&cookie) {
         Ok(h) => h,
         Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "could not encode session cookie"})),
-            )
+            return crate::problem::Problem::internal("could not encode session cookie")
                 .into_response();
         }
     };

@@ -48,11 +48,7 @@ async fn channels(headers: HeaderMap, State(state): State<AppState>) -> impl Int
             Json(json!({ "channels": channels })).into_response()
         }
         Ok(_) => Json(json!({ "channels": [] })).into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -72,11 +68,7 @@ async fn patreon(headers: HeaderMap, State(state): State<AppState>) -> impl Into
         }) => Json(json!({ "creators": patreon_creators, "posts": patreon_posts }))
             .into_response(),
         Ok(_) => Json(json!({ "creators": [], "posts": [] })).into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -93,11 +85,7 @@ async fn recordings(headers: HeaderMap, State(state): State<AppState>) -> impl I
             Json(json!({ "recordings": items })).into_response()
         }
         Ok(_) => Json(json!({ "recordings": [] })).into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -112,19 +100,10 @@ async fn recording_one(
     match state.ipc.snapshot().await {
         Ok(ServerMessage::StateSnapshot { recordings, .. }) => match recordings.get(&id) {
             Some(j) => Json(j.clone()).into_response(),
-            None => (StatusCode::NOT_FOUND, Json(json!({"error": "not found"})))
-                .into_response(),
+            None => crate::problem::Problem::not_found("recording not found").into_response(),
         },
-        Ok(_) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "unexpected response"})),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Ok(_) => crate::problem::Problem::internal("unexpected response").into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -160,11 +139,7 @@ async fn schedule(headers: HeaderMap, State(state): State<AppState>) -> impl Int
                 .collect();
             Json(json!({ "schedule": entries })).into_response()
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::internal(e.to_string()).into_response(),
     }
 }
 
@@ -191,11 +166,7 @@ async fn settings(headers: HeaderMap, State(state): State<AppState>) -> impl Int
             });
             Json(body).into_response()
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::internal(e.to_string()).into_response(),
     }
 }
 
@@ -214,11 +185,7 @@ async fn storage(headers: HeaderMap, State(state): State<AppState>) -> impl Into
     let cfg = match strivo_core::config::AppConfig::load(None) {
         Ok(c) => c,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": e.to_string()})),
-            )
-                .into_response();
+            return crate::problem::Problem::internal(e.to_string()).into_response();
         }
     };
     let path = cfg.recording_dir.clone();
@@ -356,11 +323,7 @@ async fn start_recording(
     });
     match state.ipc.send_command(cmd).await {
         Ok(()) => (StatusCode::ACCEPTED, Json(json!({"status": "queued"}))).into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -381,11 +344,7 @@ async fn stop_recording(
             Json(json!({"status": "stop sent", "job_id": id})),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -400,11 +359,7 @@ async fn stop_all_recordings(
     }
     match state.ipc.send_command(ClientMessage::Recording(RecordingCommand::StopAll)).await {
         Ok(()) => (StatusCode::ACCEPTED, Json(json!({"status": "stop_all sent"}))).into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -416,11 +371,7 @@ async fn poll_now(headers: HeaderMap, State(state): State<AppState>) -> impl Int
     }
     match state.ipc.send_command(ClientMessage::PollNow).await {
         Ok(()) => (StatusCode::ACCEPTED, Json(json!({"status": "polled"}))).into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -443,11 +394,7 @@ async fn put_auto_record(
     let mut cfg = match strivo_core::config::AppConfig::load(None) {
         Ok(c) => c,
         Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": e.to_string()})),
-            )
-                .into_response();
+            return crate::problem::Problem::internal(e.to_string()).into_response();
         }
     };
     let already_in = cfg
@@ -457,10 +404,7 @@ async fn put_auto_record(
     match (body.enabled, already_in) {
         (true, false) => {
             let Some((plat_str, ch_id)) = channel_key.split_once(':') else {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "channel_key must be Platform:id"})),
-                )
+                return crate::problem::Problem::bad_request("channel_key must be Platform:id")
                     .into_response();
             };
             let platform = match plat_str.to_lowercase().as_str() {
@@ -468,11 +412,10 @@ async fn put_auto_record(
                 "youtube" => PlatformKind::YouTube,
                 "patreon" => PlatformKind::Patreon,
                 _ => {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": format!("unknown platform: {plat_str}")})),
-                    )
-                        .into_response();
+                    return crate::problem::Problem::bad_request(format!(
+                        "unknown platform: {plat_str}"
+                    ))
+                    .into_response();
                 }
             };
             // Look up the channel's display name from the snapshot —
@@ -503,11 +446,7 @@ async fn put_auto_record(
         _ => {}
     }
     if let Err(e) = cfg.save(None) {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response();
+        return crate::problem::Problem::internal(e.to_string()).into_response();
     }
     let _ = state.ipc.send_command(ClientMessage::PollNow).await;
     (
@@ -559,11 +498,7 @@ async fn plugin_rpc(
             })),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -594,10 +529,7 @@ async fn bulk_download(
         "start" => BulkAction::Start,
         "stop" => BulkAction::Stop,
         other => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": format!("unknown action {other:?}")})),
-            )
+            return crate::problem::Problem::bad_request(format!("unknown action {other:?}"))
                 .into_response()
         }
     };
@@ -610,11 +542,7 @@ async fn bulk_download(
     };
     match state.ipc.send_command(cmd).await {
         Ok(()) => (StatusCode::ACCEPTED, Json(json!({"status": "queued"}))).into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -639,11 +567,7 @@ async fn request_playlists(
             Json(json!({"status": "requested", "note": "result arrives via /events playlist-list"})),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -677,11 +601,7 @@ async fn request_channel_vods(
             Json(json!({"status": "requested", "note": "result arrives via /events channel-vods"})),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
@@ -710,11 +630,7 @@ async fn patreon_pull(
     };
     match state.ipc.send_command(cmd).await {
         Ok(()) => (StatusCode::ACCEPTED, Json(json!({"status": "queued"}))).into_response(),
-        Err(e) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(json!({"error": e.to_string()})),
-        )
-            .into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
 }
 
