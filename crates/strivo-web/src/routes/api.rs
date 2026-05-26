@@ -170,8 +170,53 @@ async fn settings(headers: HeaderMap, State(state): State<AppState>) -> impl Int
     }
 }
 
-async fn health() -> impl IntoResponse {
-    Json(json!({"status": "ok", "version": env!("CARGO_PKG_VERSION")}))
+/// `GET /api/v1/health` — machine-readable health for CI/monitoring
+/// (roadmap item 11). Unauthenticated liveness+readiness: probes the daemon
+/// (IPC snapshot round-trip), the jobs DB (open), and free disk on the
+/// recording filesystem. 200 when all pass, 503 when any check is degraded,
+/// so a monitor can alert on the status code alone.
+async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    // Daemon reachable: a successful snapshot proves the recorder process is
+    // alive and answering on the IPC socket.
+    let daemon_ok = state.ipc.snapshot().await.is_ok();
+
+    // Jobs DB openable.
+    let db_path = strivo_core::config::AppConfig::data_dir().join("jobs.db");
+    let db_ok = strivo_core::recording::persist::PersistDb::open(&db_path).is_ok();
+
+    // Free disk on the recording filesystem.
+    let (disk, disk_ok) = match strivo_core::config::AppConfig::load(None) {
+        Ok(cfg) => {
+            let (total, avail) = statvfs_bytes(&cfg.recording_dir).unwrap_or((0, 0));
+            (
+                json!({
+                    "recording_dir": cfg.recording_dir,
+                    "filesystem_total_bytes": total,
+                    "filesystem_avail_bytes": avail,
+                }),
+                avail > 0,
+            )
+        }
+        Err(_) => (serde_json::Value::Null, false),
+    };
+
+    let ok = daemon_ok && db_ok && disk_ok;
+    let body = json!({
+        "status": if ok { "ok" } else { "degraded" },
+        "version": env!("CARGO_PKG_VERSION"),
+        "checks": {
+            "daemon": if daemon_ok { "ok" } else { "unreachable" },
+            "db": if db_ok { "ok" } else { "error" },
+            "disk": if disk_ok { "ok" } else { "warn" },
+        },
+        "disk": disk,
+    });
+    let code = if ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    (code, Json(body))
 }
 
 /// `GET /api/v1/storage` — disk usage of the recording directory.

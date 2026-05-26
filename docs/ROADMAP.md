@@ -51,7 +51,9 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   the now-dead lazy-secret branch in login. — `session_secret: Option<…>` ⇒ `String`
   (always Some at startup); delete the retired/unmounted legacy htmx route modules
   and `with_filter`-style dead helpers.
-- [ ] **11. `/health` JSON endpoint** `[E]` — machine-readable: recorder up, DB
+- [x] **11. `/health` JSON endpoint** `[E]` — `/api/v1/health` now probes
+  daemon (IPC snapshot), jobs DB (open), and free disk; 200 when all ok, 503
+  when degraded, with a per-check breakdown for monitors. — machine-readable: recorder up, DB
   reachable, disk free; separate from the UI panel, for CI/monitoring.
 - [ ] **12. Visible SSE liveness** `[A]` — set `X-Accel-Buffering: no` + no response
   buffering on `/events`; confirm/finish the "reconnecting" badge so a dropped SSE is
