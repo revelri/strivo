@@ -140,9 +140,11 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   recordings per channel (read-only `PersistDb`) and skips auto-record once a
   profile's `cutoff_episodes` is met. (Polish deferred: applying audio_only/
   format to the capture, and a SPA profile editor — needs config-write, item 14b.)
-- [ ] **22. Index density + mass-edit** `[B]` — switchable table/overview density over
-  the recordings/channels dataset + multi-select mass-edit action bar (re-run plugins /
-  delete / re-record).
+- [x] **22. Index density + mass-edit** `[B]` — recordings index now has a
+  compact/comfortable density toggle (persisted) + per-row checkboxes with
+  select-all and a multi-select mass-action bar (Stop active / Re-record
+  selected, via existing endpoints). (Bulk delete + re-run-plugins deferred —
+  they need new recording-delete + per-recording plugin endpoints.)
 
 ## Phase 5 — Live preview & micro-UX
 

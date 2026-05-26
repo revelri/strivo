@@ -158,6 +158,9 @@ const patreonState = { creators: [], posts: {} };
 let recSort = { col: "started", dir: "desc" };
 let recFilter = "";
 let recCache = [];
+// Item 22 — recordings index density (compact|comfortable) + multi-select.
+let recDensity = localStorage.getItem("strivo-rec-density") || "comfortable";
+let recSelected = new Set();
 // TUI-redesign — left-rail channel cache, current selection, per-channel
 // VOD cache (channel_id -> [VodEntry]), and the recordings dashboard cache.
 let channelCache = [];
@@ -1332,13 +1335,20 @@ async function renderRecordings() {
   // the filter box narrows by channel/title live without refetching.
   root.innerHTML = chrome(`
     <h1 class="page-title">Recordings</h1>
-    <input id="rec-filter" class="grid-filter" type="search"
-           placeholder="Filter by channel or title… (/)"
-           aria-label="Filter recordings" value="${escape(recFilter)}">
+    <div class="rec-toolbar">
+      <input id="rec-filter" class="grid-filter" type="search"
+             placeholder="Filter by channel or title… (/)"
+             aria-label="Filter recordings" value="${escape(recFilter)}">
+      <button id="rec-density" class="sm" title="Toggle row density">
+        ${recDensity === "compact" ? "▤ Comfortable" : "▥ Compact"}
+      </button>
+    </div>
     <p class="page-subtitle" id="rec-count"></p>
-    <table class="recordings-table">
+    <div id="rec-massbar" class="massbar" hidden></div>
+    <table class="recordings-table ${recDensity === "compact" ? "compact" : ""}">
       <thead>
         <tr>
+          <th class="rec-check"><input type="checkbox" id="rec-select-all" aria-label="Select all"></th>
           ${recHeader("state", "State")}
           ${recHeader("channel", "Channel")}
           ${recHeader("title", "Title")}
@@ -1355,6 +1365,17 @@ async function renderRecordings() {
 
   document.getElementById("rec-filter")?.addEventListener("input", (e) => {
     recFilter = e.target.value;
+    paintRecordings();
+  });
+  document.getElementById("rec-density")?.addEventListener("click", () => {
+    recDensity = recDensity === "compact" ? "comfortable" : "compact";
+    localStorage.setItem("strivo-rec-density", recDensity);
+    renderRecordings().catch((e) => Toast.error(e.message));
+  });
+  document.getElementById("rec-select-all")?.addEventListener("change", (e) => {
+    const visible = visibleRecordingIds();
+    if (e.target.checked) visible.forEach((id) => recSelected.add(id));
+    else visible.forEach((id) => recSelected.delete(id));
     paintRecordings();
   });
   document.querySelectorAll("th[data-sort]").forEach((th) => {
@@ -1403,6 +1424,7 @@ function paintRecordings() {
     const ka = key(a), kb = key(b);
     return ka < kb ? -dir : ka > kb ? dir : 0;
   });
+  recVisible = rows;
   body.innerHTML = rows.map(recordingRow).join("");
   const count = document.getElementById("rec-count");
   if (count) {
@@ -1418,11 +1440,88 @@ function paintRecordings() {
       try {
         await API.stopRecording(btn.dataset.jobId);
         Toast.success("Recording stopped");
-        setTimeout(render, 500);
+        setTimeout(() => render().catch(() => {}), 500);
       } catch (e) {
         Toast.error(`Stop failed: ${e.message}`);
       }
     });
+  });
+  body.querySelectorAll(".rec-row-check").forEach((cb) => {
+    cb.addEventListener("change", () => {
+      if (cb.checked) recSelected.add(cb.dataset.jobId);
+      else recSelected.delete(cb.dataset.jobId);
+      updateMassbar();
+    });
+  });
+  const all = document.getElementById("rec-select-all");
+  if (all) {
+    const vis = visibleRecordingIds();
+    all.checked = vis.length > 0 && vis.every((id) => recSelected.has(id));
+  }
+  updateMassbar();
+}
+
+// IDs currently visible after filter/sort (for select-all + mass actions).
+let recVisible = [];
+function visibleRecordingIds() {
+  return recVisible.map((r) => r.id);
+}
+
+// Show/hide the multi-select mass-action bar (item 22). Acts on the selection
+// intersected with currently-visible rows.
+function updateMassbar() {
+  const bar = document.getElementById("rec-massbar");
+  if (!bar) return;
+  const visible = new Set(visibleRecordingIds());
+  const sel = recVisible.filter((r) => recSelected.has(r.id) && visible.has(r.id));
+  if (sel.length === 0) {
+    bar.hidden = true;
+    bar.innerHTML = "";
+    return;
+  }
+  const active = sel.filter((r) => stateClassName(r.state) === "recording");
+  bar.hidden = false;
+  bar.innerHTML = `
+    <span class="massbar-count">${sel.length} selected</span>
+    ${active.length ? `<button id="mass-stop" class="danger sm">Stop ${active.length} active</button>` : ""}
+    <button id="mass-rerecord" class="sm">Re-record ${sel.length}</button>
+    <button id="mass-clear" class="sm">Clear</button>`;
+  document.getElementById("mass-clear")?.addEventListener("click", () => {
+    recSelected.clear();
+    paintRecordings();
+  });
+  document.getElementById("mass-stop")?.addEventListener("click", async () => {
+    if (!(await confirmDialog(`Stop ${active.length} active recording(s)?`, { ok: "Stop", danger: true })))
+      return;
+    let ok = 0;
+    for (const r of active) {
+      try {
+        await API.stopRecording(r.id);
+        ok++;
+      } catch (_) {}
+    }
+    Toast.success(`Stopped ${ok}/${active.length}`);
+    recSelected.clear();
+    setTimeout(() => render().catch(() => {}), 500);
+  });
+  document.getElementById("mass-rerecord")?.addEventListener("click", async () => {
+    if (!(await confirmDialog(`Re-record ${sel.length} channel(s) now?`, { ok: "Re-record" })))
+      return;
+    let ok = 0;
+    for (const r of sel) {
+      try {
+        await API.startRecording({
+          channel_id: r.channel_id,
+          channel_name: r.channel_name,
+          platform: r.platform,
+          from_start: true,
+        });
+        ok++;
+      } catch (_) {}
+    }
+    Toast.success(`Re-record queued ${ok}/${sel.length}`);
+    recSelected.clear();
+    setTimeout(() => render().catch(() => {}), 500);
   });
 }
 
@@ -1431,7 +1530,8 @@ function recordingRow(r) {
   const stateClass = stateClassName(r.state);
   const isActive = stateClass === "recording";
   return `
-    <tr>
+    <tr class="${recSelected.has(r.id) ? "rec-sel" : ""}">
+      <td class="rec-check"><input type="checkbox" class="rec-row-check" data-job-id="${escape(r.id)}" ${recSelected.has(r.id) ? "checked" : ""} aria-label="Select recording"></td>
       <td><span class="state-pill ${stateClass}">${state}</span></td>
       <td>${escape(r.channel_name)}</td>
       <td>${escape(r.stream_title || "(no title)")}</td>

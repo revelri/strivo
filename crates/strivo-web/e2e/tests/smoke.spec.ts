@@ -61,6 +61,18 @@ test("top-bar icon nav reaches the recordings table", async ({ page }) => {
   await expect(page.locator(".recordings-table")).toBeVisible();
 });
 
+test("recordings density toggle + multi-select mass bar", async ({ page }) => {
+  await page.goto("/app#/recordings");
+  await expect(page.locator(".recordings-table")).toBeVisible();
+  // Density toggle adds the compact class.
+  await page.locator("#rec-density").click();
+  await expect(page.locator(".recordings-table.compact")).toBeVisible();
+  // Selecting a row reveals the mass-action bar.
+  await page.locator(".rec-row-check").first().check();
+  await expect(page.locator("#rec-massbar")).toBeVisible();
+  await expect(page.locator("#rec-massbar")).toContainText("selected");
+});
+
 test("settings page renders real config sections", async ({ page }) => {
   await page.goto("/app#/settings");
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();

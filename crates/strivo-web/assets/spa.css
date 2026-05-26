@@ -1071,6 +1071,29 @@ button.busy::after {
 }
 
 /* System page — checks grouped by domain (item 13). */
+/* Recordings index density + multi-select mass-edit (item 22). */
+.rec-toolbar { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.5rem; }
+.rec-toolbar .grid-filter { flex: 1; }
+.recordings-table.compact th,
+.recordings-table.compact td { padding: 0.2rem 0.5rem; font-size: 0.78rem; }
+.recordings-table th.rec-check,
+.recordings-table td.rec-check { width: 1.5rem; text-align: center; }
+.recordings-table tr.rec-sel { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.massbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.6rem;
+  background: var(--surface);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.massbar[hidden] { display: none; }
+.massbar-count { font-weight: 600; margin-right: auto; }
+
 /* First-run setup wizard (item 20). */
 .fr-card { max-width: 620px; }
 .fr-step {
