@@ -263,8 +263,9 @@ impl PatreonClient {
     /// Fetch campaigns the user supports (pledged creators), including tier info.
     pub async fn fetch_pledged_creators(&self) -> Result<Vec<PatreonCreator>> {
         let url = format!(
-            "{PATREON_API_URL}/identity?include=memberships.campaign,memberships.currently_entitled_tiers\
+            "{PATREON_API_URL}/identity?include=memberships.campaign,memberships.campaign.creator,memberships.currently_entitled_tiers\
              &fields%5Bcampaign%5D=vanity,url,creation_name\
+             &fields%5Buser%5D=full_name\
              &fields%5Btier%5D=title\
              &fields%5Bmember%5D=patron_status"
         );
@@ -323,6 +324,26 @@ impl PatreonClient {
             }
         }
 
+        // Build user_id -> full_name lookup (the campaign creator's display
+        // name, e.g. "Fear &" / "the yard" — the proper title, vs the
+        // creation_name "is creating …" blurb).
+        let mut user_names: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        if let Some(items) = included {
+            for item in items {
+                if item.get("type").and_then(|t| t.as_str()) == Some("user") {
+                    let id = item.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                    let full = item
+                        .get("attributes")
+                        .and_then(|a| a.get("full_name"))
+                        .and_then(|v| v.as_str());
+                    if let (false, Some(full)) = (id.is_empty(), full) {
+                        user_names.insert(id.to_string(), full.to_string());
+                    }
+                }
+            }
+        }
+
         // Build creator list from campaign items
         let mut creators = Vec::new();
         if let Some(items) = included {
@@ -334,11 +355,21 @@ impl PatreonClient {
                         .unwrap_or("")
                         .to_string();
                     let attrs = item.get("attributes");
-                    let name = attrs
+                    // Prefer the creator user's full_name; fall back to the
+                    // campaign's creation_name, then vanity.
+                    let creator_user_id = item
+                        .get("relationships")
+                        .and_then(|r| r.get("creator"))
+                        .and_then(|c| c.get("data"))
+                        .and_then(|d| d.get("id"))
+                        .and_then(|v| v.as_str());
+                    let creation_name = attrs
                         .and_then(|a| a.get("creation_name"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Unknown")
-                        .to_string();
+                        .and_then(|v| v.as_str());
+                    let name = creator_user_id
+                        .and_then(|uid| user_names.get(uid).cloned())
+                        .or_else(|| creation_name.map(|s| s.to_string()))
+                        .unwrap_or_else(|| "Unknown".to_string());
                     let vanity = attrs
                         .and_then(|a| a.get("vanity"))
                         .and_then(|v| v.as_str())
@@ -373,7 +404,7 @@ impl PatreonClient {
         since: Option<&chrono::DateTime<chrono::Utc>>,
     ) -> Result<Vec<PatreonPost>> {
         let mut url = format!(
-            "{PATREON_API_URL}/campaigns/{campaign_id}/posts?fields%5Bpost%5D=title,url,published_at,embed&filter%5Bis_by_creator%5D=true"
+            "{PATREON_API_URL}/campaigns/{campaign_id}/posts?fields%5Bpost%5D=title,url,published_at,embed_url&filter%5Bis_by_creator%5D=true"
         );
         if let Some(since) = since {
             url.push_str(&format!(
@@ -409,9 +440,9 @@ impl PatreonClient {
                     .unwrap_or("")
                     .to_string();
                 let embed_url = attrs
-                    .and_then(|a| a.get("embed"))
-                    .and_then(|v| v.get("url"))
+                    .and_then(|a| a.get("embed_url"))
                     .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
                     .map(|s| s.to_string());
 
                 // Only include posts that have video embeds
@@ -449,7 +480,7 @@ impl PatreonClient {
         loop {
             let mut url = format!(
                 "{PATREON_API_URL}/campaigns/{campaign_id}/posts\
-                 ?fields%5Bpost%5D=title,url,published_at,embed,post_type,post_file\
+                 ?fields%5Bpost%5D=title,url,published_at,embed_url\
                  &filter%5Bis_by_creator%5D=true&page%5Bcount%5D=20&sort=-published_at"
             );
             if let Some(ref s) = since {
@@ -475,10 +506,6 @@ impl PatreonClient {
                         continue;
                     }
                     let attrs = item.get("attributes");
-                    let post_type = attrs
-                        .and_then(|a| a.get("post_type"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
                     let title = attrs
                         .and_then(|a| a.get("title"))
                         .and_then(|v| v.as_str())
@@ -497,35 +524,19 @@ impl PatreonClient {
                                 .ok()
                                 .map(|dt| dt.with_timezone(&chrono::Utc))
                         });
-                    let direct_file = attrs
-                        .and_then(|a| a.get("post_file"))
-                        .and_then(|f| f.get("url"))
-                        .and_then(|v| v.as_str())
-                        .map(String::from);
                     let embed_url = attrs
-                        .and_then(|a| a.get("embed"))
-                        .and_then(|e| e.get("url"))
+                        .and_then(|a| a.get("embed_url"))
                         .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
                         .map(String::from);
 
-                    // Pick something downloadable. Prefer direct file, fall back to embed,
-                    // last resort the post page (yt-dlp's patreon extractor handles it).
-                    let download_url = direct_file
-                        .or(embed_url)
-                        .unwrap_or_else(|| post_url.clone());
-
-                    let is_video_like = matches!(
-                        post_type,
-                        "video_external_file"
-                            | "video_embed"
-                            | "audio_file"
-                            | "podcast"
-                            | "video_file"
-                            | "audio_embed"
-                    );
-                    if !is_video_like {
+                    // A post with an embed_url is a video/audio embed. Prefer
+                    // the embed; fall back to the post page (yt-dlp's Patreon
+                    // extractor handles it with the user's cookies).
+                    if embed_url.is_none() {
                         continue;
                     }
+                    let download_url = embed_url.unwrap_or_else(|| post_url.clone());
 
                     out.push(VodEntry {
                         id,
