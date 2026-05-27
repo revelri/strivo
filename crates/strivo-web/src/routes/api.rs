@@ -530,6 +530,41 @@ async fn poll_now(headers: HeaderMap, State(state): State<AppState>) -> impl Int
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct PollIntervalPayload {
+    secs: u64,
+}
+
+/// `POST /api/v1/settings/poll_interval` — persist a new channel-poll interval
+/// to config.toml AND apply it live to the running daemon (item 14b). Clamped
+/// to a 15s floor (matching the monitor).
+async fn set_poll_interval(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<PollIntervalPayload>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let secs = body.secs.max(15);
+    // Persist to config.toml so the change survives a restart.
+    match strivo_core::config::AppConfig::load(None) {
+        Ok(mut cfg) => {
+            cfg.poll_interval_secs = secs;
+            let path = cfg.config_path.clone();
+            if let Err(e) = cfg.save(path.as_deref()) {
+                return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+            }
+        }
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    }
+    // Apply live to the running monitor.
+    match state.ipc.send_command(ClientMessage::SetPollInterval(secs)).await {
+        Ok(()) => (StatusCode::ACCEPTED, Json(json!({"poll_interval_secs": secs}))).into_response(),
+        Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
+    }
+}
+
 /// Numeric severity for a `tracing` level token, higher = more severe.
 fn level_rank(level: &str) -> u8 {
     match level.to_ascii_uppercase().as_str() {
@@ -1144,6 +1179,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/schedule", get(schedule))
         .route("/api/v1/settings", get(settings))
         .route("/api/v1/poll_now", post(poll_now))
+        .route("/api/v1/settings/poll_interval", post(set_poll_interval))
         .route("/api/v1/logs", get(logs))
         .route("/api/v1/history", get(history))
         .route("/api/v1/backup", post(backup_create))

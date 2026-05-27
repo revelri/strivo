@@ -51,6 +51,8 @@ const API = {
   healthChecks: () => API._fetch("/health/checks"),
   logs: (level, lines = 300) =>
     API._fetch(`/logs?level=${encodeURIComponent(level || "trace")}&lines=${lines}`),
+  setPollInterval: (secs) =>
+    API._fetch("/settings/poll_interval", { method: "POST", body: { secs } }),
   backupCreate: () => API._fetch("/backup", { method: "POST" }),
   backups: () => API._fetch("/backups"),
   backupRestore: (name) =>
@@ -1933,7 +1935,12 @@ async function renderSystem() {
         <div class="task-row">
           <div class="task-info">
             <span class="task-name">Channel poll</span>
-            <span class="task-cadence">every ${settings ? settings.poll_interval_secs : "?"}s</span>
+            <span class="task-cadence">every
+              <input id="poll-interval" type="number" min="15" step="5"
+                     value="${settings ? settings.poll_interval_secs : 60}"
+                     aria-label="Poll interval seconds" /> s
+              <button id="poll-interval-save" class="sm" title="Apply poll interval">Save</button>
+            </span>
           </div>
           <button id="task-poll-now" class="sm" title="Run the channel poll now">↻ Run now</button>
         </div>
@@ -1974,6 +1981,15 @@ async function renderSystem() {
     } finally {
       btn.disabled = false;
     }
+  });
+  // Live-editable poll interval (item 14b).
+  document.getElementById("poll-interval-save")?.addEventListener("click", async (e) => {
+    const input = document.getElementById("poll-interval");
+    const secs = Math.max(15, parseInt(input?.value, 10) || 60);
+    await withBusy(e.currentTarget, "Saving…", async () => {
+      const r = await API.setPollInterval(secs);
+      Toast.success(`Poll interval set to ${r.poll_interval_secs}s`);
+    }).catch((err) => Toast.error(`Failed: ${err.message}`));
   });
   // Backup/restore (item 16).
   document.getElementById("backup-now")?.addEventListener("click", async (e) => {

@@ -90,6 +90,9 @@ test("system page renders health + tasks", async ({ page }) => {
   await expect(page.locator(".restore-backup").first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Blocklist" })).toBeVisible();
   await expect(page.locator(".unblock").first()).toBeVisible();
+  // Live-editable poll interval (item 14b).
+  await expect(page.locator("#poll-interval")).toHaveValue("60");
+  await expect(page.locator("#poll-interval-save")).toBeVisible();
 });
 
 test("logs page renders with level selector and lines", async ({ page }) => {

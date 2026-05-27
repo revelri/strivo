@@ -30,6 +30,11 @@ pub struct ChannelMonitor {
     auth_notify: Arc<tokio::sync::Notify>,
     /// Notified when a client requests an immediate re-poll
     poll_notify: Arc<tokio::sync::Notify>,
+    /// Live channel-poll interval in seconds (item 14b) — updated by
+    /// `SetPollInterval` and read when the monitor (re)builds its timer.
+    poll_interval_secs: Arc<std::sync::atomic::AtomicU64>,
+    /// Notified when `poll_interval_secs` changes so the loop rebuilds its timer.
+    interval_notify: Arc<tokio::sync::Notify>,
     /// Read-only persistence handle for capture-profile cutoff checks
     /// (roadmap item 21). `None` when the daemon has no DB.
     persist: Option<Arc<crate::recording::persist::PersistDb>>,
@@ -43,6 +48,7 @@ impl ChannelMonitor {
         recording_tx: mpsc::UnboundedSender<RecordingCommand>,
         cancel: CancellationToken,
     ) -> Self {
+        let interval_secs = config.poll_interval_secs;
         Self {
             platforms,
             config,
@@ -54,8 +60,16 @@ impl ChannelMonitor {
             last_channels: HashMap::new(),
             auth_notify: Arc::new(tokio::sync::Notify::new()),
             poll_notify: Arc::new(tokio::sync::Notify::new()),
+            poll_interval_secs: Arc::new(std::sync::atomic::AtomicU64::new(interval_secs)),
+            interval_notify: Arc::new(tokio::sync::Notify::new()),
             persist: None,
         }
+    }
+
+    /// Handles to live-update the poll interval (item 14b): the daemon stores
+    /// the new value in the atomic and fires the notify to rebuild the timer.
+    pub fn interval_controls(&self) -> (Arc<std::sync::atomic::AtomicU64>, Arc<tokio::sync::Notify>) {
+        (self.poll_interval_secs.clone(), self.interval_notify.clone())
     }
 
     /// Set an external auth notify (shared with auth tasks)
@@ -74,8 +88,6 @@ impl ChannelMonitor {
     }
 
     pub async fn run(mut self) {
-        let poll_interval = std::time::Duration::from_secs(self.config.poll_interval_secs.max(15));
-
         // Wait for first platform auth or timeout before initial poll.
         // If the timeout fires before any platform has authenticated we
         // wait again — emitting an unauthenticated poll just produces a
@@ -112,12 +124,21 @@ impl ChannelMonitor {
                 .send(AppEvent::error(format!("Poll error: {e}")));
         }
 
-        let mut interval = tokio::time::interval(poll_interval);
+        let interval_atomic = self.poll_interval_secs.clone();
+        let cur_secs = || interval_atomic.load(std::sync::atomic::Ordering::Relaxed).max(15);
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(cur_secs()));
         // Consume the first tick (it fires immediately)
         interval.tick().await;
 
         loop {
             tokio::select! {
+                _ = self.interval_notify.notified() => {
+                    // poll_interval changed live (item 14b) — rebuild the timer.
+                    let secs = cur_secs();
+                    tracing::info!("Poll interval updated to {secs}s");
+                    interval = tokio::time::interval(std::time::Duration::from_secs(secs));
+                    interval.tick().await;
+                }
                 _ = interval.tick() => {
                     if let Err(e) = self.poll_all().await {
                         tracing::error!("Monitor poll error: {e}");

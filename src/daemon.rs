@@ -396,6 +396,10 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
     let bulk_tx = crate::recording::bulk::spawn(config.clone(), event_tx.clone());
 
     // Spawn channel monitor
+    let mut interval_ctl: Option<(
+        std::sync::Arc<std::sync::atomic::AtomicU64>,
+        std::sync::Arc<tokio::sync::Notify>,
+    )> = None;
     let poll_notify = if !platforms.is_empty() {
         let mut monitor = ChannelMonitor::new(
             platforms.clone(),
@@ -409,6 +413,7 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
             monitor.set_persist(db.clone());
         }
         let poll_notify = monitor.poll_notify();
+        interval_ctl = Some(monitor.interval_controls());
         tokio::spawn(async move {
             monitor.run().await;
         });
@@ -533,6 +538,7 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
                         let rec_tx = recording_tx.clone();
                         let bulk_tx_ref = Some(bulk_tx.clone());
                         let poll_notify = poll_notify.clone();
+                        let interval_ctl = interval_ctl.clone();
                         let cancel_ref = cancel.clone();
 
                         let client_config = config.clone();
@@ -553,6 +559,7 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
                                 client_recordings,
                                 client_event_tx,
                                 poll_notify,
+                                interval_ctl,
                                 cancel_ref,
                             ).await {
                                 tracing::debug!("Client disconnected: {e}");
@@ -639,6 +646,7 @@ async fn handle_client(
     recordings: HashMap<Uuid, RecordingJob>,
     event_tx: mpsc::UnboundedSender<AppEvent>,
     poll_notify: Option<Arc<tokio::sync::Notify>>,
+    interval_ctl: Option<(Arc<std::sync::atomic::AtomicU64>, Arc<tokio::sync::Notify>)>,
     cancel: CancellationToken,
 ) -> Result<()> {
     let (reader, mut writer) = tokio::io::split(stream);
@@ -722,6 +730,17 @@ async fn handle_client(
             ClientMessage::PollNow => {
                 if let Some(ref notify) = poll_notify {
                     notify.notify_one();
+                }
+            }
+            ClientMessage::SetPollInterval(secs) => {
+                // Live-update the monitor's poll cadence (item 14b). The web
+                // endpoint already persisted it to config.toml; here we just
+                // apply it to the running monitor.
+                let secs = secs.max(15);
+                if let Some((ref atomic, ref notify)) = interval_ctl {
+                    atomic.store(secs, std::sync::atomic::Ordering::Relaxed);
+                    notify.notify_one();
+                    tracing::info!("Applied live poll interval: {secs}s");
                 }
             }
             ClientMessage::Shutdown => {

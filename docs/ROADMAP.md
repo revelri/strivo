@@ -91,11 +91,13 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   scheduled recordings listed with cron/duration; active recordings link to
   the dashboard Stop. (Live interval editing split to item 14b — needs daemon
   config hot-reload since the monitor reads poll_interval once at startup.)
-- [ ] **14b. Live-editable poll interval** `[E]` — daemon config hot-reload:
-  monitor re-reads `poll_interval_secs` on a `SetPollInterval` IPC message +
-  a settings-write endpoint, so the System Tasks interval becomes editable
-  without a restart. (Deferred from 14 to avoid a config-write that silently
-  needs a restart.)
+- [x] **14b. Live-editable poll interval** `[E]` — daemon config hot-reload:
+  the monitor holds the interval in an `Arc<AtomicU64>` and rebuilds its timer
+  on an `interval_notify`; `ClientMessage::SetPollInterval` updates it live;
+  `POST /api/v1/settings/poll_interval` persists to config.toml AND applies
+  live; the System Tasks card interval is now an editable input + Save. First
+  real config-write from the webui (unblocks the deferred settings-write bits
+  of items 14/20/21).
 - [x] **15. Logs viewer polish** `[E]` — daemon logs to rolling/capped files
   (daily rotation, keep 7 via tracing-appender); `GET /api/v1/logs?level=&lines=`
   tails the newest file with min-level filtering; SPA Logs route (📜) renders

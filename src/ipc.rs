@@ -17,6 +17,9 @@ pub enum ClientMessage {
     Recording(RecordingCommand),
     /// Trigger immediate channel poll
     PollNow,
+    /// Live-update the channel-poll interval without a restart (item 14b).
+    /// Seconds; the daemon clamps to a sane minimum.
+    SetPollInterval(u64),
     /// Graceful daemon shutdown
     Shutdown,
     /// Dispatch an actions-popup verb to a plugin via the host
