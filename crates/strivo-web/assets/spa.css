@@ -4,39 +4,44 @@
  * overlay #3B3D56, fg #E8E8E2, primary #00E5FF (cyan),
  * secondary #FFB020 (amber), live #39FF7F, recording #FF4444. */
 
-/* ElegantFin-derived theme (see DESIGN.md "Web UI Theme" + docs/reference).
-   Ported as literally as possible: ElegantFin tokens + the user's near-black
-   YouTube-style gradient override. */
+/* JellySkin-derived theme (prayag17/JellySkin): deep navy gradient, purple→cyan
+   accent gradient, heavy frosted glass, Montserrat. Ported from its SCSS
+   variables. */
+@import url("https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap");
 :root {
-  /* Background = user's gradient override; --bg is the darker base point. */
-  --bg: #050505;
-  --bg-lighter: #101010;
-  --bg-gradient: linear-gradient(180deg, #101010 0%, #050505 100%);
-  /* Glass card/panel surface over the gradient (ElegantFin uses #1d2635-ish). */
-  --surface: rgba(29, 38, 53, 0.85);
-  --overlay: rgba(55, 65, 81, 0.5);
-  --border: hsl(214, 13%, 32%);
-  --border-light: hsla(0, 0%, 100%, 0.2);
-  --fg: rgb(209, 213, 219);
-  --muted: rgb(156, 163, 175);
-  --dim: hsl(214, 13%, 45%);
-  /* ElegantFin accent (activeColor). */
-  --primary: rgb(119, 91, 244);
-  --accent: rgb(119, 91, 244);
-  --submit: rgb(61, 54, 178);
+  /* Navy background gradient (JellySkin $background-darker → $background-dark). */
+  --bg: hsl(208, 89%, 5%);
+  --bg-lighter: hsl(208, 89%, 20%);
+  --bg-gradient: linear-gradient(45deg, hsl(208, 89%, 5%), hsl(208, 89%, 20%));
+  /* Translucent navy glass — the heavy --blur darkens/saturates it. */
+  --surface: hsla(208, 60%, 13%, 0.5);
+  --overlay: hsla(208, 50%, 30%, 0.4);
+  --border: hsla(0, 0%, 100%, 0.12);
+  --border-light: hsla(0, 0%, 100%, 0.18);
+  --fg: #eef3f8;
+  --muted: hsl(208, 22%, 72%);
+  --dim: hsl(208, 16%, 55%);
+  /* JellySkin accents: purple (accent1) + cyan/blue (accent2) + the signature
+     130deg gradient used for primary actions/icons. */
+  --primary: hsl(285, 46%, 56%);
+  --accent: hsl(285, 46%, 56%);
+  --accent2: hsl(195, 100%, 43%);
+  --gradient: linear-gradient(130deg, hsl(285, 46%, 56%), hsl(195, 100%, 43%));
+  --submit: hsl(285, 46%, 56%);
   --secondary: #f5a623;
-  --live: rgb(50, 167, 105);
-  --recording: rgb(217, 84, 84);
+  --live: hsl(150, 60%, 50%);
+  --recording: hsl(0, 70%, 60%);
   --twitch: #9146ff;
   --youtube: #ff0000;
   --patreon: #ff424d;
-  /* Radii / blur / shadow (ElegantFin). */
-  --radius-lg: 1em;
-  --radius: 0.5em;
-  --radius-sm: 0.375em;
-  --blur: blur(10px);
-  --shadow: 0.1em 0.1em 0.15em hsla(0, 0%, 0%, 0.3);
-  --font: "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+  /* Rounding (JellySkin $rounding-*). */
+  --radius-lg: 20px;
+  --radius: 10px;
+  --radius-sm: 8px;
+  /* Frosted glass: JellySkin's blur 25px + saturate/brightness/contrast. */
+  --blur: blur(25px) saturate(110%) brightness(50%) contrast(110%);
+  --shadow: 0 8px 24px hsla(208, 89%, 3%, 0.55);
+  --font: "Montserrat", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
@@ -83,14 +88,13 @@ button:hover {
   border-color: var(--primary);
 }
 button.primary {
-  background: var(--submit);
+  background: var(--gradient);
   color: #fff;
-  border-color: var(--primary);
+  border: none;
   font-weight: 600;
 }
 button.primary:hover {
-  background: var(--primary);
-  filter: brightness(1.05);
+  filter: brightness(1.1);
 }
 button.danger {
   border-color: var(--recording);
@@ -189,9 +193,12 @@ textarea:focus {
   gap: 1rem;
 }
 .topbar .brand {
-  font-weight: 700;
+  font-weight: 800;
   font-size: 1.25rem;
-  color: var(--primary);
+  background: var(--gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
   text-decoration: none;
   cursor: pointer;
 }
@@ -432,10 +439,11 @@ th[data-sort]:hover {
 }
 .page-title::before {
   content: "";
-  height: 2px;
+  height: 3px;
   width: 1.3em;
   margin-right: 0.5em;
-  background: #fff;
+  background: var(--gradient);
+  border-radius: 3px;
   flex: none;
 }
 .page-subtitle {
