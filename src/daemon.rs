@@ -422,6 +422,48 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
         None
     };
 
+    // Twitch EventSub (real-time stream.online → immediate poll). Reuses the
+    // monitor's poll_notify so the proven auto-record path runs within seconds
+    // of a broadcast start, instead of waiting up to a poll interval.
+    if let (Some(th), Some(tcfg), Some(pn)) =
+        (twitch_handle.clone(), config.twitch.clone(), poll_notify.clone())
+    {
+        let client_id = tcfg.client_id.clone();
+        let cancel_es = cancel.clone();
+        tokio::spawn(async move {
+            // Wait for Twitch auth (token present) before subscribing.
+            let token_arc = loop {
+                if cancel_es.is_cancelled() {
+                    return;
+                }
+                let arc = th.read().await.access_token_arc();
+                if arc.read().await.is_some() {
+                    break arc;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+            };
+            let ids: Vec<String> = match th.read().await.fetch_followed_channels().await {
+                Ok(chs) => chs.into_iter().map(|c| c.id).collect(),
+                Err(e) => {
+                    tracing::warn!("twitch eventsub: could not list follows: {e:#}");
+                    return;
+                }
+            };
+            if ids.is_empty() {
+                return;
+            }
+            crate::platform::twitch_eventsub::EventSubClient {
+                client_id,
+                token: token_arc,
+                channel_ids: ids,
+                poll_notify: pn,
+                cancel: cancel_es,
+            }
+            .run()
+            .await;
+        });
+    }
+
     // Spawn schedule manager
     if !config.schedule.is_empty() {
         let sched_config = config.clone();

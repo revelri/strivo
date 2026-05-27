@@ -1,5 +1,6 @@
 pub mod patreon;
 pub mod twitch;
+pub mod twitch_eventsub;
 pub mod youtube;
 
 use chrono::{DateTime, Utc};

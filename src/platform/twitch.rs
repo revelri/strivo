@@ -125,6 +125,12 @@ impl TwitchPlatform {
         self.event_tx = Some(tx);
     }
 
+    /// Shared handle to the current access token, for the EventSub client to
+    /// authorize subscription creation with the live (refreshed) token.
+    pub fn access_token_arc(&self) -> Arc<RwLock<Option<String>>> {
+        self.access_token.clone()
+    }
+
     pub async fn load_stored_tokens(&self) -> Result<bool> {
         if let Some(token) = credentials::get_secret("twitch_access_token")? {
             *self.access_token.write().await = Some(token);
