@@ -142,28 +142,45 @@ impl EventSubClient {
                 "condition": { "broadcaster_user_id": id },
                 "transport": { "method": "websocket", "session_id": session_id },
             });
-            match client
-                .post(SUB_URL)
-                .header("Authorization", format!("Bearer {token}"))
-                .header("Client-Id", &self.client_id)
-                .json(&body)
-                .send()
-                .await
-            {
-                Ok(r) if r.status().is_success() => ok += 1,
-                Ok(r) => {
-                    fail += 1;
-                    if fail <= 3 {
-                        tracing::warn!("twitch eventsub: subscribe {id} -> HTTP {}", r.status());
+            // Twitch rate-limits subscription creation; pace the calls and
+            // retry once on 429 so a large follow list doesn't get dropped.
+            let mut attempt = 0;
+            loop {
+                attempt += 1;
+                let resp = client
+                    .post(SUB_URL)
+                    .header("Authorization", format!("Bearer {token}"))
+                    .header("Client-Id", &self.client_id)
+                    .json(&body)
+                    .send()
+                    .await;
+                match resp {
+                    Ok(r) if r.status().is_success() => {
+                        ok += 1;
+                        break;
                     }
-                }
-                Err(e) => {
-                    fail += 1;
-                    if fail <= 3 {
-                        tracing::warn!("twitch eventsub: subscribe {id} failed: {e}");
+                    Ok(r) if r.status().as_u16() == 429 && attempt < 4 => {
+                        tokio::time::sleep(Duration::from_millis(800 * attempt)).await;
+                        continue;
+                    }
+                    Ok(r) => {
+                        fail += 1;
+                        if fail <= 3 {
+                            tracing::warn!("twitch eventsub: subscribe {id} -> HTTP {}", r.status());
+                        }
+                        break;
+                    }
+                    Err(e) => {
+                        fail += 1;
+                        if fail <= 3 {
+                            tracing::warn!("twitch eventsub: subscribe {id} failed: {e}");
+                        }
+                        break;
                     }
                 }
             }
+            // Gentle pacing between channels to stay under the create limit.
+            tokio::time::sleep(Duration::from_millis(120)).await;
         }
         tracing::info!(
             "twitch eventsub: subscribed stream.online for {ok} channels ({fail} failed)"
