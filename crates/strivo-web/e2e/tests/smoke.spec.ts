@@ -116,8 +116,8 @@ test("schedule page renders the upcoming agenda", async ({ page }) => {
 test("history page renders durable jobs from the DB", async ({ page }) => {
   await page.goto("/app#/history");
   await expect(page.getByRole("heading", { name: "History" })).toBeVisible();
-  await expect(page.locator(".recordings-table")).toContainText("LilAggy");
-  await expect(page.locator(".recordings-table")).toContainText("Finished");
+  await expect(page.locator(".media-list")).toContainText("LilAggy");
+  await expect(page.locator(".media-pill").first()).toContainText("Finished");
 });
 
 test("add-channel wizard opens to phase 1 search", async ({ page }) => {

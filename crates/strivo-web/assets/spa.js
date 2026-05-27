@@ -1086,6 +1086,22 @@ function paintChannelVods(channelId, platform) {
   if (uploadsEl) uploadsEl.innerHTML = vodSectionHtml("Recent uploads", uploads);
 }
 
+// Resolve a VOD/stream thumbnail URL, substituting Twitch's templated
+// dimension placeholders ({width}/%{width}). VOD thumbnails are static.
+function vodThumb(url) {
+  if (!url) return null;
+  return url
+    .replace(/%?\{width\}/g, "440")
+    .replace(/%?\{height\}/g, "248");
+}
+// Compact duration from a serde std::time::Duration ({secs, nanos}) or number.
+function fmtDur(d) {
+  const s = typeof d === "number" ? d : d && d.secs;
+  if (!s || s <= 0) return "";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
 function vodSectionHtml(title, vods) {
   if (vods === null) {
     return `<h2 class="cd-section-title">${title}</h2><div class="empty sm">Loading…</div>`;
@@ -1093,17 +1109,28 @@ function vodSectionHtml(title, vods) {
   if (vods.length === 0) {
     return `<h2 class="cd-section-title">${title}</h2><div class="empty sm">None</div>`;
   }
+  // Jellyseerr/*arr-style horizontal media pills: thumbnail + rich info block.
   const rows = vods
-    .map(
-      (v) => `
-    <a class="vod-row" href="${/^https?:\/\//i.test(v.url || "") ? escape(v.url) : "#"}" target="_blank" rel="noopener">
-      <span class="vod-date">${escape((v.published_at || "").slice(0, 10))}</span>
-      <span class="vod-title">${escape(v.title)}</span>
-    </a>`,
-    )
+    .map((v) => {
+      const href = /^https?:\/\//i.test(v.url || "") ? escape(v.url) : "#";
+      const thumb = vodThumb(v.thumbnail_url);
+      const date = (v.published_at || "").slice(0, 10);
+      const dur = fmtDur(v.duration);
+      const live = v.kind === "Live" || v.kind === "live";
+      const meta = [date, dur].filter(Boolean).map(escape).join(" · ");
+      return `
+    <a class="media-pill" href="${href}" target="_blank" rel="noopener">
+      <div class="mp-thumb">${thumb ? `<img class="mp-thumb-img" loading="lazy" alt="" src="${escape(thumb)}" onerror="this.remove()">` : ""}</div>
+      <div class="mp-info">
+        <div class="mp-title">${escape(v.title)}</div>
+        <div class="mp-sub">${meta}</div>
+      </div>
+      <div class="mp-meta">${live ? '<span class="mp-badge live">LIVE VOD</span>' : '<span class="mp-badge">Upload</span>'}</div>
+    </a>`;
+    })
     .join("");
   return `<h2 class="cd-section-title">${title} <span class="dash-count">${vods.length}</span></h2>
-    <div class="vod-list">${rows}</div>`;
+    <div class="media-list">${rows}</div>`;
 }
 
 // Patreon channel detail: render cached posts with a pull action.
@@ -2238,27 +2265,28 @@ async function renderHistory() {
   const body = rows.length
     ? rows
         .map((j) => {
-          const when = j.started_at
-            ? new Date(j.started_at).toLocaleString()
-            : "—";
+          const when = j.started_at ? new Date(j.started_at).toLocaleString() : "—";
+          const size = formatBytes(j.bytes_written || 0);
           return `
-      <tr>
-        <td><span class="state-pill ${stateClassName(j.state)}">${escape(stateLabel(j.state))}</span></td>
-        <td>${escape(j.channel_name || "")}</td>
-        <td><div class="rec-title-cell">${recThumb(j)}<span>${escape(j.stream_title || "")}</span></div></td>
-        <td>${escape(when)}</td>
-        <td>${formatBytes(j.bytes_written || 0)}</td>
-      </tr>`;
+      <div class="media-pill">
+        <div class="mp-thumb"><img class="mp-thumb-img" loading="lazy" alt=""
+          src="/api/v1/recordings/${encodeURIComponent(j.id)}/thumb" onerror="this.remove()"></div>
+        <div class="mp-info">
+          <div class="mp-title">${escape(j.stream_title || "(no title)")}</div>
+          <div class="mp-sub">${escape(j.channel_name || "")} · ${escape(when)}</div>
+        </div>
+        <div class="mp-meta">
+          <span class="state-pill ${stateClassName(j.state)}">${escape(stateLabel(j.state))}</span>
+          <span class="mp-size">${size}</span>
+        </div>
+      </div>`;
         })
         .join("")
-    : `<tr><td colspan="5" class="empty sm">No recording history yet.</td></tr>`;
+    : '<div class="empty">No recording history yet.</div>';
   root.innerHTML = chrome(`
     <h1 class="page-title">History</h1>
     <p class="page-subtitle">Durable record of every capture (survives restarts) · ${rows.length} entries</p>
-    <table class="recordings-table">
-      <thead><tr><th>State</th><th>Channel</th><th>Title</th><th>Started</th><th>Size</th></tr></thead>
-      <tbody>${body}</tbody>
-    </table>
+    <div class="media-list">${body}</div>
   `);
   setupChromeHandlers();
 }
