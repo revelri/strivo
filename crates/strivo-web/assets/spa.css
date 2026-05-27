@@ -920,6 +920,15 @@ button.busy::after {
   vertical-align: -1px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  button.busy::after { animation: none; }
+}
+/* Inline field validation (item 25). */
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
+  border-color: var(--recording);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--recording) 25%, transparent);
+}
 
 /* ── Live preview hero (item 4) ── */
 .cd-preview {

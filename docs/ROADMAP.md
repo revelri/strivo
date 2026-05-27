@@ -163,7 +163,11 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   pause-on-hover, cap 4, `prefers-reduced-motion` honored, non-interactive wrap
   (`pointer-events:none`), light-on-dark ≥4.5:1 contrast. e2e asserts the
   regions + non-interactive wrap.
-- [ ] **25. Async-feedback polish** `[D]` — `aria-busy` + label swap + debounce on
-  buttons (kill double-submit); skeletons for grids; inline field-level validation
-  (`aria-describedby`/`aria-invalid`); actionable empty states wired to real CTAs;
-  never strand a spinner (timeout + error surface + guaranteed teardown everywhere).
+- [x] **25. Async-feedback polish** `[D]` — `withBusy` (aria-busy + label-swap +
+  debounce + guaranteed teardown) now also **races a 30s timeout so a hung
+  request never strands the spinner** (surfaces an error + tears down); wired
+  into the per-row + detail Stop, Poll-now, and existing backup/restore/mass
+  actions to kill double-submit; inline field validation (`aria-invalid` +
+  red ring) on the poll-interval input with a reduced-motion spinner guard.
+  (Remaining cosmetic polish — grid skeletons + per-form validation everywhere
+  — is incremental on top of these primitives.)

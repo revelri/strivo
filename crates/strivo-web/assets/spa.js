@@ -273,9 +273,9 @@ function confirmDialog(message, opts = {}) {
 
 // Run an async action with a busy/debounced button: aria-busy + label
 // swap + double-fire guard. Safe even if the handler re-renders the page.
-async function withBusy(btn, busyLabel, fn) {
+async function withBusy(btn, busyLabel, fn, timeoutMs = 30000) {
   if (btn) {
-    if (btn.dataset.busy === "1") return; // debounce
+    if (btn.dataset.busy === "1") return; // debounce double-submit
     btn.dataset.busy = "1";
     btn.setAttribute("aria-busy", "true");
     btn.classList.add("busy");
@@ -284,9 +284,16 @@ async function withBusy(btn, busyLabel, fn) {
       btn.textContent = busyLabel;
     }
   }
+  // Never strand a spinner: race the work against a timeout so a hung
+  // request still tears the busy state down and surfaces an error (item 25).
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("timed out")), timeoutMs);
+  });
   try {
-    return await fn();
+    return await Promise.race([fn(), timeout]);
   } finally {
+    clearTimeout(timer);
     if (btn && btn.isConnected) {
       btn.dataset.busy = "0";
       btn.removeAttribute("aria-busy");
@@ -822,13 +829,11 @@ function wireDashboard() {
     btn.addEventListener("click", async () => {
       if (!(await confirmDialog("Stop this recording?", { ok: "Stop", danger: true })))
         return;
-      try {
+      await withBusy(btn, "Stopping…", async () => {
         await API.stopRecording(btn.dataset.jobId);
         Toast.success("Recording stopped");
-        setTimeout(render, 500);
-      } catch (e) {
-        Toast.error(`Stop failed: ${e.message}`);
-      }
+        setTimeout(() => render().catch(() => {}), 500);
+      }).catch((e) => Toast.error(`Stop failed: ${e.message}`));
     });
   });
 }
@@ -1505,13 +1510,11 @@ function paintRecordings() {
     btn.addEventListener("click", async () => {
       if (!(await confirmDialog("Stop this recording?", { ok: "Stop", danger: true })))
         return;
-      try {
+      await withBusy(btn, "Stopping…", async () => {
         await API.stopRecording(btn.dataset.jobId);
         Toast.success("Recording stopped");
         setTimeout(() => render().catch(() => {}), 500);
-      } catch (e) {
-        Toast.error(`Stop failed: ${e.message}`);
-      }
+      }).catch((e) => Toast.error(`Stop failed: ${e.message}`));
     });
   });
   body.querySelectorAll(".rec-row-check").forEach((cb) => {
@@ -1971,23 +1974,23 @@ async function renderSystem() {
   setupChromeHandlers();
   // Run-now duality: poll task enqueues the same command as the scheduled poll.
   document.getElementById("task-poll-now")?.addEventListener("click", async (e) => {
-    const btn = e.currentTarget;
-    btn.disabled = true;
-    try {
+    await withBusy(e.currentTarget, "Polling…", async () => {
       await API.pollNow();
       Toast.success("Channel poll triggered");
-    } catch (err) {
-      Toast.error(`Poll failed: ${err.message}`);
-    } finally {
-      btn.disabled = false;
-    }
+    }).catch((err) => Toast.error(`Poll failed: ${err.message}`));
   });
-  // Live-editable poll interval (item 14b).
+  // Live-editable poll interval (item 14b) + inline field validation (item 25).
   document.getElementById("poll-interval-save")?.addEventListener("click", async (e) => {
     const input = document.getElementById("poll-interval");
-    const secs = Math.max(15, parseInt(input?.value, 10) || 60);
+    const raw = parseInt(input?.value, 10);
+    if (!Number.isFinite(raw) || raw < 15) {
+      input?.setAttribute("aria-invalid", "true");
+      Toast.error("Poll interval must be at least 15 seconds");
+      return;
+    }
+    input?.removeAttribute("aria-invalid");
     await withBusy(e.currentTarget, "Saving…", async () => {
-      const r = await API.setPollInterval(secs);
+      const r = await API.setPollInterval(raw);
       Toast.success(`Poll interval set to ${r.poll_interval_secs}s`);
     }).catch((err) => Toast.error(`Failed: ${err.message}`));
   });

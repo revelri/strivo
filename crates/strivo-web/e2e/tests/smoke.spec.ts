@@ -93,6 +93,10 @@ test("system page renders health + tasks", async ({ page }) => {
   // Live-editable poll interval (item 14b).
   await expect(page.locator("#poll-interval")).toHaveValue("60");
   await expect(page.locator("#poll-interval-save")).toBeVisible();
+  // Inline field validation (item 25): below the 15s floor flags aria-invalid.
+  await page.locator("#poll-interval").fill("5");
+  await page.locator("#poll-interval-save").click();
+  await expect(page.locator("#poll-interval")).toHaveAttribute("aria-invalid", "true");
 });
 
 test("logs page renders with level selector and lines", async ({ page }) => {
