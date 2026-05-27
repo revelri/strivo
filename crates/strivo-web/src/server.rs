@@ -73,7 +73,7 @@ pub async fn serve(cfg: ServeConfig) -> Result<()> {
     // recordings, schedule, settings, logs, system) are retired — they
     // served the old server-rendered UI at /, /channels, … and were the
     // reason the bare root showed the pre-redesign dashboard.
-    let app = Router::new()
+    let guarded = Router::new()
         .merge(routes::events::router())
         .merge(routes::api::router())
         .merge(routes::login::router())
@@ -82,7 +82,13 @@ pub async fn serve(cfg: ServeConfig) -> Result<()> {
             state.clone(),
             routes::login::session_refresh,
         ))
-        .layer(middleware::from_fn(csrf::csrf_guard))
+        .layer(middleware::from_fn(csrf::csrf_guard));
+
+    // The YouTube WebSub callback is merged AFTER the auth/CSRF layers so it
+    // stays public — Google's PubSubHubbub hub sends no API key or CSRF token.
+    // It exposes only a verification echo and a poll-trigger, no data.
+    let app = guarded
+        .merge(routes::websub::router())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 

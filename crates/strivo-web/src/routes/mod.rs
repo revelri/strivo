@@ -7,3 +7,4 @@ pub mod login;
 // legacy htmx page routers (channels/dashboard/logs/schedule/settings/
 // system) were retired in item 10 — the SPA + /api/v1 supersede them.
 pub mod recordings;
+pub mod websub;

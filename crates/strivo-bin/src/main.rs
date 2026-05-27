@@ -953,6 +953,7 @@ fn config_set(cfg: &mut config::AppConfig, key: &str, value: &str) -> Result<()>
                     client_id: value.to_string(),
                     client_secret: String::new(),
                     cookies_path: None,
+                    websub_callback_url: None,
                 });
             }
         }
@@ -964,6 +965,7 @@ fn config_set(cfg: &mut config::AppConfig, key: &str, value: &str) -> Result<()>
                     client_id: String::new(),
                     client_secret: value.to_string(),
                     cookies_path: None,
+                    websub_callback_url: None,
                 });
             }
         }
@@ -975,6 +977,19 @@ fn config_set(cfg: &mut config::AppConfig, key: &str, value: &str) -> Result<()>
                     client_id: String::new(),
                     client_secret: String::new(),
                     cookies_path: Some(std::path::PathBuf::from(value)),
+                    websub_callback_url: None,
+                });
+            }
+        }
+        "youtube.websub_callback_url" => {
+            if let Some(ref mut yt) = cfg.youtube {
+                yt.websub_callback_url = Some(value.to_string());
+            } else {
+                cfg.youtube = Some(config::YouTubeConfig {
+                    client_id: String::new(),
+                    client_secret: String::new(),
+                    cookies_path: None,
+                    websub_callback_url: Some(value.to_string()),
                 });
             }
         }

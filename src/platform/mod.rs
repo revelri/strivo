@@ -2,6 +2,7 @@ pub mod patreon;
 pub mod twitch;
 pub mod twitch_eventsub;
 pub mod youtube;
+pub mod youtube_websub;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

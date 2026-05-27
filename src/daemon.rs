@@ -291,6 +291,7 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
     // Initialize platforms
     let mut platforms: Vec<Arc<RwLock<dyn Platform>>> = Vec::new();
     let mut twitch_handle: Option<Arc<RwLock<crate::platform::twitch::TwitchPlatform>>> = None;
+    let mut youtube_handle: Option<Arc<RwLock<crate::platform::youtube::YouTubePlatform>>> = None;
 
     if let Some(ref twitch_config) = config.twitch {
         let mut twitch = crate::platform::twitch::TwitchPlatform::new(
@@ -329,6 +330,7 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
         youtube.set_event_tx(event_tx.clone());
         let youtube = Arc::new(RwLock::new(youtube));
         platforms.push(youtube.clone() as Arc<RwLock<dyn Platform>>);
+        youtube_handle = Some(youtube.clone());
 
         let tx = event_tx.clone();
         let notify = auth_notify.clone();
@@ -487,6 +489,30 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
                 channel_ids: ids,
                 poll_notify: pn,
                 cancel: cancel_es,
+            }
+            .run()
+            .await;
+        });
+    }
+
+    // YouTube WebSub (PubSubHubbub) — Google's hub pushes new-video / live
+    // notifications to `strivo serve`'s public /yt-websub callback, which fires
+    // a PollNow over IPC. Combined with the RSS-candidate poll this gives
+    // near-real-time YouTube detection without burning Data API quota on a
+    // tight interval. Only runs when a public callback URL is configured.
+    if let (Some(yt), Some(url)) = (
+        youtube_handle.clone(),
+        config
+            .youtube
+            .as_ref()
+            .and_then(|c| c.websub_callback_url.clone()),
+    ) {
+        let cancel_ws = cancel.clone();
+        tokio::spawn(async move {
+            crate::platform::youtube_websub::WebSubClient {
+                callback_url: url,
+                youtube: yt,
+                cancel: cancel_ws,
             }
             .run()
             .await;

@@ -276,6 +276,13 @@ pub struct YouTubeConfig {
     pub client_id: String,
     pub client_secret: String,
     pub cookies_path: Option<PathBuf>,
+    /// Public HTTPS URL of the WebSub (PubSubHubbub) callback served by
+    /// `strivo serve` at `/yt-websub` (e.g. a `tailscale funnel` path). When
+    /// set, the daemon subscribes each followed channel's upload feed to
+    /// Google's hub so a new video / live broadcast triggers an immediate
+    /// poll instead of waiting for the next interval. Unset = polling only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub websub_callback_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
