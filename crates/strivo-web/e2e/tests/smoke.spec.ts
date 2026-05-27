@@ -122,6 +122,16 @@ test("add-channel wizard opens to phase 1 search", async ({ page }) => {
   await expect(page.locator("#aw-search")).toBeVisible();
 });
 
+test("ARIA toast live regions are pre-created on load", async ({ page }) => {
+  await page.goto("/app#/library");
+  // Both regions must exist before any toast fires, for reliable SR announce.
+  await expect(page.locator('.toast-region[role="status"][aria-live="polite"]')).toHaveCount(1);
+  await expect(page.locator('.toast-region[role="alert"][aria-live="assertive"]')).toHaveCount(1);
+  // The wrap must be non-interactive (pointer-events: none).
+  const pe = await page.locator(".toast-wrap").evaluate((el) => getComputedStyle(el).pointerEvents);
+  expect(pe).toBe("none");
+});
+
 test("command palette opens with Ctrl+K and navigates", async ({ page }) => {
   await page.goto("/app#/library");
   await page.keyboard.press("Control+k");

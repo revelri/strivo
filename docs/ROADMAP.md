@@ -155,9 +155,12 @@ Source tags: `[review]` = code-quality review High/Medium finding; `[F]`/`[A]`/`
   on-screen guard; Patreon thumbnail-only. (Path A self-proxied HLS playback of
   recordings + Twitch rewind deferred — needs a range-serving recording-stream
   endpoint + vendored hls.js, a separate large feature.)
-- [ ] **24. Toast + ARIA live regions** `[D]` — singleton with two pre-created regions
-  (`polite/status`, `assertive/alert`); success ≥5s, errors sticky + dismissible,
-  pause-on-hover, cap ~3–4, `prefers-reduced-motion`, 4.5:1 contrast, non-interactive.
+- [x] **24. Toast + ARIA live regions** `[D]` — singleton with two regions now
+  **pre-created at load** (`polite/status`, `assertive/alert`) so SRs register
+  them before content is injected; success 5s, errors sticky + dismissible,
+  pause-on-hover, cap 4, `prefers-reduced-motion` honored, non-interactive wrap
+  (`pointer-events:none`), light-on-dark ≥4.5:1 contrast. e2e asserts the
+  regions + non-interactive wrap.
 - [ ] **25. Async-feedback polish** `[D]` — `aria-busy` + label swap + debounce on
   buttons (kill double-submit); skeletons for grids; inline field-level validation
   (`aria-describedby`/`aria-invalid`); actionable empty states wired to real CTAs;

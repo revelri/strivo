@@ -183,7 +183,7 @@ function isInProgress(state) {
 const Toast = (() => {
   let polite, assertive;
   function ensure() {
-    if (polite) return;
+    if (polite && document.body.contains(polite)) return;
     const wrap = document.createElement("div");
     wrap.className = "toast-wrap";
     const mk = (role, live) => {
@@ -198,6 +198,10 @@ const Toast = (() => {
     wrap.append(assertive, polite);
     document.body.appendChild(wrap);
   }
+  // Pre-create the live regions at load so screen readers register them
+  // BEFORE any message is injected — injecting a region and its content in
+  // the same frame is unreliably announced (item 24).
+  if (typeof document !== "undefined" && document.body) ensure();
   function show(kind, msg, sticky) {
     ensure();
     const region = kind === "error" ? assertive : polite;
