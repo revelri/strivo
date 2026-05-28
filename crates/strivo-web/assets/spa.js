@@ -27,9 +27,35 @@ const API = {
       route("login");
       throw new Error("unauthorized");
     }
+    if (res.status === 402) {
+      // Pro gate — extract the plugin name + detail so callers can
+      // render a polished upsell card instead of the raw JSON. Detail
+      // shape from problem.rs: { detail, instance, status, title, type }.
+      let detail = "Strivo Pro plugin — activate or start a 3-day trial.";
+      let plugin = null;
+      try {
+        const j = await res.json();
+        if (j && j.detail) {
+          detail = j.detail;
+          const m = /^([a-z0-9_-]+) is a Strivo Pro plugin/i.exec(j.detail);
+          if (m) plugin = m[1];
+        }
+      } catch (_) { /* keep defaults */ }
+      const err = new Error(detail);
+      err.code = 402;
+      err.plugin = plugin;
+      throw err;
+    }
     if (!res.ok) {
+      // Try to extract problem+json's `detail` for a clean message; fall
+      // back to the raw body when the response isn't JSON.
       const text = await res.text();
-      throw new Error(`HTTP ${res.status}: ${text}`);
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        if (j && typeof j.detail === "string") detail = j.detail;
+      } catch (_) { /* not json */ }
+      throw new Error(`HTTP ${res.status}: ${detail}`);
     }
     return res.headers.get("content-type")?.includes("json")
       ? res.json()
@@ -233,6 +259,7 @@ const API = {
   licenceTrial: () => API._fetch("/licence/trial", { method: "POST" }),
   licenceActivate: (key) =>
     API._fetch("/licence/activate", { method: "POST", body: { key } }),
+  licenceTrial: () => API._fetch("/licence/trial", { method: "POST" }),
 };
 
 // ── SSE event stream ─────────────────────────────────────────────────
@@ -2972,6 +2999,83 @@ async function renderWatch() {
   });
 }
 
+function toTitleCase(slug) {
+  return slug.split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+// Per-plugin pitch lines for the upsell card. Keyed by plugin name so the
+// CTA copy stays specific instead of generic. Defaults to the plugin's
+// description fetched from the marketplace catalog when present.
+const PRO_UPSELL_PITCH = {
+  crunchr: "Transcribe every recording, jump-to-quote search, speaker timeline, exportable subtitles.",
+  archiver: "Auto-catalog the full back-catalog of any followed channel, dedup VODs, search by title or game.",
+  insights: "Cross-stream analytics: word frequency, topic shifts, retention proxy, side-by-side compares.",
+  viewguard: "Live fraud-signal scoring during captures; cross-stream trend dashboard.",
+  editor: "Non-destructive EDL editor with split / ripple-delete / dead-air trim / branding overlay + revision history.",
+  chapters: "Heuristic chapter markers extracted from your stream's pacing.",
+  clipper: "Highlight detection + one-click clip extraction from the timeline.",
+  captions: "Export SRT / VTT / TXT with a translator-trait pluggable backend.",
+};
+
+function renderProUpsell(plugin, licence) {
+  const pitch = PRO_UPSELL_PITCH[plugin] || "Unlock this plugin's analytics, automation, and editor features.";
+  const trial = licence && licence.trial;
+  const hasTrialUsed = trial && trial.used;
+  const trialNote = hasTrialUsed
+    ? "Your 3-day trial has already been used on this machine."
+    : "Start a free 3-day trial — no card needed.";
+  const trialBtn = hasTrialUsed
+    ? `<button class="btn-primary" disabled title="trial already used">Trial used</button>`
+    : `<button class="btn-primary pg-upsell-trial">▶ Start 3-day trial</button>`;
+  return `
+    <div class="pg-upsell-card">
+      <div class="pg-upsell-icon">★</div>
+      <div class="pg-upsell-body">
+        <h2 class="pg-upsell-title">${escape(toTitleCase(plugin))} is a Strivo Pro plugin</h2>
+        <p class="pg-upsell-pitch">${escape(pitch)}</p>
+        <p class="pg-upsell-trial-note pg-cap-hint">${escape(trialNote)}</p>
+        <div class="pg-upsell-actions">
+          ${trialBtn}
+          <span class="pg-upsell-sep">or</span>
+          <input type="text" class="pg-upsell-key" placeholder="paste licence key…" aria-label="licence key"/>
+          <button class="sm pg-upsell-activate">Activate</button>
+        </div>
+        <p class="pg-upsell-foot pg-cap-hint">
+          Already a subscriber? Find your key in your Strivo account.
+        </p>
+      </div>
+    </div>`;
+}
+
+function wireProUpsell(host, plugin) {
+  host.querySelector(".pg-upsell-trial")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    await withBusy(btn, "Starting…", async () => {
+      try {
+        await API.licenceTrial();
+        Toast.success(`Trial active — ${toTitleCase(plugin)} unlocked. Refreshing…`);
+        setTimeout(() => location.reload(), 800);
+      } catch (err) {
+        Toast.error(`Trial failed: ${err.message}`);
+      }
+    });
+  });
+  host.querySelector(".pg-upsell-activate")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const key = host.querySelector(".pg-upsell-key").value.trim();
+    if (!key) { Toast.error("Paste a licence key first."); return; }
+    await withBusy(btn, "Activating…", async () => {
+      try {
+        await API.licenceActivate(key);
+        Toast.success(`Activated — ${toTitleCase(plugin)} unlocked. Refreshing…`);
+        setTimeout(() => location.reload(), 800);
+      } catch (err) {
+        Toast.error(`Activate failed: ${err.message}`);
+      }
+    });
+  });
+}
+
 async function renderPlugins() {
   const parts = routeParts(); // ["plugins", <slug?>, …]
   const slug = parts[1];
@@ -2993,6 +3097,18 @@ async function renderPlugins() {
   } catch (e) {
     if (e.message && e.message.includes("unauthorized")) return;
     root.removeAttribute("aria-busy");
+    if (e.code === 402) {
+      const plugin = e.plugin || slug || "this plugin";
+      root.innerHTML = chrome(
+        `${pluginHeader(toTitleCase(plugin), "Strivo Pro")}<div id="pg-upsell-host"></div>`,
+      );
+      setupChromeHandlers();
+      const host = document.getElementById("pg-upsell-host");
+      const licence = await API.licenceStatus().catch(() => null);
+      host.innerHTML = renderProUpsell(plugin, licence);
+      wireProUpsell(host, plugin);
+      return;
+    }
     root.innerHTML = chrome(
       `${pluginHeader("Plugins", "")}<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`,
     );

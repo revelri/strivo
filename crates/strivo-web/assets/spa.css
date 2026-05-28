@@ -3585,3 +3585,38 @@ body.modal-open { overflow: hidden; }
 .chat-sep { opacity: 0.6; margin-right: 0.2rem; }
 .chat-mention { color: #6e56cf; font-weight: 600; }
 .chat-link { color: #4ec9b0; text-decoration: underline; }
+
+/* Pro-gate upsell card — shown when an unentitled session hits a Pro
+ * plugin sub-route. Replaces the previous raw "HTTP 402: {...}" dump. */
+.pg-upsell-card {
+  display: flex; gap: 1.2rem; align-items: flex-start;
+  margin: 1rem 0;
+  padding: 1.2rem 1.4rem;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(110,86,207,0.12), rgba(0,188,212,0.06));
+}
+.pg-upsell-icon {
+  font-size: 2.4rem; line-height: 1;
+  width: 56px; height: 56px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: rgba(110,86,207,0.25);
+  color: #fff;
+}
+.pg-upsell-body { flex: 1; }
+.pg-upsell-title { margin: 0 0 0.4rem; font-size: 1.15rem; }
+.pg-upsell-pitch { margin: 0 0 0.8rem; font-size: 0.95em; opacity: 0.92; }
+.pg-upsell-trial-note { margin: 0 0 0.7rem; }
+.pg-upsell-actions {
+  display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+}
+.pg-upsell-sep { opacity: 0.5; font-size: 0.85em; padding: 0 0.2rem; }
+.pg-upsell-key {
+  flex: 1 1 220px; min-width: 180px;
+  padding: 0.35rem 0.6rem;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border-light);
+  border-radius: 4px; color: inherit; font-family: monospace;
+}
+.pg-upsell-foot { margin: 0.8rem 0 0; }
