@@ -215,6 +215,23 @@ const API = {
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/revisions/${encodeURIComponent(revId)}/restore`, { method: "POST" }),
   editorRender: (recordingId) =>
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/render`, { method: "POST" }),
+  scenesList: (recordingId) =>
+    API._fetch(`/plugins/scenes/${encodeURIComponent(recordingId)}`),
+  scenesCapture: (recordingId, name, thumbnailDataUrl) =>
+    API._fetch(`/plugins/scenes/${encodeURIComponent(recordingId)}`, {
+      method: "POST",
+      body: { name, thumbnail_data_url: thumbnailDataUrl || null },
+    }),
+  scenesRestore: (recordingId, sceneId) =>
+    API._fetch(
+      `/plugins/scenes/${encodeURIComponent(recordingId)}/${encodeURIComponent(sceneId)}/restore`,
+      { method: "POST" },
+    ),
+  scenesDelete: (recordingId, sceneId) =>
+    API._fetch(
+      `/plugins/scenes/${encodeURIComponent(recordingId)}/${encodeURIComponent(sceneId)}`,
+      { method: "DELETE" },
+    ),
   vadAnalyze: (recordingId, opts = {}) => {
     const p = new URLSearchParams();
     if (opts.window_sec != null) p.set("window_sec", opts.window_sec);
@@ -5163,11 +5180,13 @@ async function openRecordingInfo(jobId) {
             <button class="sm rec-ed-branding" type="button" title="Watermark + intro/outro banner overlay applied at render">★ Branding…</button>
             <button class="sm rec-ed-loudness" type="button" title="EBU R128 loudness check + per-platform normalisation target">♪ Loudness…</button>
             <button class="sm rec-ed-history" type="button" title="Revision history — revert across saves (DAW-style undo)">↺ History…</button>
+            <button class="sm rec-ed-scenes" type="button" title="Scenes — Ableton-style session save/recall bundling EDL + branding + automation + loudness + captions style">🎬 Scenes…</button>
             <button class="btn-primary rec-ed-render" type="button">⚡ Render to MKV</button>
           </div>
           <div class="rec-branding" hidden></div>
           <div class="rec-loudness" hidden></div>
           <div class="rec-history" hidden></div>
+          <div class="rec-scenes" hidden></div>
           <div class="rec-ed-list">
             ${edl.cuts
               .map(
@@ -5594,6 +5613,84 @@ async function openRecordingInfo(jobId) {
               });
             });
           }).catch((err) => Toast.error(`History failed: ${err.message}`));
+        });
+        host.querySelector(".rec-ed-scenes")?.addEventListener("click", async (e2) => {
+          const sbtn = e2.currentTarget;
+          await withBusy(sbtn, "Loading…", async () => {
+            const r = await API.scenesList(jobId);
+            const panel = host.querySelector(".rec-scenes");
+            if (!panel) return;
+            const scenes = r.scenes || [];
+            panel.hidden = false;
+            const sceneRows = scenes.map((s) => `
+              <div class="rec-scene-row" data-scene-id="${escape(s.id)}">
+                <div class="rec-scene-head">
+                  <span class="rec-scene-name">${escape(s.name)}</span>
+                  <span class="rec-scene-meta pg-cap-hint">${(s.component_keys || []).length} component${(s.component_keys||[]).length===1?"":"s"} · ${formatBytes(s.size_bytes || 0)} · ${escape(s.created_at.replace("T"," ").split(".")[0])}</span>
+                </div>
+                <div class="rec-scene-tags">
+                  ${(s.component_keys || []).map(k => `<span class="rec-scene-tag">${escape(k)}</span>`).join("")}
+                </div>
+                <div class="rec-scene-actions">
+                  <button class="sm rec-scene-restore" type="button" title="Restore this scene as the current state">Restore</button>
+                  <button class="sm danger rec-scene-delete" type="button" title="Delete this scene (irreversible)">✕</button>
+                </div>
+              </div>`).join("");
+            panel.innerHTML = `
+              <h5>Scene snapshots <span class="pg-cap-hint">${scenes.length} saved</span></h5>
+              <form class="rec-scene-capture" onsubmit="return false;">
+                <input class="rec-scene-name-input" type="text" placeholder="Scene name (e.g. 'v1 — main mix')" required />
+                <button class="btn-primary sm rec-scene-capture-btn" type="submit">+ Capture current state</button>
+              </form>
+              ${sceneRows ? `<div class="rec-scene-list">${sceneRows}</div>`
+                          : `<p class="pg-cap-hint">No scenes yet. Capture the current state to save EDL + branding + automation + loudness + captions style as a named bundle.</p>`}
+              <p class="pg-cap-hint">Restoring writes every captured component back to its plugin's store; the EDL restore goes through the editor's revision history so it's itself undoable.</p>`;
+            // Wire capture form
+            const form = panel.querySelector(".rec-scene-capture");
+            form.addEventListener("submit", async (ev) => {
+              ev.preventDefault();
+              const input = panel.querySelector(".rec-scene-name-input");
+              const name = input.value.trim();
+              if (!name) { Toast.error("Scene name required"); return; }
+              const captureBtn = panel.querySelector(".rec-scene-capture-btn");
+              await withBusy(captureBtn, "Capturing…", async () => {
+                const res = await API.scenesCapture(jobId, name);
+                Toast.success(`Captured · ${res.component_keys.length} component(s) · ${formatBytes(res.size_bytes || 0)}`);
+                // Re-open to refresh
+                host.querySelector(".rec-ed-scenes")?.click();
+              }).catch((err) => Toast.error(`Capture failed: ${err.message}`));
+            });
+            // Wire restore per row
+            panel.querySelectorAll(".rec-scene-restore").forEach((rb) => {
+              rb.addEventListener("click", async () => {
+                const id = rb.closest(".rec-scene-row").dataset.sceneId;
+                if (!confirm("Restore this scene? Every component (EDL, branding, automation, loudness, captions style) will be overwritten with the captured state. The EDL restore is itself undoable via the History panel.")) return;
+                await withBusy(rb, "Restoring…", async () => {
+                  const res = await API.scenesRestore(jobId, id);
+                  // Re-fetch the EDL since the restore touched the
+                  // editor store; rebuild the in-memory copy so the
+                  // toolbar reflects the new cut list.
+                  const reloaded = await API.editorLoad(jobId);
+                  edl = reloaded.edl;
+                  paint();
+                  Toast.success(`Restored · ${res.restored.length} component(s)${res.skipped.length ? ` · ${res.skipped.length} skipped` : ""}.`);
+                }).catch((err) => Toast.error(`Restore failed: ${err.message}`));
+              });
+            });
+            // Wire delete per row
+            panel.querySelectorAll(".rec-scene-delete").forEach((db) => {
+              db.addEventListener("click", async () => {
+                const row = db.closest(".rec-scene-row");
+                const id = row.dataset.sceneId;
+                if (!confirm("Delete this scene? Irreversible.")) return;
+                await withBusy(db, "Deleting…", async () => {
+                  await API.scenesDelete(jobId, id);
+                  row.remove();
+                  Toast.success("Scene deleted");
+                }).catch((err) => Toast.error(`Delete failed: ${err.message}`));
+              });
+            });
+          }).catch((err) => Toast.error(`Scenes failed: ${err.message}`));
         });
         host.querySelector(".rec-ed-render")?.addEventListener("click", async (e2) => {
           const btnR = e2.currentTarget;
