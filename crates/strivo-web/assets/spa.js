@@ -3207,12 +3207,37 @@ async function renderSettings() {
     <h1 class="page-title">Settings</h1>
     <p class="page-subtitle">Live daemon configuration. Toggles and numeric knobs persist to <code>~/.config/strivo/config.toml</code> on change.</p>
     <div class="stg-shell">
-      <nav class="stg-rail" aria-label="Settings sections">${rail}</nav>
+      <nav class="stg-rail" aria-label="Settings sections">
+        <div class="stg-search-wrap">
+          <input id="stg-search" class="stg-search" type="search"
+                 placeholder="Filter settings…" aria-label="Filter settings" />
+        </div>
+        ${rail}
+      </nav>
       <div class="stg-pane" id="stg-pane">${pane}</div>
     </div>
   `);
   setupChromeHandlers();
   wireSettingsControls();
+  wireSettingsSearch();
+}
+
+// Filter rows in the right pane and rail items by typed query (audit M10).
+function wireSettingsSearch() {
+  const input = document.getElementById("stg-search");
+  if (!input) return;
+  input.addEventListener("input", () => {
+    const q = input.value.trim().toLowerCase();
+    document.querySelectorAll(".stg-row").forEach((r) => {
+      const txt = r.textContent.toLowerCase();
+      r.classList.toggle("stg-row-hidden", q.length > 0 && !txt.includes(q));
+    });
+    // Hide group headings whose rows all collapsed.
+    document.querySelectorAll(".stg-group").forEach((g) => {
+      const anyVisible = g.querySelector(".stg-row:not(.stg-row-hidden)");
+      g.style.display = q && !anyVisible ? "none" : "";
+    });
+  });
 }
 
 // Wire every editable control on the right pane. Each control declares
@@ -3233,7 +3258,7 @@ function wireSettingsControls() {
       let value;
       if (el.type === "checkbox") value = el.checked;
       else if (el.type === "number") value = parseInt(el.value, 10);
-      else value = el.value;
+      else value = (el.value || "").trim();
       const previous = el.type === "checkbox"
         ? !el.checked
         : el.getAttribute("data-prev") || "";
@@ -3270,6 +3295,19 @@ function renderSettingsPane(slug, s) {
     <input class="stg-num" type="number" data-stg-path="${escape(path)}"
            data-prev="${value ?? ""}" value="${value ?? ""}"
            min="${min}" max="${max}" step="1" />`;
+  const textInput = (path, value, placeholder = "") => `
+    <input class="stg-text" type="text" data-stg-path="${escape(path)}"
+           data-prev="${escape(value ?? "")}" value="${escape(value ?? "")}"
+           placeholder="${escape(placeholder)}" spellcheck="false" />`;
+  const selectInput = (path, value, opts) => {
+    const options = opts
+      .map((o) => `<option value="${escape(o)}"${o === value ? " selected" : ""}>${escape(o)}</option>`)
+      .join("");
+    return `<select class="stg-select" data-stg-path="${escape(path)}" data-prev="${escape(value ?? "")}">${options}</select>`;
+  };
+  // Filename template token reference shown via the ⓘ hover hint.
+  const TEMPLATE_TOKENS_HINT =
+    "Tokens: {channel} channel name · {title} stream title · {date} YYYY-MM-DD · {time} HHMMSS · {platform} twitch/youtube/patreon · {id} broadcast id. Path-safe at write-time.";
   // Row helper. `hint` is rendered as a tooltip on a ⓘ glyph so the
   // layout stays clean; long-form text only appears on hover.
   const row = (label, value, hint) => `
@@ -3313,10 +3351,14 @@ function renderSettingsPane(slug, s) {
     case "recording":
       return [
         group("Output", [
-          row("Filename template", code(rec.filename_template),
-            "Tokens like {channel}, {title}, {date} expand at record-start time."),
-          row("Container", code(rec.container || "matroska (default)"),
-            "Output muxer. Matroska is the browser-friendliest default; switch only if you have a downstream pipeline that needs MP4 or TS."),
+          row("Filename template",
+            textInput("recording.filename_template", rec.filename_template, "{channel}_{date}_{title}.mkv"),
+            TEMPLATE_TOKENS_HINT),
+          row("Container",
+            selectInput("recording.container",
+              (rec.container || "matroska").toLowerCase(),
+              ["matroska", "mp4", "webm"]),
+            "Output muxer. Matroska is the browser-friendliest default; switch only if you have a downstream pipeline that needs MP4 or WebM."),
           row("Transcode", toggle("recording.transcode", rec.transcode),
             "Re-encode on the fly via h264_nvenc. Off = stream-copy (zero CPU, original bitrate)."),
         ].join("")),
@@ -3367,10 +3409,12 @@ function renderSettingsPane(slug, s) {
         group("Archiver", [
           row("Enabled", toggle("archiver.enabled", arc.enabled),
             "Back-catalog VOD archiver. Walks each tracked channel's history and downloads anything missing."),
-          row("Archive directory", code(arc.archive_dir),
+          row("Archive directory",
+            textInput("archiver.archive_dir", arc.archive_dir, "/path/to/archives"),
             "Where archived VODs land. Defaults under the main recording dir."),
-          row("Format", code(arc.format),
-            "yt-dlp format selector. Default targets bestvideo+bestaudio with a sensible cap."),
+          row("Format",
+            textInput("archiver.format", arc.format, "best"),
+            "yt-dlp format selector. Default targets bestvideo+bestaudio with a sensible cap. See yt-dlp -F for options."),
           row("Concurrent fragments", numInput("archiver.concurrent_fragments", arc.concurrent_fragments ?? 4, 1, 16),
             "yt-dlp -N flag. Higher = faster downloads, more bandwidth/CPU. Range 1–16."),
         ].join("")),

@@ -942,6 +942,17 @@ async fn update_setting(
                 }
             })
         }
+        "recording.filename_template" => take_nonempty_str(&body.value).map(|s| {
+            cfg.recording.filename_template = s;
+        }),
+        "recording.container" => take_str_in(&body.value, &["matroska", "mp4", "webm"])
+            .map(|s| cfg.recording.format.container = Some(s)),
+        "archiver.archive_dir" => take_nonempty_str(&body.value).map(|s| {
+            cfg.archiver.archive_dir = std::path::PathBuf::from(s);
+        }),
+        "archiver.format" => take_nonempty_str(&body.value).map(|s| {
+            cfg.archiver.format = s;
+        }),
         other => Err(format!("unknown or read-only setting: {other}")),
     };
 
@@ -963,6 +974,24 @@ fn take_u32(v: &serde_json::Value) -> Result<u32, String> {
     v.as_u64()
         .and_then(|n| u32::try_from(n).ok())
         .ok_or_else(|| "expected non-negative integer".into())
+}
+
+fn take_nonempty_str(v: &serde_json::Value) -> Result<String, String> {
+    let s = v.as_str().ok_or_else(|| "expected string".to_string())?;
+    let t = s.trim();
+    if t.is_empty() {
+        return Err("value must not be empty".into());
+    }
+    Ok(t.to_string())
+}
+
+fn take_str_in(v: &serde_json::Value, allowed: &[&str]) -> Result<String, String> {
+    let s = take_nonempty_str(v)?;
+    if allowed.iter().any(|a| a.eq_ignore_ascii_case(&s)) {
+        Ok(s.to_lowercase())
+    } else {
+        Err(format!("must be one of {allowed:?}"))
+    }
 }
 
 #[derive(Debug, Deserialize)]
