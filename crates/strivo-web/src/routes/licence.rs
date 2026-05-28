@@ -31,18 +31,44 @@ struct LicenceStatus {
 }
 
 async fn status() -> Json<LicenceStatus> {
-    // Dev override: STRIVO_DEV_UNLOCK_ALL=1 reports as fully entitled so
-    // the team can dogfood gated features without a real licence. Stays
-    // wired through Phase 3 — the gating layer reads the same env.
-    let dev_unlock = std::env::var("STRIVO_DEV_UNLOCK_ALL")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+    use strivo_core::licence::{gate, machine_id, LicenceCache, Tier};
+
+    // Surface the hashed machine_id so the activation flow can pin it
+    // without ever sending the raw OS-level identifier. Read once per
+    // request; the underlying call memoises.
+    let mh = machine_id::hashed_machine_id();
+
+    // gate::entitled handles the dev override + cache check in one
+    // place so the UI and the runtime gate stay in lockstep.
+    let entitled = gate::entitled();
+    let cache = LicenceCache::load().ok().flatten();
+
+    let (tier, expires_at, trial) = match cache.as_ref() {
+        Some(lic) if entitled => {
+            let tier = match lic.tier {
+                Tier::Pro => "pro",
+                Tier::Trial => "trial",
+                Tier::Free => "free",
+            };
+            let trial = if matches!(lic.tier, Tier::Trial) {
+                Some(serde_json::json!({ "expires_at": lic.expires_at }))
+            } else {
+                None
+            };
+            (tier, lic.expires_at.clone(), trial)
+        }
+        _ if entitled => ("pro", None, None), // dev override w/o cache
+        _ => ("free", None, None),
+    };
+
     Json(LicenceStatus {
-        entitled: dev_unlock,
-        tier: if dev_unlock { "pro" } else { "free" },
-        trial: None,
-        expires_at: None,
-        machine_id: None,
+        entitled,
+        tier,
+        trial,
+        expires_at,
+        machine_id: Some(mh),
+        // Real reads now wired; mutating routes (activate/trial/refresh)
+        // still 501 until the CF Workers backend (Phase 3b) is up.
         implemented: false,
     })
 }

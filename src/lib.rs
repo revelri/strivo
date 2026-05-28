@@ -24,6 +24,7 @@ pub mod config;
 pub mod daemon;
 pub mod edl;
 pub mod ipc;
+pub mod licence;
 pub mod media;
 pub mod monitor;
 pub mod pipeline;
