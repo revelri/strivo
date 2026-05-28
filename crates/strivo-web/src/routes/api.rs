@@ -887,6 +887,84 @@ async fn set_poll_interval(
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct SettingsUpdatePayload {
+    /// Dotted path identifying which knob to mutate.
+    path: String,
+    value: serde_json::Value,
+}
+
+/// `POST /api/v1/settings/update` — persist a single config knob.
+///
+/// Strict allow-list: anything not enumerated here is rejected with 400.
+/// Each entry validates type, applies it to the loaded AppConfig, and
+/// saves. None of these need a live daemon-side apply — they're read
+/// at the start of each new recording / archive job, or by the SPA on
+/// next /settings fetch. The poll-interval knob keeps its own endpoint
+/// because it has to be re-armed in the monitor immediately.
+async fn update_setting(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<SettingsUpdatePayload>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let mut cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+
+    // Allow-list. Booleans and small ints only — anything that could
+    // break recordings on a typo (paths, templates, format strings)
+    // stays out until phase 2c adds proper validation + a wizard.
+    let result: Result<(), String> = match body.path.as_str() {
+        "recording.transcode" => take_bool(&body.value).map(|v| cfg.recording.transcode = v),
+        "recording.twitch_live_from_start" => {
+            take_bool(&body.value).map(|v| cfg.recording.twitch_live_from_start = v)
+        }
+        "recording.auto_vod_backfill" => {
+            take_bool(&body.value).map(|v| cfg.recording.auto_vod_backfill = v)
+        }
+        "recording.auto_trim_ads" => take_bool(&body.value).map(|v| cfg.recording.auto_trim_ads = v),
+        "ui.reduce_motion" => take_bool(&body.value).map(|v| cfg.ui.reduce_motion = v),
+        "ui.verbose_status" => take_bool(&body.value).map(|v| cfg.ui.verbose_status = v),
+        "archiver.enabled" => take_bool(&body.value).map(|v| cfg.archiver.enabled = v),
+        "archiver.concurrent_fragments" => {
+            // Clamp to 1..=16 — yt-dlp accepts more but past 16 you're
+            // just thrashing the platform's rate limiter.
+            take_u32(&body.value).and_then(|v| {
+                if (1..=16).contains(&v) {
+                    cfg.archiver.concurrent_fragments = v;
+                    Ok(())
+                } else {
+                    Err("concurrent_fragments must be 1..=16".into())
+                }
+            })
+        }
+        other => Err(format!("unknown or read-only setting: {other}")),
+    };
+
+    if let Err(e) = result {
+        return crate::problem::Problem::bad_request(e).into_response();
+    }
+    let path = cfg.config_path.clone();
+    if let Err(e) = cfg.save(path.as_deref()) {
+        return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+    }
+    (StatusCode::ACCEPTED, Json(json!({"ok": true, "path": body.path}))).into_response()
+}
+
+fn take_bool(v: &serde_json::Value) -> Result<bool, String> {
+    v.as_bool().ok_or_else(|| "expected boolean".into())
+}
+
+fn take_u32(v: &serde_json::Value) -> Result<u32, String> {
+    v.as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| "expected non-negative integer".into())
+}
+
 /// Numeric severity for a `tracing` level token, higher = more severe.
 fn level_rank(level: &str) -> u8 {
     match level.to_ascii_uppercase().as_str() {
@@ -1539,6 +1617,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/settings", get(settings))
         .route("/api/v1/poll_now", post(poll_now))
         .route("/api/v1/settings/poll_interval", post(set_poll_interval))
+        .route("/api/v1/settings/update", post(update_setting))
         .route("/api/v1/logs", get(logs))
         .route("/api/v1/history", get(history))
         .route("/api/v1/backup", post(backup_create))

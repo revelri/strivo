@@ -127,6 +127,8 @@ const API = {
     API._fetch("/auth/login", { method: "POST", body: { api_key: apiKey } }),
   logout: () => API._fetch("/auth/logout", { method: "POST" }),
   // ── Strivo Pro licensing (Phase 1: status only; activate/trial 501) ──
+  updateSetting: (path, value) =>
+    API._fetch("/settings/update", { method: "POST", body: { path, value } }),
   licenceStatus: () => API._fetch("/licence/status"),
   licenceTrial: () => API._fetch("/licence/trial", { method: "POST" }),
   licenceActivate: (key) =>
@@ -3164,13 +3166,44 @@ async function renderSettings() {
 
   root.innerHTML = chrome(`
     <h1 class="page-title">Settings</h1>
-    <p class="page-subtitle">Live daemon configuration. Editing lands in Phase 2b — for now changes go through the TUI or <code>~/.config/strivo/config.toml</code>.</p>
+    <p class="page-subtitle">Live daemon configuration. Toggles and numeric knobs persist to <code>~/.config/strivo/config.toml</code> on change. Path-typed fields land in Phase 2c with a wizard.</p>
     <div class="stg-shell">
       <nav class="stg-rail" aria-label="Settings sections">${rail}</nav>
       <div class="stg-pane" id="stg-pane">${pane}</div>
     </div>
   `);
   setupChromeHandlers();
+  wireSettingsControls();
+}
+
+// Wire every editable control on the right pane. Each control declares
+// its dotted config path via `data-stg-path` and its type via the input
+// itself (checkbox / number). On change we POST to /settings/update;
+// failure rolls the control back to its previous value and toasts.
+function wireSettingsControls() {
+  const pane = document.getElementById("stg-pane");
+  if (!pane) return;
+  pane.querySelectorAll("[data-stg-path]").forEach((el) => {
+    el.addEventListener("change", async (e) => {
+      const path = el.getAttribute("data-stg-path");
+      let value;
+      if (el.type === "checkbox") value = el.checked;
+      else if (el.type === "number") value = parseInt(el.value, 10);
+      else value = el.value;
+      const previous = el.type === "checkbox"
+        ? !el.checked
+        : el.getAttribute("data-prev") || "";
+      try {
+        await API.updateSetting(path, value);
+        if (el.type !== "checkbox") el.setAttribute("data-prev", String(value));
+        Toast.success(`Saved · ${path}`);
+      } catch (err) {
+        if (el.type === "checkbox") el.checked = previous;
+        else el.value = previous;
+        Toast.error(`Couldn't save ${path}: ${err.message}`);
+      }
+    });
+  });
 }
 
 // Build the right-pane HTML for a section. Each section is a sequence of
@@ -3179,10 +3212,20 @@ function renderSettingsPane(slug, s) {
   const rec = s.recording || {};
   const arc = s.archiver || {};
   const ui = s.ui || {};
-  const yesno = (b) => (b ? "Yes" : "No");
   const badge = (ok, okText, noText) =>
     `<span class="cfg-badge ${ok ? "ok" : "warn"}">${ok ? okText : noText}</span>`;
   const code = (v) => `<code>${escape(v || "—")}</code>`;
+  // Editable controls: rendered as live inputs bound to a config path.
+  // wireSettingsControls() picks them up via [data-stg-path].
+  const toggle = (path, checked) => `
+    <label class="stg-toggle">
+      <input type="checkbox" data-stg-path="${escape(path)}" ${checked ? "checked" : ""} />
+      <span class="stg-toggle-track"><span class="stg-toggle-knob"></span></span>
+    </label>`;
+  const numInput = (path, value, min, max) => `
+    <input class="stg-num" type="number" data-stg-path="${escape(path)}"
+           data-prev="${value ?? ""}" value="${value ?? ""}"
+           min="${min}" max="${max}" step="1" />`;
   // Row helper. `hint` is rendered as a tooltip on a ⓘ glyph so the
   // layout stays clean; long-form text only appears on hover.
   const row = (label, value, hint) => `
@@ -3230,17 +3273,17 @@ function renderSettingsPane(slug, s) {
             "Tokens like {channel}, {title}, {date} expand at record-start time."),
           row("Container", code(rec.container || "matroska (default)"),
             "Output muxer. Matroska is the browser-friendliest default; switch only if you have a downstream pipeline that needs MP4 or TS."),
-          row("Transcode", yesno(rec.transcode),
+          row("Transcode", toggle("recording.transcode", rec.transcode),
             "Re-encode on the fly via h264_nvenc. Off = stream-copy (zero CPU, original bitrate)."),
         ].join("")),
         group("Twitch", [
-          row("Record from start", yesno(rec.twitch_live_from_start),
+          row("Record from start", toggle("recording.twitch_live_from_start", rec.twitch_live_from_start),
             "Pull from the first available HLS segment (~5 min back) instead of the live edge. Sub-only channels reject this and StriVo silently falls back to live edge."),
         ].join("")),
         group("YouTube / VOD", [
-          row("Auto VOD backfill", yesno(rec.auto_vod_backfill),
+          row("Auto VOD backfill", toggle("recording.auto_vod_backfill", rec.auto_vod_backfill),
             "When a stream ends, automatically queue the resulting VOD for download via yt-dlp."),
-          row("Auto-trim ads", yesno(rec.auto_trim_ads),
+          row("Auto-trim ads", toggle("recording.auto_trim_ads", rec.auto_trim_ads),
             "Run sponsorblock-style ad-segment trimming on completed Twitch VODs."),
         ].join("")),
       ].join("");
@@ -3264,14 +3307,14 @@ function renderSettingsPane(slug, s) {
     case "plugins":
       return [
         group("Archiver", [
-          row("Enabled", badge(arc.enabled, "enabled", "disabled"),
+          row("Enabled", toggle("archiver.enabled", arc.enabled),
             "Back-catalog VOD archiver. Walks each tracked channel's history and downloads anything missing."),
           row("Archive directory", code(arc.archive_dir),
             "Where archived VODs land. Defaults under the main recording dir."),
           row("Format", code(arc.format),
             "yt-dlp format selector. Default targets bestvideo+bestaudio with a sensible cap."),
-          row("Concurrent fragments", `${arc.concurrent_fragments ?? "—"}`,
-            "yt-dlp -N flag. Higher = faster downloads, more bandwidth/CPU."),
+          row("Concurrent fragments", numInput("archiver.concurrent_fragments", arc.concurrent_fragments ?? 4, 1, 16),
+            "yt-dlp -N flag. Higher = faster downloads, more bandwidth/CPU. Range 1–16."),
         ].join("")),
         group("Other plugins", [
           row("Pro plugins", `<a href="#/plugins" class="stg-linkbtn">Open Plugins page →</a>`,
@@ -3282,9 +3325,9 @@ function renderSettingsPane(slug, s) {
     case "interface":
       return [
         group("Accessibility", [
-          row("Reduce motion", yesno(ui.reduce_motion),
+          row("Reduce motion", toggle("ui.reduce_motion", ui.reduce_motion),
             "Disables non-essential transitions across the UI. Mirrors the OS-level prefers-reduced-motion."),
-          row("Verbose status", yesno(ui.verbose_status),
+          row("Verbose status", toggle("ui.verbose_status", ui.verbose_status),
             "Adds extra status text to long-running operations. Useful on screen readers."),
         ].join("")),
         group("Scheduling", [

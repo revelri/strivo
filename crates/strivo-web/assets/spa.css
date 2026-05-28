@@ -2125,6 +2125,52 @@ body.modal-open { overflow: hidden; }
   .stg-row { grid-template-columns: 1fr; gap: 0.3rem; }
 }
 
+/* iOS-style toggle for settings rows. */
+.stg-toggle { display: inline-flex; cursor: pointer; user-select: none; }
+.stg-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.stg-toggle-track {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  transition: background 0.18s, border-color 0.18s;
+}
+.stg-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform 0.18s, background 0.18s;
+}
+.stg-toggle input:checked + .stg-toggle-track {
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  border-color: transparent;
+}
+.stg-toggle input:checked + .stg-toggle-track .stg-toggle-knob {
+  transform: translateX(16px);
+  background: #fff;
+}
+.stg-toggle input:focus-visible + .stg-toggle-track {
+  outline: 2px solid var(--accent2);
+  outline-offset: 2px;
+}
+.stg-num {
+  width: 80px;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.9rem;
+}
+.stg-num:focus { outline: 0; border-color: var(--accent2); }
+
 /* ── Strivo Pro upgrade card (Plugins hub) ────────────────────────── */
 .upgrade-card {
   display: flex;
