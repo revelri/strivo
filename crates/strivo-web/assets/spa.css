@@ -201,6 +201,25 @@ textarea:focus {
   background: var(--gradient);
   color: #fff;
 }
+/* Vendored candy-icons (GPL-3.0, EliverLara/candy-icons). The SVGs are
+ * full-colour app-launcher art, so don't recolour on hover/active — just
+ * brighten the active one slightly so the gradient pill backdrop still
+ * reads as "selected". */
+.topnav-icon {
+  display: block;
+  width: 22px;
+  height: 22px;
+}
+.topnav-link.active .topnav-icon {
+  filter: brightness(1.12) drop-shadow(0 0 4px rgba(255, 255, 255, 0.28));
+}
+.topnav-link:hover .topnav-icon {
+  filter: brightness(1.1);
+}
+/* The logout button already had no specific sizing; constrain it to match
+ * the topnav buttons so the icon doesn't overflow the topbar. */
+#logout { padding: 0.3rem 0.45rem; line-height: 0; }
+#logout .topnav-icon { width: 22px; height: 22px; }
 
 .topbar {
   grid-area: topbar;
@@ -517,6 +536,13 @@ th[data-sort]:hover {
   margin: 0 0 0.5rem 0;
   color: var(--secondary);
 }
+/* Past Broadcasts gets a larger, centered treatment per user request:
+ * +33% size (0.95rem → 1.26rem) and text-align: center. */
+.cd-section-title.past-broadcasts {
+  font-size: 1.26rem;
+  text-align: center;
+  margin: 0.6rem 0 0.8rem 0;
+}
 .vod-list {
   display: flex;
   flex-direction: column;
@@ -774,6 +800,14 @@ button.sm {
   color: var(--bg);
   animation: pulse 1.2s ease-in-out infinite;
 }
+/* VOD pulls (DownloadVod) share the in-flight class but get a distinct
+ * cyan accent so live captures and yt-dlp pulls don't read identically. */
+.state-pill.downloading,
+.recordings-table .state-pill.downloading {
+  background: var(--accent2);
+  color: var(--bg);
+  animation: pulse 1.2s ease-in-out infinite;
+}
 .recordings-table .state-pill.finished {
   background: var(--live);
   color: var(--bg);
@@ -984,6 +1018,21 @@ select[aria-invalid="true"] {
   height: 100%;
   border: 0;
 }
+/* When the cross-origin player enters fullscreen, override our absolute /
+ * aspect-ratio positioning so the iframe fills the viewport rather than
+ * staying boxed to the aspect-ratio parent's calculated size. Without this,
+ * Chromium has been observed to strand the iframe's intrinsic box at 0
+ * during the top-layer transition, freezing playback while the rest of the
+ * app stays interactive. */
+.cd-preview iframe:fullscreen,
+.cd-preview iframe:-webkit-full-screen {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+}
 /* Progressive live preview (item 23): poster thumbnail + play overlay. */
 .cd-preview.poster { cursor: default; }
 .cd-preview.poster img {
@@ -1159,8 +1208,92 @@ select[aria-invalid="true"] {
   transition: transform 0.12s ease, border-color 0.12s ease;
 }
 a.media-pill:hover,
-.media-pill[data-action]:hover { transform: translateY(-1px); border-color: var(--accent); }
+.media-pill[data-action]:hover,
+.media-pill:has(.mp-link:hover) { transform: translateY(-1px); border-color: var(--accent); }
 .media-pill[data-action] { cursor: pointer; }
+/* Inner link wrapper used by VOD pills (button-sibling layout). Inherits
+ * the flex layout the outer .media-pill used to provide directly. */
+.mp-link {
+  display: flex;
+  align-items: stretch;
+  gap: 0.9rem;
+  flex: 1;
+  min-width: 0;
+  text-decoration: none;
+  color: inherit;
+}
+/* Per-VOD download button: three states, color-coded.
+ *   idle        → primary (purple/cyan gradient via --accent2)
+ *   downloading → secondary amber
+ *   downloaded  → live green
+ */
+.vod-dl {
+  align-self: center;
+  margin-right: 0.9rem;
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.vod-dl:disabled { cursor: default; }
+.vod-dl-idle {
+  background: color-mix(in srgb, var(--accent2) 22%, transparent);
+  color: var(--accent2);
+  border-color: color-mix(in srgb, var(--accent2) 40%, transparent);
+}
+.vod-dl-idle:hover {
+  background: var(--accent2);
+  color: #fff;
+}
+.vod-dl-downloading {
+  background: color-mix(in srgb, var(--secondary) 12%, transparent);
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--secondary) 40%, transparent);
+  /* Switch from a chip to a wider widget that hosts the bar + label. */
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.4rem 0.8rem;
+  min-width: 14rem;
+}
+.vod-dl-downloading .vod-dl-bar {
+  flex: 1;
+  height: 0.55rem;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+.vod-dl-downloading .vod-dl-fill {
+  display: block;
+  height: 100%;
+  /* Gradient runs amber → green so the visible end of the bar shifts greener
+   * as the download approaches 100%. Bar width = pct%; the fill itself is a
+   * fixed-size gradient anchored to the bar so colour stops correspond to
+   * progress, not to the (clipped) fill width. */
+  background: linear-gradient(90deg, var(--secondary) 0%, var(--accent2) 60%, var(--live) 100%);
+  background-size: 100% 100%;
+  background-attachment: local;
+  transition: width 250ms ease-out;
+}
+.vod-dl-downloading .vod-dl-label {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  color: var(--muted);
+  white-space: nowrap;
+  flex: none;
+}
+.vod-dl-downloaded {
+  background: color-mix(in srgb, var(--live) 22%, transparent);
+  color: var(--live);
+  border-color: color-mix(in srgb, var(--live) 40%, transparent);
+}
 .mp-thumb {
   position: relative;
   flex: none;
@@ -1315,3 +1448,481 @@ a.media-pill:hover,
   margin: 0.4rem 0 0.3rem;
 }
 .sys-fix { color: var(--muted); font-style: italic; }
+
+/* ── Plugins (hub + per-plugin views) ───────────────────────────────── */
+/* Neutral badge fallback so status pills without ok/warn/err read clearly. */
+.cfg-badge { background: var(--overlay); color: var(--muted); }
+
+.pg-back {
+  display: inline-block;
+  color: var(--accent2);
+  text-decoration: none;
+  font-size: 0.8rem;
+  margin-bottom: 0.4rem;
+}
+.pg-back:hover { text-decoration: underline; }
+
+/* Hub grid of plugin cards. */
+.pg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+.pg-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: var(--surface);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  box-shadow: var(--shadow);
+  transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1), border-color 150ms;
+}
+.pg-card:hover { transform: translateY(-2px); border-color: var(--border-light); }
+.pg-card-idle { opacity: 0.6; }
+.pg-card-head { display: flex; align-items: center; gap: 0.6rem; }
+.pg-icon {
+  display: grid;
+  place-items: center;
+  width: 2rem; height: 2rem;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  color: #fff;
+  background: var(--gradient);
+}
+.pg-icon-archiver { background: linear-gradient(130deg, var(--secondary), #d98324); }
+.pg-icon-viewguard { background: linear-gradient(130deg, var(--recording), #ff7b7b); }
+.pg-icon-insights { background: linear-gradient(130deg, var(--accent2), var(--live)); }
+.pg-card-name { font-weight: 600; font-size: 1.05rem; flex: 1; }
+.pg-card-desc { color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 0.7rem; }
+.pg-stats { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; }
+.pg-stat { font-size: 0.8rem; color: var(--dim); }
+.pg-stat strong { color: var(--fg); font-variant-numeric: tabular-nums; }
+.pg-stat.muted { font-style: italic; }
+
+/* Generic list/row used by crunchr, archiver, search hits. */
+.pg-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.pg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  text-decoration: none;
+  color: inherit;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.85rem;
+  transition: border-color 150ms, background 150ms;
+}
+.pg-row:not(.pg-row-static):hover { border-color: var(--accent2); }
+.pg-row-main { display: flex; flex-direction: column; min-width: 0; gap: 0.15rem; }
+.pg-row-title { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-row-sub { font-size: 0.78rem; color: var(--muted); }
+.pg-row-meta { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
+.pg-row-num { font-family: var(--mono); font-size: 0.8rem; color: var(--dim); }
+.plat-twitch { color: var(--twitch); }
+.plat-youtube { color: var(--youtube); }
+.plat-patreon { color: var(--patreon); }
+
+.pg-mini-gauge {
+  width: 60px; height: 6px;
+  border-radius: 999px;
+  background: var(--overlay);
+  overflow: hidden;
+}
+.pg-mini-gauge > span { display: block; height: 100%; background: var(--gradient); }
+
+/* Search box. */
+.pg-search { margin: 0.6rem 0; }
+.pg-search input {
+  width: 100%;
+  padding: 0.55rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+  font: inherit;
+}
+.pg-search input:focus {
+  outline: none;
+  border-color: var(--accent2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent2) 25%, transparent);
+}
+.pg-search-hits { margin-bottom: 1rem; }
+
+/* Verb + link buttons. */
+.pg-verbs { display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1rem; }
+.pg-linkbtn {
+  color: var(--accent2);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+.pg-linkbtn:hover { text-decoration: underline; }
+
+/* Chips (topics, analysis). */
+.pg-chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.pg-chip {
+  font-size: 0.78rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--overlay);
+  color: var(--fg);
+}
+.pg-chip em { color: var(--accent2); font-style: normal; font-variant-numeric: tabular-nums; }
+.pg-summary { color: var(--fg); line-height: 1.5; margin: 0 0 0.6rem; }
+
+/* Transcript. */
+.pg-transcript { display: flex; flex-direction: column; gap: 0.3rem; max-height: 60vh; overflow-y: auto; }
+.pg-seg { display: flex; gap: 0.6rem; align-items: baseline; font-size: 0.9rem; line-height: 1.4; }
+.pg-seg-time { font-family: var(--mono); font-size: 0.75rem; color: var(--accent2); flex-shrink: 0; }
+.pg-seg-speaker { color: var(--secondary); font-weight: 600; flex-shrink: 0; }
+.pg-seg-text { color: var(--fg); }
+
+/* Word-frequency / airtime bars. */
+.wf-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.wf-row { display: grid; grid-template-columns: 7rem 1fr 3rem; align-items: center; gap: 0.6rem; }
+.wf-word { font-size: 0.85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wf-bar { height: 0.7rem; background: var(--overlay); border-radius: 999px; overflow: hidden; }
+.wf-bar > span { display: block; height: 100%; background: var(--gradient); }
+.wf-count { font-family: var(--mono); font-size: 0.78rem; color: var(--dim); text-align: right; }
+
+.pg-toolbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.7rem; flex-wrap: wrap; }
+.pg-toggle { font-size: 0.8rem; color: var(--muted); display: flex; align-items: center; gap: 0.35rem; }
+
+/* Viewguard verdicts. */
+.vg-card { display: flex; flex-direction: column; gap: 0.6rem; }
+.vg-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.vg-channel { font-weight: 600; font-family: var(--mono); font-size: 0.85rem; word-break: break-all; }
+.vg-band-clean { background: color-mix(in srgb, var(--live) 22%, transparent); color: var(--live); }
+.vg-band-watch { background: color-mix(in srgb, var(--accent2) 22%, transparent); color: var(--accent2); }
+.vg-band-suspect { background: color-mix(in srgb, var(--secondary) 22%, transparent); color: var(--secondary); }
+.vg-band-fraudulent { background: color-mix(in srgb, var(--recording) 28%, transparent); color: var(--recording); }
+.vg-score { display: flex; align-items: baseline; gap: 0.4rem; }
+.vg-score-num { font-size: 1.8rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.vg-score-label { color: var(--muted); font-size: 0.8rem; }
+.vg-contribs { display: flex; flex-direction: column; gap: 0.3rem; }
+.vg-contrib { display: grid; grid-template-columns: 8rem 1fr; align-items: center; gap: 0.5rem; }
+.vg-contrib-name { font-size: 0.78rem; color: var(--muted); }
+.vg-bar { height: 0.6rem; background: var(--overlay); border-radius: 999px; overflow: hidden; }
+.vg-bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--secondary), var(--recording)); }
+.vg-when { font-size: 0.75rem; color: var(--dim); }
+
+/* Sentiment + crunchr status badge tints. */
+.cfg-badge.sentiment-positive { background: color-mix(in srgb, var(--live) 22%, transparent); color: var(--live); }
+.cfg-badge.sentiment-negative { background: color-mix(in srgb, var(--recording) 22%, transparent); color: var(--recording); }
+.cfg-badge.sentiment-neutral { background: var(--overlay); color: var(--muted); }
+.cfg-badge.status-complete { background: color-mix(in srgb, var(--live) 22%, transparent); color: var(--live); }
+.cfg-badge.status-failed { background: color-mix(in srgb, var(--recording) 22%, transparent); color: var(--recording); }
+
+/* ── Recording info modal + in-app player ───────────────────────────── */
+body.modal-open { overflow: hidden; }
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: 1.2rem;
+}
+.modal-card {
+  background: var(--surface);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  width: min(900px, 96vw);
+  max-height: 92vh;
+  overflow: auto;
+}
+.modal-close {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  font-size: 1.1rem;
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.modal-close:hover { background: rgba(0,0,0,0.3); color: var(--fg); }
+
+/* Recording row action buttons. The td itself stays a normal table-cell
+ * (display:flex on a <td> breaks it out of table layout and lands the
+ * border-bottom at a different Y than adjacent text cells, producing the
+ * "stepped separator" between the Size column and the actions column).
+ * Flex lives on the inner wrapper instead. */
+.rec-actions { text-align: right; white-space: nowrap; }
+.rec-actions-inner {
+  display: inline-flex;
+  gap: 0.35rem;
+  justify-content: flex-end;
+  vertical-align: middle;
+}
+.rec-actions .sm { padding: 0.25rem 0.55rem; font-size: 0.78rem; border-radius: var(--radius-sm); }
+.recordings-table tr[data-rec-row] { cursor: pointer; }
+.recordings-table tr[data-rec-row]:hover td { background: rgba(255,255,255,0.03); }
+
+/* Info modal layout. */
+.rec-info-card { padding: 1.25rem 1.5rem; }
+.rec-info-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.rec-info-head h2 {
+  margin: 0;
+  flex: 1;
+  font-size: 1.1rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rec-info-body {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 1rem 1.5rem;
+  align-items: start;
+}
+.rec-info-thumb img {
+  width: 100%;
+  border-radius: var(--radius-sm);
+  display: block;
+  background: rgba(0,0,0,0.3);
+  aspect-ratio: 16/9;
+  object-fit: cover;
+}
+.rec-info-stats {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1rem;
+  font-size: 0.85rem;
+}
+.rec-info-stats dt { color: var(--muted); font-weight: 500; }
+.rec-info-stats dd { margin: 0; color: var(--fg); word-break: break-all; }
+.rec-info-stats a { color: var(--accent2); }
+.rec-info-path { font-family: var(--mono); font-size: 0.78rem; }
+.rec-info-actions {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+.rec-info-actions h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.rec-info-verbs { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+.rec-info-foot {
+  display: flex;
+  gap: 0.6rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Player card. */
+.rec-player-card { padding: 0; width: min(1100px, 96vw); display: flex; flex-direction: column; }
+.rec-player-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.rec-player-title {
+  margin: 0;
+  flex: 1;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rec-player-stage {
+  position: relative;
+  background: #000;
+  aspect-ratio: 16/9;
+  width: 100%;
+}
+.rec-player-stage video {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  outline: none;
+}
+.rec-player-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.45);
+  pointer-events: none;
+}
+.rec-player-overlay-msg {
+  padding: 0.5rem 0.9rem;
+  border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.65);
+  color: var(--fg);
+  font-size: 0.95rem;
+  text-align: center;
+}
+.rec-player-stage:fullscreen,
+.rec-player-stage:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  inset: 0;
+  position: fixed;
+}
+
+/* Control bar. */
+.rec-player-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.85rem;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.rec-pc-btn {
+  background: rgba(0,0,0,0.25);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  width: 34px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.rec-pc-btn:hover { border-color: var(--accent2); }
+.rec-pc-btn.on { background: color-mix(in srgb, var(--accent2) 32%, transparent); color: var(--accent2); }
+.rec-pc-time {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--muted);
+  min-width: 3.2rem;
+  text-align: center;
+}
+.rec-pc-seek {
+  flex: 1 1 240px;
+  min-width: 180px;
+  accent-color: var(--accent2);
+}
+.rec-pc-vol {
+  width: 80px;
+  accent-color: var(--accent2);
+}
+.rec-pc-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.rec-pc-speed select {
+  background: rgba(0,0,0,0.3);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  padding: 0.18rem 0.35rem;
+}
+.rec-pc-ab {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--secondary);
+  min-width: 0;
+}
+
+/* Help overlay (rendered inside the card). */
+.rec-player-help {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.78);
+  padding: 1rem;
+}
+.rec-player-help-card {
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  padding: 1rem 1.5rem;
+  max-width: 480px;
+  max-height: 70vh;
+  overflow: auto;
+  pointer-events: auto;
+}
+.rec-player-help-card h3 {
+  margin: 0 0 0.6rem;
+  font-size: 0.95rem;
+  color: var(--accent2);
+}
+.rec-player-help-card dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.3rem 1rem;
+  font-size: 0.82rem;
+}
+.rec-player-help-card dt {
+  font-family: var(--mono);
+  color: var(--secondary);
+}
+.rec-player-help-card dd { margin: 0; color: var(--muted); }
+
+@media (max-width: 720px) {
+  .rec-info-body { grid-template-columns: 1fr; }
+  .rec-info-thumb img { max-width: 320px; }
+}
+
+/* Info modal — Stream (ffprobe) section. */
+.rec-info-stream {
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--border);
+}
+.rec-info-stream h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.rec-info-stream-stats { grid-template-columns: max-content 1fr; }
+.rec-info-track {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--fg);
+  line-height: 1.5;
+}
+.rec-info-stream-missing .empty { font-style: italic; }
+
+/* Anchor styled like a sm button for the SPA-routed Show-transcript link. */
+.rec-info-verb-link {
+  display: inline-block;
+  padding: 0.3rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(0,0,0,0.25);
+  color: var(--fg);
+  font-size: 0.78rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+.rec-info-verb-link:hover { border-color: var(--accent2); }

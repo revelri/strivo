@@ -41,6 +41,14 @@ const API = {
     API._fetch("/recordings", { method: "POST", body }),
   stopRecording: (id) =>
     API._fetch(`/recordings/${id}`, { method: "DELETE" }),
+  recordingOne: (id) =>
+    API._fetch(`/recordings/${encodeURIComponent(id)}`),
+  recordingProbe: (id) =>
+    API._fetch(`/recordings/${encodeURIComponent(id)}/probe`),
+  deleteRecordingFile: (id) =>
+    API._fetch(`/recordings/${encodeURIComponent(id)}/file`, { method: "DELETE" }),
+  clearErroredRecordings: () =>
+    API._fetch("/recordings/clear_errored", { method: "POST" }),
   toggleAutoRecord: (channelKey, enabled) =>
     API._fetch(`/channels/${encodeURIComponent(channelKey)}/auto_record`, {
       method: "PUT",
@@ -70,6 +78,30 @@ const API = {
       method: "POST",
       body,
     }),
+  // ── Plugin data (read-only, served from each plugin's SQLite DB) ──
+  plugins: () => API._fetch("/plugins"),
+  crunchrRecordings: () => API._fetch("/plugins/crunchr/recordings"),
+  crunchrRecording: (id) =>
+    API._fetch(`/plugins/crunchr/recordings/${encodeURIComponent(id)}`),
+  crunchrSearch: (q) =>
+    API._fetch(`/plugins/crunchr/search?q=${encodeURIComponent(q)}`),
+  archiverChannels: () => API._fetch("/plugins/archiver/channels"),
+  archiverVideos: (channelId) =>
+    API._fetch(`/plugins/archiver/channels/${encodeURIComponent(channelId)}/videos`),
+  viewguardVerdicts: () => API._fetch("/plugins/viewguard/verdicts"),
+  viewguardSamples: (channelId) =>
+    API._fetch(`/plugins/viewguard/channels/${encodeURIComponent(channelId)}/samples`),
+  insightsWords: (opts = {}) => {
+    const p = new URLSearchParams();
+    if (opts.scope) p.set("scope", opts.scope);
+    if (opts.recording) p.set("recording", opts.recording);
+    if (opts.stopwords) p.set("stopwords", "true");
+    if (opts.limit) p.set("limit", String(opts.limit));
+    return API._fetch(`/plugins/insights/words?${p.toString()}`);
+  },
+  insightsTopics: () => API._fetch("/plugins/insights/topics"),
+  insightsSpeakers: (id) =>
+    API._fetch(`/plugins/insights/recordings/${encodeURIComponent(id)}/speakers`),
   bulkDownload: (channelId, body) =>
     API._fetch(`/channels/${encodeURIComponent(channelId)}/bulk`, {
       method: "POST",
@@ -89,6 +121,8 @@ const API = {
   schedule: () => API._fetch("/schedule"),
   patreonPull: (body) =>
     API._fetch("/patreon/pull", { method: "POST", body }),
+  vodDownload: (body) =>
+    API._fetch("/vods/download", { method: "POST", body }),
   login: (apiKey) =>
     API._fetch("/auth/login", { method: "POST", body: { api_key: apiKey } }),
   logout: () => API._fetch("/auth/logout", { method: "POST" }),
@@ -163,11 +197,23 @@ let recCache = [];
 // Item 22 — recordings index density (compact|comfortable) + multi-select.
 let recDensity = localStorage.getItem("strivo-rec-density") || "comfortable";
 let recSelected = new Set();
+// Anchor for shift+click range selection. Tracks the last row whose
+// selection state was toggled by direct interaction (click on checkbox or
+// modifier+click on row). Reset when the recordings page re-renders.
+let recAnchorId = null;
 // TUI-redesign — left-rail channel cache, current selection, per-channel
 // VOD cache (channel_id -> [VodEntry]), and the recordings dashboard cache.
 let channelCache = [];
 let selectedChannelKey = null;
 const channelVods = {};
+// Per-VOD download state for the Past Broadcasts / Recent uploads pills.
+// Keys: VOD URL. Values: "downloading" | "downloaded". Absence = idle.
+// Seeded from recCache on every recordings refresh via
+// `seedVodDownloadStateFromRecCache()` — correlation is by exact source_url
+// match (RecordingJob.source_url, stamped on DownloadVod), so a page reload
+// or a previously-finished download both surface correctly without a FIFO
+// guess.
+const vodDownloadState = {};
 let dashRecordings = [];
 let dashSchedule = [];
 
@@ -319,7 +365,19 @@ const ROUTES = [
 
 function currentRoute() {
   const hash = window.location.hash.replace(/^#\/?/, "") || "library";
-  return ROUTES.includes(hash) ? hash : "library";
+  // Sub-routes (e.g. #/plugins/crunchr) highlight their base tab.
+  const base = hash.split("/")[0];
+  return ROUTES.includes(base) ? base : "library";
+}
+
+// Path segments after the leading "#/", e.g. #/plugins/crunchr/rec/<id>
+// → ["plugins", "crunchr", "rec", "<id>"].
+function routeParts() {
+  return window.location.hash
+    .replace(/^#\/?/, "")
+    .split("/")
+    .filter(Boolean)
+    .map((s) => decodeURIComponent(s));
 }
 
 function route(name) {
@@ -381,34 +439,38 @@ async function render() {
 
 // Top-bar route nav (functional pages). The left rail is the channel
 // list now; these icon links reach the management pages.
+// Tuple: [route, fallbackGlyph, label, key, iconHref?]
+// Eight slots ship Eliver Lara's candy-icons (GPL-3.0, vendored under
+// /assets/icons/candy/ with the upstream LICENSE + ATTRIBUTION). History
+// keeps its Unicode glyph by the user's choice.
 const TOPNAV = [
-  ["library", "▣", "Home", "l"],
-  ["recordings", "📁", "Recordings", "r"],
-  ["schedule", "📅", "Schedule", "s"],
-  ["pipelines", "🔁", "Pipelines", "d"],
-  ["plugins", "🧩", "Plugins", "g"],
-  ["settings", "⚙", "Settings", "c"],
-  ["system", "🛠", "System", "y"],
-  ["logs", "📜", "Logs", "o"],
+  ["library", "▣", "Home", "l", "/assets/icons/candy/home.svg"],
+  ["recordings", "📁", "Recordings", "r", "/assets/icons/candy/recordings.svg"],
+  ["schedule", "📅", "Schedule", "s", "/assets/icons/candy/schedule.svg"],
+  ["pipelines", "🔁", "Pipelines", "d", "/assets/icons/candy/pipelines.svg"],
+  ["plugins", "🧩", "Plugins", "g", "/assets/icons/candy/plugins.svg"],
+  ["settings", "⚙", "Settings", "c", "/assets/icons/candy/settings.svg"],
+  ["system", "🛠", "System", "y", "/assets/icons/candy/system.svg"],
+  ["logs", "📜", "Logs", "o", "/assets/icons/candy/logs.svg"],
   ["history", "🗂", "History", "h"],
 ];
 
 function chrome(content) {
   const r = currentRoute();
-  const nav = TOPNAV.map(
-    ([route, glyph, label, key]) =>
-      `<a class="topnav-link ${route === r ? "active" : ""}"
-          href="#/${route}" data-route="${route}" data-key="${key}"
-          title="${label}" aria-label="${label}">
-        <span aria-hidden="true">${glyph}</span>
-      </a>`,
-  ).join("");
+  const nav = TOPNAV.map(([route, glyph, label, key, iconHref]) => {
+    const inner = iconHref
+      ? `<img class="topnav-icon" src="${iconHref}" alt="" />`
+      : `<span aria-hidden="true">${glyph}</span>`;
+    return `<a class="topnav-link ${route === r ? "active" : ""}"
+              href="#/${route}" data-route="${route}" data-key="${key}"
+              title="${label}" aria-label="${label}">
+            ${inner}
+          </a>`;
+  }).join("");
   return `
     <div class="chrome">
       <header class="topbar" role="banner">
         <a class="brand" href="#/library" id="brand-home" title="Home">StriVo</a>
-        <span id="live-pill" class="live-pill" style="display: none"
-              aria-label="Live recording count"></span>
         <span id="conn-status" class="conn-status" role="status" hidden
               title="Live updates connection">● reconnecting…</span>
         <a id="health-pill" class="health-pill" href="#/system" hidden
@@ -419,7 +481,9 @@ function chrome(content) {
                 aria-label="Add channel">＋ Add</button>
         <button id="poll-now" title="Poke channel monitor (p)"
                 aria-label="Trigger immediate channel poll">↻ Poll</button>
-        <button id="logout" title="Logout" aria-label="Sign out">⏻</button>
+        <button id="logout" title="Logout" aria-label="Sign out">
+          <img class="topnav-icon" src="/assets/icons/candy/logout.svg" alt="" />
+        </button>
       </header>
       <nav class="leftrail" id="channel-list" aria-label="Channels"></nav>
       <main class="content" id="content">${content}</main>
@@ -719,6 +783,7 @@ async function renderHome() {
     channelCache = ch.channels || [];
     recCache = rec.recordings || [];
     dashRecordings = recCache;
+    seedVodDownloadStateFromRecCache();
   } catch (e) {
     if (e.message.includes("unauthorized")) return;
   }
@@ -811,7 +876,7 @@ function recordingPillHtml(j) {
         <div class="mp-sub">${escape(j.channel_name || "")} · ${escape(when)}</div>
       </div>
       <div class="mp-meta">
-        <span class="state-pill ${stateClassName(j.state)}">${escape(stateLabel(j.state))}</span>
+        ${(() => { const d = recordingDisplayState(j); return `<span class="state-pill ${d.className}">${escape(d.label)}</span>`; })()}
         <span class="mp-size">${formatBytes(j.bytes_written || 0)}</span>
         ${stop}
       </div>
@@ -932,9 +997,12 @@ function livePreviewHtml(c) {
   const src = liveEmbedSrc(c);
   const thumb = liveThumbUrl(c);
   // No thumbnail but we have an embed → mount the player directly.
+  // No `loading="lazy"`: this iframe is the live player. Chromium
+  // viewport-throttles lazy iframes during the top-layer transition that
+  // fullscreen triggers on cross-origin embeds, which stalls Twitch playback.
   if (!thumb && src) {
     return `<div class="cd-preview" data-embed-src="${escape(src)}">
-      <iframe src="${escape(src)}" title="Live preview" loading="lazy"
+      <iframe src="${escape(src)}" title="Live preview"
               allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>
     </div>`;
   }
@@ -1046,7 +1114,7 @@ function loadChannelDetailData(c) {
         const el = document.getElementById(sid);
         if (el && el.textContent.includes("Loading")) {
           const title = sid === "cd-streams"
-            ? (c.platform === "Twitch" ? "Past broadcasts" : "Recent live streams")
+            ? "Past Broadcasts"
             : "Recent uploads";
           el.innerHTML = `<h2 class="cd-section-title">${title}</h2>` +
             `<div class="empty sm">Couldn't load — the daemon may be fetching, or the platform isn't authed. <a href="#" data-action="cd-retry">Retry</a></div>`;
@@ -1064,20 +1132,153 @@ function paintChannelVods(channelId, platform) {
   const vods = channelVods[channelId];
   const streamsEl = document.getElementById("cd-streams");
   const uploadsEl = document.getElementById("cd-uploads");
+  // Look up channel context once so each VOD pill can carry the
+  // channel_name + platform the download route needs.
+  const channel = channelCache.find((c) => c.id === channelId);
+  const ctx = {
+    channelName: (channel && (channel.display_name || channel.name)) || "",
+    platform: platform || (channel && channel.platform) || "",
+  };
   if (!vods) {
-    if (streamsEl) streamsEl.innerHTML = vodSectionHtml("Recent live streams", null);
-    if (uploadsEl) uploadsEl.innerHTML = vodSectionHtml("Recent uploads", null);
+    if (streamsEl) streamsEl.innerHTML = vodSectionHtml("Past Broadcasts", null, ctx);
+    if (uploadsEl) uploadsEl.innerHTML = vodSectionHtml("Recent uploads", null, ctx);
     return;
   }
   const streams = vods.filter((v) => v.kind === "LiveBroadcast");
   const uploads = vods.filter((v) => v.kind !== "LiveBroadcast");
   if (streamsEl) {
-    streamsEl.innerHTML = vodSectionHtml(
-      platform === "Twitch" ? "Past broadcasts" : "Recent live streams",
-      streams,
-    );
+    streamsEl.innerHTML = vodSectionHtml("Past Broadcasts", streams, ctx);
   }
-  if (uploadsEl) uploadsEl.innerHTML = vodSectionHtml("Recent uploads", uploads);
+  if (uploadsEl) uploadsEl.innerHTML = vodSectionHtml("Recent uploads", uploads, ctx);
+  wireVodDownloadButtons();
+}
+
+// Click handler for [data-action=vod-download] buttons inside the media-list
+// pills. Optimistically flips to "downloading"; the SSE RecordingFinished
+// handler flips to "downloaded" when a matching recording completes.
+function wireVodDownloadButtons() {
+  document.querySelectorAll("[data-action=vod-download]").forEach((btn) => {
+    if (btn.dataset.wired === "1") return;
+    btn.dataset.wired = "1";
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const url = btn.dataset.url;
+      const channel_name = btn.dataset.channel;
+      const platform = btn.dataset.platform;
+      const post_title = btn.dataset.title || null;
+      if (!url || vodDownloadState[url] === "downloading" || vodDownloadState[url] === "downloaded") {
+        return;
+      }
+      vodDownloadState[url] = "downloading";
+      setVodButtonState(btn, "downloading");
+      try {
+        // `data-via=patreon` routes through PatreonPull (its IPC arm
+        // builds the Patreon-shaped output path + threads the patron
+        // cookies); everything else lands on the generic DownloadVod
+        // path. Both produce a RecordingJob with `source_url == url`,
+        // so the state map + progress bar pipeline are identical.
+        if (btn.dataset.via === "patreon") {
+          await API.patreonPull({
+            embed_url: url,
+            creator_name: channel_name,
+            post_title: post_title || "",
+          });
+        } else {
+          await API.vodDownload({ url, channel_name, platform, post_title });
+        }
+        Toast.success(`Downloading: ${post_title || url}`);
+        // The RecordingStarted SSE that follows will land in recCache with
+        // source_url == this url; seedVodDownloadStateFromRecCache() then
+        // confirms our optimistic state. When the recording reaches
+        // Finished, the same path flips the pill to Downloaded by exact
+        // source_url match — no FIFO guess.
+      } catch (err) {
+        // Roll back to idle so the user can retry.
+        delete vodDownloadState[url];
+        setVodButtonState(btn, "idle");
+        Toast.error(`Download failed: ${err.message}`);
+      }
+    });
+  });
+}
+
+// Walk recCache and reflect each recording whose source_url points at a VOD
+// into vodDownloadState. Called whenever recCache is refreshed so the
+// channel-detail view (and a fresh page reload) shows correct button state
+// without any FIFO guess.
+function seedVodDownloadStateFromRecCache() {
+  for (const r of recCache) {
+    if (!r.source_url) continue;
+    if (r.state === "Finished") {
+      vodDownloadState[r.source_url] = "downloaded";
+    } else if (isInProgress(r.state)) {
+      // Don't downgrade a "downloaded" entry if a stale in-progress row
+      // sneaks in (rare, but be safe).
+      if (vodDownloadState[r.source_url] !== "downloaded") {
+        vodDownloadState[r.source_url] = "downloading";
+      }
+    }
+  }
+}
+
+function setVodButtonState(btn, state) {
+  btn.classList.remove("vod-dl-idle", "vod-dl-downloading", "vod-dl-downloaded");
+  btn.classList.add(`vod-dl-${state}`);
+  btn.disabled = state !== "idle";
+  if (state === "downloading") {
+    // Try to seed initial bar from any cached progress on the matching job.
+    const url = btn.dataset.url;
+    const job = recCache.find((r) => r.source_url === url);
+    btn.innerHTML = vodProgressHtml(
+      job && job.download_pct,
+      job && job.download_eta_secs,
+      job && job.download_rate_bps,
+    );
+  } else {
+    btn.textContent = state === "downloaded" ? "Downloaded" : "Download";
+  }
+}
+
+// Inner HTML for the in-flight download widget: gradient-filled bar +
+// "NN% · Xm Ys left · R MB/s" label. Bar gradient runs amber → green so the
+// rightmost fill colour shifts greener as the pull completes.
+function vodProgressHtml(pct, etaSecs, rateBps) {
+  const p = Math.max(0, Math.min(100, Math.round(pct == null ? 0 : pct)));
+  const eta = etaSecs == null ? "" : fmtEta(etaSecs);
+  const rate = rateBps == null ? "" : `${formatBytes(rateBps)}/s`;
+  const meta = [eta && `${eta} left`, rate].filter(Boolean).join(" · ");
+  return `
+    <span class="vod-dl-bar"><span class="vod-dl-fill" style="width:${p}%"></span></span>
+    <span class="vod-dl-label">${p}%${meta ? " · " + meta : ""}</span>
+  `;
+}
+
+function fmtEta(secs) {
+  const s = Math.max(0, Math.floor(secs));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  if (m < 60) return r ? `${m}m ${r}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  const mm = m % 60;
+  return mm ? `${h}h ${mm}m` : `${h}h`;
+}
+
+// Surgical DOM patch: find every visible VOD pill bound to this job's
+// source_url and refresh its progress widget. Skips pills that have
+// transitioned to "downloaded" (which the seed function will finalize).
+function updateVodProgressDom(job) {
+  if (!job || !job.source_url) return;
+  if (vodDownloadState[job.source_url] !== "downloading") return;
+  const sel = `[data-action=vod-download][data-url="${CSS.escape(job.source_url)}"]`;
+  document.querySelectorAll(sel).forEach((btn) => {
+    btn.innerHTML = vodProgressHtml(
+      job.download_pct,
+      job.download_eta_secs,
+      job.download_rate_bps,
+    );
+  });
 }
 
 // Resolve a VOD/stream thumbnail URL, substituting Twitch's templated
@@ -1096,14 +1297,22 @@ function fmtDur(d) {
   return h ? `${h}h ${m}m` : `${m}m`;
 }
 
-function vodSectionHtml(title, vods) {
+function vodSectionHtml(title, vods, ctx) {
+  // Past Broadcasts gets the larger, centered treatment. Uploads keep the
+  // smaller original style.
+  const isPast = title === "Past Broadcasts";
+  const titleCls = isPast ? "cd-section-title past-broadcasts" : "cd-section-title";
   if (vods === null) {
-    return `<h2 class="cd-section-title">${title}</h2><div class="empty sm">Loading…</div>`;
+    return `<h2 class="${titleCls}">${title}</h2><div class="empty sm">Loading…</div>`;
   }
   if (vods.length === 0) {
-    return `<h2 class="cd-section-title">${title}</h2><div class="empty sm">None</div>`;
+    return `<h2 class="${titleCls}">${title}</h2><div class="empty sm">None</div>`;
   }
-  // Jellyseerr/*arr-style horizontal media pills: thumbnail + rich info block.
+  const channelName = (ctx && ctx.channelName) || "";
+  const platform = (ctx && ctx.platform) || "";
+  // Jellyseerr/*arr-style horizontal media pills: thumbnail + rich info block,
+  // with a sibling download button. The link wraps thumb+info; the button
+  // sits next to it so we don't nest interactive elements.
   const rows = vods
     .map((v) => {
       const href = /^https?:\/\//i.test(v.url || "") ? escape(v.url) : "#";
@@ -1112,18 +1321,47 @@ function vodSectionHtml(title, vods) {
       const dur = fmtDur(v.duration);
       const live = v.kind === "Live" || v.kind === "live";
       const meta = [date, dur].filter(Boolean).map(escape).join(" · ");
+      const downloadable = !!(v.url && channelName && platform);
+      const state = vodDownloadState[v.url] || "idle";
+      // For the downloading state, embed a live progress widget instead of
+      // plain text. Seed pct/eta/rate from any matching cached job so a
+      // re-render between SSE ticks doesn't reset the bar to 0%.
+      let inner;
+      if (state === "downloading") {
+        const job = recCache.find((r) => r.source_url === v.url);
+        inner = vodProgressHtml(
+          job && job.download_pct,
+          job && job.download_eta_secs,
+          job && job.download_rate_bps,
+        );
+      } else if (state === "downloaded") {
+        inner = "Downloaded";
+      } else {
+        inner = "Download";
+      }
+      const btn = downloadable
+        ? `<button class="vod-dl vod-dl-${state}" data-action="vod-download"
+              data-url="${escape(v.url)}"
+              data-channel="${escape(channelName)}"
+              data-platform="${escape(platform)}"
+              data-title="${escape(v.title || "")}"
+              ${state !== "idle" ? "disabled" : ""}>${inner}</button>`
+        : "";
       return `
-    <a class="media-pill" href="${href}" target="_blank" rel="noopener">
-      <div class="mp-thumb">${thumb ? `<img class="mp-thumb-img" loading="lazy" alt="" src="${escape(thumb)}" onerror="this.remove()">` : ""}</div>
-      <div class="mp-info">
-        <div class="mp-title">${escape(v.title)}</div>
-        <div class="mp-sub">${meta}</div>
-      </div>
-      <div class="mp-meta">${live ? '<span class="mp-badge live">LIVE VOD</span>' : '<span class="mp-badge">Upload</span>'}</div>
-    </a>`;
+    <div class="media-pill">
+      <a class="mp-link" href="${href}" target="_blank" rel="noopener">
+        <div class="mp-thumb">${thumb ? `<img class="mp-thumb-img" loading="lazy" alt="" src="${escape(thumb)}" onerror="this.remove()">` : ""}</div>
+        <div class="mp-info">
+          <div class="mp-title">${escape(v.title)}</div>
+          <div class="mp-sub">${meta}</div>
+        </div>
+        <div class="mp-meta">${live ? '<span class="mp-badge live">LIVE VOD</span>' : '<span class="mp-badge">Upload</span>'}</div>
+      </a>
+      ${btn}
+    </div>`;
     })
     .join("");
-  return `<h2 class="cd-section-title">${title} <span class="dash-count">${vods.length}</span></h2>
+  return `<h2 class="${titleCls}">${title}</h2>
     <div class="media-list">${rows}</div>`;
 }
 
@@ -1132,44 +1370,53 @@ function renderPatreonPosts(c) {
   const el = document.getElementById("cd-posts");
   if (!el) return;
   const posts = patreonState.posts[c.id] || [];
+  const channelName = c.display_name || c.name;
+  // Each post pill carries the same `.vod-dl` button the past-broadcasts
+  // list uses; state is keyed by embed_url (== source_url on the resulting
+  // RecordingJob), so seedVodDownloadStateFromRecCache surfaces in-flight /
+  // completed pulls across navigation just like past broadcasts.
   const rows = posts.length
     ? posts
         .map((p) => {
           const thumb = p.thumbnail_url
             ? `<img class="mp-thumb-img" loading="lazy" alt="" src="${escape(p.thumbnail_url)}" onerror="this.remove()">`
             : "";
+          const url = p.embed_url || "";
+          const state = vodDownloadState[url] || "idle";
+          const cachedJob = recCache.find((r) => r.source_url === url);
+          const inner = state === "downloading"
+            ? vodProgressHtml(
+                cachedJob && cachedJob.download_pct,
+                cachedJob && cachedJob.download_eta_secs,
+                cachedJob && cachedJob.download_rate_bps,
+              )
+            : state === "downloaded" ? "Downloaded" : "Download";
+          const btn = url
+            ? `<button class="vod-dl vod-dl-${state}" data-action="vod-download"
+                  data-via="patreon"
+                  data-url="${escape(url)}"
+                  data-channel="${escape(channelName)}"
+                  data-platform="Patreon"
+                  data-title="${escape(p.title)}"
+                  ${state !== "idle" ? "disabled" : ""}>${inner}</button>`
+            : "";
           return `
-      <div class="media-pill" data-action="patreon-pull"
-           data-embed="${escape(p.embed_url || "")}"
-           data-creator="${escape(c.display_name || c.name)}"
-           data-title="${escape(p.title)}">
-        <div class="mp-thumb">${thumb}</div>
-        <div class="mp-info">
-          <div class="mp-title">${escape(p.title)}</div>
-          <div class="mp-sub">${escape((p.published_at || "").slice(0, 10))}</div>
+      <div class="media-pill">
+        <div class="mp-link" style="cursor: default;">
+          <div class="mp-thumb">${thumb}</div>
+          <div class="mp-info">
+            <div class="mp-title">${escape(p.title)}</div>
+            <div class="mp-sub">${escape((p.published_at || "").slice(0, 10))}</div>
+          </div>
+          <div class="mp-meta"></div>
         </div>
-        <div class="mp-meta">${p.embed_url ? '<span class="vod-pull mp-badge">⇩ pull</span>' : ""}</div>
+        ${btn}
       </div>`;
         })
         .join("")
     : '<div class="empty sm">No video posts.</div>';
   el.innerHTML = `<h2 class="cd-section-title">Posts</h2><div class="media-list">${rows}</div>`;
-  el.querySelectorAll("[data-action=patreon-pull]").forEach((row) => {
-    if (!row.dataset.embed) return;
-    row.addEventListener("click", async () => {
-      try {
-        await API.patreonPull({
-          embed_url: row.dataset.embed,
-          creator_name: row.dataset.creator,
-          post_title: row.dataset.title,
-        });
-        row.querySelector(".vod-pull")?.replaceChildren(document.createTextNode("queued ✓"));
-        Toast.success(`Pull queued — ${row.dataset.title}`);
-      } catch (e) {
-        Toast.error(`Pull failed: ${e.message}`);
-      }
-    });
-  });
+  wireVodDownloadButtons();
 }
 
 // #74 — start/stop a per-channel bulk download.
@@ -1434,6 +1681,7 @@ async function renderRecordings() {
     return;
   }
   recCache = recordings;
+  seedVodDownloadStateFromRecCache();
   // W4-alt: sortable + filterable data grid. Column headers toggle sort;
   // the filter box narrows by channel/title live without refetching.
   root.innerHTML = chrome(`
@@ -1445,6 +1693,12 @@ async function renderRecordings() {
       <button id="rec-density" class="sm" title="Toggle row density">
         ${recDensity === "compact" ? "▤ Comfortable" : "▥ Compact"}
       </button>
+      ${(() => {
+        const errored = recCache.filter((r) => stateClassName(r.state) === "failed" || stateLabel(r.state).toLowerCase().includes("interrupt")).length;
+        return errored > 0
+          ? `<button id="rec-clear-errored" class="danger sm" title="Trash all failed/interrupted recordings">✕ Clear errored (${errored})</button>`
+          : "";
+      })()}
     </div>
     <p class="page-subtitle" id="rec-count"></p>
     <div id="rec-massbar" class="massbar" hidden></div>
@@ -1474,6 +1728,25 @@ async function renderRecordings() {
     recDensity = recDensity === "compact" ? "comfortable" : "compact";
     localStorage.setItem("strivo-rec-density", recDensity);
     renderRecordings().catch((e) => Toast.error(e.message));
+  });
+  document.getElementById("rec-clear-errored")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    const errored = recCache.filter((r) => {
+      const c = stateClassName(r.state);
+      const l = stateLabel(r.state).toLowerCase();
+      return c === "failed" || l.includes("interrupt");
+    });
+    if (errored.length === 0) return;
+    if (!(await confirmDialog(`Trash ${errored.length} errored recording(s)? Files move to the 7-day trash.`, { ok: "Clear", danger: true })))
+      return;
+    await withBusy(btn, "Clearing…", async () => {
+      await API.clearErroredRecordings();
+      Toast.success(`Cleared ${errored.length}`);
+      // Optimistic prune; SSE refetch confirms.
+      const erroredIds = new Set(errored.map((r) => r.id));
+      recCache = recCache.filter((r) => !erroredIds.has(r.id));
+      renderRecordings().catch(() => {});
+    }).catch((err) => Toast.error(`Clear failed: ${err.message}`));
   });
   document.getElementById("rec-select-all")?.addEventListener("change", (e) => {
     const visible = visibleRecordingIds();
@@ -1547,11 +1820,90 @@ function paintRecordings() {
       }).catch((e) => Toast.error(`Stop failed: ${e.message}`));
     });
   });
+  body.querySelectorAll("[data-action=rec-play]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openRecordingPlayer(btn.dataset.jobId);
+    });
+  });
+  body.querySelectorAll("[data-action=rec-info]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openRecordingInfo(btn.dataset.jobId);
+    });
+  });
+  body.querySelectorAll("[data-action=rec-delete]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!(await confirmDialog("Delete this recording? The file moves to the 7-day trash.", { ok: "Delete", danger: true })))
+        return;
+      await withBusy(btn, "Deleting…", async () => {
+        await API.deleteRecordingFile(btn.dataset.jobId);
+        Toast.success("Deleted");
+        // Optimistic: drop from local cache + repaint; the SSE refetch
+        // confirms shortly.
+        recCache = recCache.filter((r) => r.id !== btn.dataset.jobId);
+        renderRecordings().catch(() => {});
+      }).catch((err) => Toast.error(`Delete failed: ${err.message}`));
+    });
+  });
+  // Row click:
+  //   plain                           → open Info modal
+  //   Shift+click                     → select range (anchor → here)
+  //   Ctrl/Cmd+click                  → toggle just this row
+  // Buttons/inputs/anchors still get their own handlers (early-return).
+  body.querySelectorAll("tr[data-rec-row]").forEach((tr) => {
+    tr.addEventListener("click", (e) => {
+      if (e.target.closest("button, input, a")) return;
+      const id = tr.dataset.recRow;
+      if (e.shiftKey && recAnchorId) {
+        e.preventDefault();
+        const ids = visibleRecordingIds();
+        const i = ids.indexOf(recAnchorId);
+        const j = ids.indexOf(id);
+        if (i >= 0 && j >= 0) {
+          const [lo, hi] = i < j ? [i, j] : [j, i];
+          for (let k = lo; k <= hi; k++) recSelected.add(ids[k]);
+          paintRecordings();
+        }
+        return;
+      }
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        if (recSelected.has(id)) recSelected.delete(id);
+        else recSelected.add(id);
+        recAnchorId = id;
+        paintRecordings();
+        return;
+      }
+      openRecordingInfo(id);
+    });
+  });
+  // Selection model:
+  //   Click checkbox            → toggle this row
+  //   Shift+click checkbox/row  → select range from anchor to here
+  //   Ctrl/Cmd+click row body   → toggle this row (without opening Info)
+  //   Plain click row body      → open Info modal (handled below)
   body.querySelectorAll(".rec-row-check").forEach((cb) => {
-    cb.addEventListener("change", () => {
-      if (cb.checked) recSelected.add(cb.dataset.jobId);
-      else recSelected.delete(cb.dataset.jobId);
-      updateMassbar();
+    // Suppress the native `change` (it fires on Space too); a `click`
+    // handler with `preventDefault` lets us implement range semantics.
+    cb.addEventListener("click", (e) => {
+      e.preventDefault();
+      const id = cb.dataset.jobId;
+      if (e.shiftKey && recAnchorId) {
+        const ids = visibleRecordingIds();
+        const i = ids.indexOf(recAnchorId);
+        const j = ids.indexOf(id);
+        if (i >= 0 && j >= 0) {
+          const [lo, hi] = i < j ? [i, j] : [j, i];
+          for (let k = lo; k <= hi; k++) recSelected.add(ids[k]);
+        }
+      } else {
+        if (recSelected.has(id)) recSelected.delete(id);
+        else recSelected.add(id);
+        recAnchorId = id;
+      }
+      paintRecordings();
     });
   });
   const all = document.getElementById("rec-select-all");
@@ -1635,24 +1987,48 @@ function recThumb(r) {
 }
 
 function recordingRow(r) {
-  const state = stateLabel(r.state);
-  const stateClass = stateClassName(r.state);
-  const isActive = stateClass === "recording";
+  const disp = recordingDisplayState(r);
+  const state = disp.label;
+  const stateClass = disp.className;
+  // Active includes both live captures (Recording) and VOD pulls (Downloading);
+  // both are in-flight and offer Stop.
+  const isActive = stateClass === "recording" || stateClass === "downloading";
+  const isFinished = stateClass === "finished";
+  // Action set per state:
+  //   active   → Stop
+  //   finished → ▶ Play  ⓘ Info
+  //   anything → ⓘ Info  ✕ Delete
+  const actions = isActive
+    ? `<button class="danger sm" data-action="stop" data-job-id="${r.id}">Stop</button>`
+    : `${isFinished
+        ? `<button class="primary sm" data-action="rec-play" data-job-id="${r.id}" title="Open player (Enter)">▶ Play</button>`
+        : ""}
+       <button class="sm" data-action="rec-info" data-job-id="${r.id}" title="Recording details (I)">ⓘ Info</button>
+       <button class="danger sm" data-action="rec-delete" data-job-id="${r.id}" title="Delete (Del)">✕</button>`;
   return `
-    <tr class="${recSelected.has(r.id) ? "rec-sel" : ""}">
+    <tr class="${recSelected.has(r.id) ? "rec-sel" : ""}" data-rec-row="${escape(r.id)}">
       <td class="rec-check"><input type="checkbox" class="rec-row-check" data-job-id="${escape(r.id)}" ${recSelected.has(r.id) ? "checked" : ""} aria-label="Select recording"></td>
       <td><span class="state-pill ${stateClass}">${state}</span></td>
       <td>${escape(r.channel_name)}</td>
       <td><div class="rec-title-cell">${recThumb(r)}<span>${escape(r.stream_title || "(no title)")}</span></div></td>
       <td>${new Date(r.started_at).toLocaleString()}</td>
       <td>${formatBytes(r.bytes_written || 0)}</td>
-      <td>
-        ${isActive
-          ? `<button class="danger" data-action="stop" data-job-id="${r.id}">Stop</button>`
-          : ""}
-      </td>
+      <td class="rec-actions"><div class="rec-actions-inner">${actions}</div></td>
     </tr>
   `;
+}
+
+// VOD pulls and live captures both ride `RecordingState::Recording`, but
+// "Recording" reads wrong for a yt-dlp-backed VOD pull. Distinguish by
+// `source_url`: when set, label + colour as a download instead. Other
+// states (Finished/Failed/etc) read the same regardless.
+function recordingDisplayState(j) {
+  const cls = stateClassName(j.state);
+  const lbl = stateLabel(j.state);
+  if (j && j.source_url && cls === "recording") {
+    return { label: "Downloading", className: "downloading" };
+  }
+  return { label: lbl, className: cls };
 }
 
 function stateLabel(s) {
@@ -1757,60 +2133,870 @@ async function renderPipelines() {
 }
 
 // ── Plugins (W5 — mirror the TUI's Shift+P browser) ────────────────────
+// Top-level Plugins route. Sub-routes select a plugin and its sub-views:
+//   #/plugins                       → hub
+//   #/plugins/crunchr               → transcribed-recordings list + search
+//   #/plugins/crunchr/rec/<id>      → transcript + analysis
+//   #/plugins/archiver              → archived channels
+//   #/plugins/archiver/<channelId>  → channel catalog
+//   #/plugins/viewguard             → fraud verdicts
+//   #/plugins/insights              → word freq / topics / speakers
 async function renderPlugins() {
+  const parts = routeParts(); // ["plugins", <slug?>, …]
+  const slug = parts[1];
+  try {
+    switch (slug) {
+      case "crunchr":
+        if (parts[2] === "rec" && parts[3]) return await renderCrunchrRecording(parts[3]);
+        return await renderCrunchr();
+      case "archiver":
+        if (parts[2]) return await renderArchiverVideos(parts[2]);
+        return await renderArchiver();
+      case "viewguard":
+        return await renderViewguard();
+      case "insights":
+        return await renderInsights();
+      default:
+        return await renderPluginHub();
+    }
+  } catch (e) {
+    if (e.message && e.message.includes("unauthorized")) return;
+    root.removeAttribute("aria-busy");
+    root.innerHTML = chrome(
+      `${pluginHeader("Plugins", "")}<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`,
+    );
+    setupChromeHandlers();
+  }
+}
+
+// Shared page header with an optional "← back to Plugins" trail.
+function pluginHeader(title, subtitle, backHref) {
+  const back = backHref
+    ? `<a class="pg-back" href="${backHref}">← back</a>`
+    : "";
+  return `
+    ${back}
+    <h1 class="page-title">${escape(title)}</h1>
+    ${subtitle ? `<p class="page-subtitle">${subtitle}</p>` : ""}
+  `;
+}
+
+async function renderPluginHub() {
+  const resp = await API.plugins();
   root.removeAttribute("aria-busy");
+  const plugins = (resp && resp.plugins) || [];
+  const cards = plugins
+    .map((p) => {
+      const statBits = Object.entries(p.stats || {})
+        .map(
+          ([k, v]) =>
+            `<span class="pg-stat"><strong>${formatCount(v)}</strong> ${escape(k.replace(/_/g, " "))}</span>`,
+        )
+        .join("");
+      const status = p.available
+        ? `<span class="cfg-badge ok">ready</span>`
+        : `<span class="cfg-badge">idle</span>`;
+      const href = p.available ? `#/plugins/${p.name}` : null;
+      const body = `
+        <div class="pg-card-head">
+          <span class="pg-icon pg-icon-${p.name}" aria-hidden="true">${escape((p.display || p.name)[0])}</span>
+          <span class="pg-card-name">${escape(p.display || p.name)}</span>
+          ${status}
+        </div>
+        <p class="pg-card-desc">${escape(p.description || "")}</p>
+        <div class="pg-stats">${statBits || '<span class="pg-stat muted">no data yet</span>'}</div>`;
+      return href
+        ? `<a class="pg-card" href="${href}" data-plugin="${p.name}">${body}</a>`
+        : `<div class="pg-card pg-card-idle" data-plugin="${p.name}">${body}</div>`;
+    })
+    .join("");
   root.innerHTML = chrome(`
-    <h1 class="page-title">Plugins</h1>
-    <p class="page-subtitle">
-      Loaded first-party plugins. Verbs hit <code>POST /api/v1/plugins/&lt;plugin&gt;/&lt;verb&gt;</code>.
-    </p>
-    <div class="channel-grid">
-      ${pluginCard("crunchr", "Crunchr", "Transcription + analysis", ["Re-transcribe", "Show transcript"])}
-      ${pluginCard("archiver", "Archiver", "Back-catalog VOD pulls", ["Re-archive channel"])}
-      ${pluginCard("editor", "Editor", "Lossless transcript-as-timeline clipper", [])}
-      ${pluginCard("insights", "Insights", "Word freq / speakers / topics", [])}
+    ${pluginHeader("Plugins", "First-party plugins. Pick one to browse what it has produced.")}
+    <div class="pg-grid">${cards || '<div class="empty">No plugins loaded.</div>'}</div>
+  `);
+  setupChromeHandlers();
+}
+
+// ── Crunchr ──────────────────────────────────────────────────────────
+async function renderCrunchr() {
+  const resp = await API.crunchrRecordings();
+  root.removeAttribute("aria-busy");
+  const recs = (resp && resp.recordings) || [];
+  const rows = recs
+    .map((r) => {
+      const an = r.has_analysis
+        ? '<span class="cfg-badge ok">analyzed</span>'
+        : "";
+      return `
+        <a class="pg-row" href="#/plugins/crunchr/rec/${encodeURIComponent(r.recording_id)}">
+          <span class="pg-row-main">
+            <span class="pg-row-title">${escape(r.title || "(untitled)")}</span>
+            <span class="pg-row-sub">${escape(r.channel_name)} · ${escape(r.created_at || "")}</span>
+          </span>
+          <span class="pg-row-meta">
+            <span class="cfg-badge status-${escape(r.status)}">${escape(r.status)}</span>
+            <span class="pg-row-num">${formatCount(r.segment_count)} segs</span>
+            ${an}
+          </span>
+        </a>`;
+    })
+    .join("");
+  root.innerHTML = chrome(`
+    ${pluginHeader("Crunchr", "Transcribed recordings. Click one to read its transcript and analysis.", "#/plugins")}
+    <div class="pg-search">
+      <input id="crunchr-q" type="search" placeholder="Search transcripts…"
+             autocomplete="off" aria-label="Search transcripts" />
     </div>
-    <div class="empty" style="margin-top: 2rem; font-size: 0.875rem;">
-      Verb dispatch is W2-phase-3 — buttons here POST to the daemon, which logs the request
-      and returns 202. Full dispatch lands when the daemon AppState wrapper does.
+    <div id="crunchr-search-results"></div>
+    <div class="pg-list">${rows || '<div class="empty">Nothing transcribed yet.</div>'}</div>
+  `);
+  setupChromeHandlers();
+
+  const q = document.getElementById("crunchr-q");
+  const out = document.getElementById("crunchr-search-results");
+  let timer = null;
+  q.addEventListener("input", () => {
+    clearTimeout(timer);
+    const term = q.value.trim();
+    if (!term) {
+      out.innerHTML = "";
+      return;
+    }
+    timer = setTimeout(async () => {
+      try {
+        const r = await API.crunchrSearch(term);
+        const hits = (r && r.results) || [];
+        out.innerHTML = hits.length
+          ? `<div class="pg-list pg-search-hits">${hits
+              .map(
+                (h) => `
+            <a class="pg-row" href="#/plugins/crunchr/rec/${encodeURIComponent(findRecIdForHit(recs, h))}">
+              <span class="pg-row-main">
+                <span class="pg-row-title">${escape(h.snippet)}</span>
+                <span class="pg-row-sub">${escape(h.video_title)} · ${escape(h.channel_name)} · ${fmtClock(h.start_sec)}</span>
+              </span>
+            </a>`,
+              )
+              .join("")}</div>`
+          : '<div class="empty sm">No matches.</div>';
+      } catch (e) {
+        out.innerHTML = `<div class="empty sm">${escape(e.message)}</div>`;
+      }
+    }, 220);
+  });
+}
+
+// FTS rows don't carry a recording_id; match on title+channel against the
+// already-loaded list so a hit links to the right transcript.
+function findRecIdForHit(recs, hit) {
+  const m = recs.find(
+    (r) => r.title === hit.video_title && r.channel_name === hit.channel_name,
+  );
+  return m ? m.recording_id : "";
+}
+
+async function renderCrunchrRecording(id) {
+  const d = await API.crunchrRecording(id);
+  root.removeAttribute("aria-busy");
+  const topics = (d.topics || [])
+    .map((t) => `<span class="pg-chip">${escape(t)}</span>`)
+    .join("");
+  const sentiment = d.sentiment
+    ? `<span class="cfg-badge sentiment-${escape(d.sentiment)}">${escape(d.sentiment)}</span>`
+    : "";
+  const analysis = d.summary || topics || sentiment
+    ? `<section class="cfg-card">
+         <h2 class="cfg-title">Analysis ${sentiment}</h2>
+         ${d.summary ? `<p class="pg-summary">${escape(d.summary)}</p>` : ""}
+         ${topics ? `<div class="pg-chips">${topics}</div>` : ""}
+       </section>`
+    : "";
+  const segs = (d.segments || [])
+    .map(
+      (s) => `
+      <div class="pg-seg">
+        <span class="pg-seg-time">${fmtClock(s.start_sec)}</span>
+        ${s.speaker ? `<span class="pg-seg-speaker">${escape(s.speaker)}</span>` : ""}
+        <span class="pg-seg-text">${escape(s.text)}</span>
+      </div>`,
+    )
+    .join("");
+  root.innerHTML = chrome(`
+    ${pluginHeader(d.title || "Transcript", `${escape(d.channel_name)} · ${escape(d.status)}`, "#/plugins/crunchr")}
+    <div class="pg-verbs">
+      <button id="retranscribe" data-rec="${escape(d.recording_id)}">↻ Re-transcribe</button>
+      <a class="pg-linkbtn" href="#/plugins/insights/rec/${encodeURIComponent(d.recording_id)}">View insights →</a>
+    </div>
+    ${analysis}
+    <section class="cfg-card">
+      <h2 class="cfg-title">Transcript</h2>
+      <div class="pg-transcript">${segs || '<div class="empty sm">No segments — transcription may still be running.</div>'}</div>
+    </section>
+  `);
+  setupChromeHandlers();
+  const btn = document.getElementById("retranscribe");
+  if (btn) {
+    btn.addEventListener("click", () =>
+      dispatchVerb("crunchr", "Re-transcribe", [btn.dataset.rec], btn),
+    );
+  }
+}
+
+// ── Archiver ─────────────────────────────────────────────────────────
+async function renderArchiver() {
+  const resp = await API.archiverChannels();
+  root.removeAttribute("aria-busy");
+  const chans = (resp && resp.channels) || [];
+  const rows = chans
+    .map((c) => {
+      const pct = c.video_count
+        ? Math.round((c.downloaded_count / c.video_count) * 100)
+        : 0;
+      return `
+        <a class="pg-row" href="#/plugins/archiver/${encodeURIComponent(c.id)}">
+          <span class="pg-row-main">
+            <span class="pg-row-title">${escape(c.name)}</span>
+            <span class="pg-row-sub plat-${escape((c.platform || "").toLowerCase())}">${escape(c.platform)} · ${escape(c.last_scan || "never scanned")}</span>
+          </span>
+          <span class="pg-row-meta">
+            <span class="pg-row-num">${formatCount(c.downloaded_count)} / ${formatCount(c.video_count)}</span>
+            <span class="pg-mini-gauge"><span style="width:${pct}%"></span></span>
+          </span>
+        </a>`;
+    })
+    .join("");
+  root.innerHTML = chrome(`
+    ${pluginHeader("Archiver", "Tracked channels and their back-catalog download status.", "#/plugins")}
+    <div class="pg-list">${rows || '<div class="empty">No channels archived yet.</div>'}</div>
+  `);
+  setupChromeHandlers();
+}
+
+async function renderArchiverVideos(channelId) {
+  const resp = await API.archiverVideos(channelId);
+  root.removeAttribute("aria-busy");
+  const vids = (resp && resp.videos) || [];
+  const rows = vids
+    .map(
+      (v) => `
+      <div class="pg-row pg-row-static">
+        <span class="pg-row-main">
+          <span class="pg-row-title">${escape(v.title)}</span>
+          <span class="pg-row-sub">${escape(v.upload_date || "")}${v.playlist ? " · " + escape(v.playlist) : ""}${v.duration ? " · " + fmtClock(v.duration) : ""}</span>
+        </span>
+        <span class="pg-row-meta">
+          ${v.downloaded ? '<span class="cfg-badge ok">downloaded</span>' : '<span class="cfg-badge">pending</span>'}
+        </span>
+      </div>`,
+    )
+    .join("");
+  root.innerHTML = chrome(`
+    ${pluginHeader("Catalog", `${vids.length} videos`, "#/plugins/archiver")}
+    <div class="pg-list">${rows || '<div class="empty">No catalog entries.</div>'}</div>
+  `);
+  setupChromeHandlers();
+}
+
+// ── Viewguard ────────────────────────────────────────────────────────
+async function renderViewguard() {
+  const resp = await API.viewguardVerdicts();
+  root.removeAttribute("aria-busy");
+  const verdicts = (resp && resp.verdicts) || [];
+  const cards = verdicts
+    .map((v) => {
+      const pct = Math.round((v.final_score || 0) * 100);
+      const contributors = Array.isArray(v.contributors)
+        ? v.contributors
+        : v.contributors && v.contributors.contributors
+          ? v.contributors.contributors
+          : [];
+      const bars = contributors
+        .map((c) => {
+          const name = c.kind || c.detector || c.name || "signal";
+          const score = c.score != null ? c.score : c.weight != null ? c.weight : 0;
+          return `<div class="vg-contrib">
+              <span class="vg-contrib-name">${escape(String(name))}</span>
+              <span class="vg-bar"><span style="width:${Math.round(score * 100)}%"></span></span>
+            </div>`;
+        })
+        .join("");
+      return `
+        <section class="cfg-card vg-card">
+          <div class="vg-head">
+            <span class="vg-channel">${escape(v.channel_id)}</span>
+            <span class="cfg-badge vg-band vg-band-${escape((v.band || "").toLowerCase())}">${escape(v.band)}</span>
+          </div>
+          <div class="vg-score">
+            <span class="vg-score-num">${pct}%</span>
+            <span class="vg-score-label">suspicion</span>
+          </div>
+          ${bars ? `<div class="vg-contribs">${bars}</div>` : ""}
+          <div class="vg-when">${escape(v.stream_started_at || "")}</div>
+        </section>`;
+    })
+    .join("");
+  root.innerHTML = chrome(`
+    ${pluginHeader("Viewguard", "Latest viewbot-fraud verdict per channel. Higher = more suspicious.", "#/plugins")}
+    <div class="cfg-grid">${cards || '<div class="empty">No verdicts yet — viewers are sampled while channels are live.</div>'}</div>
+  `);
+  setupChromeHandlers();
+}
+
+// ── Insights ─────────────────────────────────────────────────────────
+let insightsState = { stopwords: false };
+async function renderInsights() {
+  const parts = routeParts();
+  const recId = parts[2] === "rec" ? parts[3] : null;
+  const [wordsResp, topicsResp] = await Promise.all([
+    API.insightsWords({ stopwords: insightsState.stopwords, limit: 40 }),
+    API.insightsTopics(),
+  ]);
+  root.removeAttribute("aria-busy");
+  const words = (wordsResp && wordsResp.words) || [];
+  const max = words.reduce((m, w) => Math.max(m, w.count), 0) || 1;
+  const wordRows = words
+    .map(
+      (w) => `
+      <div class="wf-row">
+        <span class="wf-word">${escape(w.word)}</span>
+        <span class="wf-bar"><span style="width:${Math.round((w.count / max) * 100)}%"></span></span>
+        <span class="wf-count">${formatCount(w.count)}</span>
+      </div>`,
+    )
+    .join("");
+  const topics = (topicsResp && topicsResp.topics) || [];
+  const topicChips = topics
+    .slice(0, 60)
+    .map(
+      (t) =>
+        `<span class="pg-chip" title="${escape(t.first_seen)} → ${escape(t.last_seen)}">${escape(t.topic)} <em>${t.count}</em></span>`,
+    )
+    .join("");
+
+  root.innerHTML = chrome(`
+    ${pluginHeader("Insights", "Aggregate signals across every transcribed recording.", "#/plugins")}
+    <div class="cfg-grid">
+      <section class="cfg-card">
+        <h2 class="cfg-title">Top words</h2>
+        <div class="pg-toolbar">
+          <label class="pg-toggle"><input type="checkbox" id="ins-stopwords" ${insightsState.stopwords ? "checked" : ""}/> include stopwords</label>
+          <a class="pg-linkbtn" href="/api/v1/plugins/insights/export?fmt=csv${insightsState.stopwords ? "&stopwords=true" : ""}">Export CSV</a>
+          <a class="pg-linkbtn" href="/api/v1/plugins/insights/export?fmt=json${insightsState.stopwords ? "&stopwords=true" : ""}">JSON</a>
+        </div>
+        <div class="wf-list">${wordRows || '<div class="empty sm">No word data yet.</div>'}</div>
+      </section>
+      <section class="cfg-card">
+        <h2 class="cfg-title">Topics</h2>
+        <div class="pg-chips">${topicChips || '<div class="empty sm">No analyzed recordings yet.</div>'}</div>
+      </section>
+      <section class="cfg-card" id="ins-speakers-card">
+        <h2 class="cfg-title">Speaker airtime</h2>
+        <div id="ins-speakers"><div class="empty sm">Open a transcript and choose “View insights” to load speaker airtime.</div></div>
+      </section>
     </div>
   `);
   setupChromeHandlers();
-  document.querySelectorAll("[data-action=plugin-verb]").forEach((btn) => {
+  const cb = document.getElementById("ins-stopwords");
+  if (cb) {
+    cb.addEventListener("change", () => {
+      insightsState.stopwords = cb.checked;
+      renderInsights();
+    });
+  }
+  if (recId) await loadInsightsSpeakers(recId);
+}
+
+async function loadInsightsSpeakers(recId) {
+  const host = document.getElementById("ins-speakers");
+  if (!host) return;
+  try {
+    const r = await API.insightsSpeakers(recId);
+    const speakers = (r && r.speakers) || [];
+    const max = speakers.reduce((m, s) => Math.max(m, s.seconds), 0) || 1;
+    host.innerHTML = speakers.length
+      ? `${r.sentiment ? `<p class="page-subtitle">sentiment: <span class="cfg-badge sentiment-${escape(r.sentiment)}">${escape(r.sentiment)}</span></p>` : ""}
+         ${speakers
+           .map(
+             (s) => `
+        <div class="wf-row">
+          <span class="wf-word">${escape(s.speaker)}</span>
+          <span class="wf-bar"><span style="width:${Math.round((s.seconds / max) * 100)}%"></span></span>
+          <span class="wf-count">${fmtClock(s.seconds)}</span>
+        </div>`,
+           )
+           .join("")}`
+      : '<div class="empty sm">No diarized speakers for this recording.</div>';
+  } catch (e) {
+    host.innerHTML = `<div class="empty sm">${escape(e.message)}</div>`;
+  }
+}
+
+// ── Verb dispatch (actions over IPC) ─────────────────────────────────
+async function dispatchVerb(plugin, verb, selection, btn) {
+  if (btn) {
+    btn.disabled = true;
+    btn.dataset.prevLabel = btn.textContent;
+    btn.textContent = "…";
+  }
+  try {
+    await API.pluginRpc(plugin, verb, { selection });
+    Toast.success(`${verb} queued in the daemon`);
+  } catch (e) {
+    Toast.error(`${verb} failed: ${e.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      if (btn.dataset.prevLabel) btn.textContent = btn.dataset.prevLabel;
+    }
+  }
+}
+
+// mm:ss / h:mm:ss from a float-seconds value.
+function fmtClock(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+}
+
+// ── Recording info modal + in-app player ─────────────────────────────
+//
+// Two overlays — `#rec-info-modal` (stats + plugin quick-actions) and
+// `#rec-player-modal` (custom mpv-style HTML5 player). Both close on
+// Esc / backdrop click; opening one closes any other.
+
+function ensureModalContainer(id) {
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = id;
+    el.className = "modal-overlay";
+    el.setAttribute("role", "dialog");
+    el.setAttribute("aria-modal", "true");
+    document.body.appendChild(el);
+  }
+  return el;
+}
+
+function closeRecordingModals() {
+  document.getElementById("rec-info-modal")?.remove();
+  const pl = document.getElementById("rec-player-modal");
+  if (pl) {
+    const v = pl.querySelector("video");
+    if (v) { v.pause(); v.removeAttribute("src"); v.load(); }
+    pl.remove();
+  }
+  document.body.classList.remove("modal-open");
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (document.getElementById("rec-player-modal") || document.getElementById("rec-info-modal")) {
+    closeRecordingModals();
+    e.preventDefault();
+  }
+});
+
+// Format bytes/sec into "1.2 Mbps" / "320 kbps" / "12 bps".
+function fmtBitrate(bps) {
+  if (!bps || bps <= 0) return "";
+  if (bps >= 1_000_000) return `${(bps / 1_000_000).toFixed(1)} Mbps`;
+  if (bps >= 1_000) return `${Math.round(bps / 1_000)} kbps`;
+  return `${bps} bps`;
+}
+function fmtHz(hz) {
+  if (!hz || hz <= 0) return "";
+  if (hz >= 1_000) return `${(hz / 1_000).toFixed(hz % 1_000 === 0 ? 0 : 1)} kHz`;
+  return `${hz} Hz`;
+}
+
+// Stream section for the Info modal: container + per-track summaries from
+// ffprobe. Renders empty when the probe failed (ffprobe missing, file
+// missing, codec parse failure) — the rest of the modal still shows.
+function probeSectionHtml(p) {
+  if (!p) {
+    return `<section class="rec-info-stream rec-info-stream-missing">
+      <h3>Stream</h3>
+      <div class="empty sm">ffprobe unavailable or recording file missing.</div>
+    </section>`;
+  }
+  const meta = (k, v) => v ? `<dt>${escape(k)}</dt><dd>${v}</dd>` : "";
+  const headBits = [
+    p.container && escape(p.container),
+    fmtBitrate(p.bit_rate || 0),
+  ].filter(Boolean).join(" · ");
+  const vRows = (p.video || []).map((v) => {
+    const bits = [
+      v.codec && escape(v.codec),
+      (v.width && v.height) ? `${v.width}×${v.height}` : null,
+      v.fps ? `${(+v.fps).toFixed(v.fps % 1 === 0 ? 0 : 2)} fps` : null,
+      fmtBitrate(v.bit_rate || 0),
+      v.pix_fmt && escape(v.pix_fmt),
+    ].filter(Boolean).join(" · ");
+    return bits ? `<div class="rec-info-track">${bits}</div>` : "";
+  }).join("");
+  const aRows = (p.audio || []).map((a) => {
+    const bits = [
+      a.codec && escape(a.codec),
+      a.channel_layout ? escape(a.channel_layout) : (a.channels ? `${a.channels} ch` : null),
+      fmtHz(a.sample_rate || 0),
+      fmtBitrate(a.bit_rate || 0),
+      a.language && escape(a.language),
+    ].filter(Boolean).join(" · ");
+    return bits ? `<div class="rec-info-track">${bits}</div>` : "";
+  }).join("");
+  const sRows = (p.subtitle || []).map((s) => {
+    const bits = [s.codec && escape(s.codec), s.language && escape(s.language)]
+      .filter(Boolean).join(" · ");
+    return bits ? `<div class="rec-info-track">${bits}</div>` : "";
+  }).join("");
+  return `
+    <section class="rec-info-stream">
+      <h3>Stream</h3>
+      <dl class="rec-info-stats rec-info-stream-stats">
+        ${meta("Container", headBits)}
+        ${vRows ? meta(`Video${p.video.length > 1 ? ` ×${p.video.length}` : ""}`, vRows) : ""}
+        ${aRows ? meta(`Audio${p.audio.length > 1 ? ` ×${p.audio.length}` : ""}`, aRows) : ""}
+        ${sRows ? meta(`Subtitle${p.subtitle.length > 1 ? ` ×${p.subtitle.length}` : ""}`, sRows) : ""}
+      </dl>
+    </section>`;
+}
+
+async function openRecordingInfo(jobId) {
+  closeRecordingModals();
+  const overlay = ensureModalContainer("rec-info-modal");
+  overlay.innerHTML = `<div class="modal-card rec-info-card"><div class="empty sm">Loading…</div></div>`;
+  document.body.classList.add("modal-open");
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeRecordingModals(); });
+
+  let rec, plugins, probe;
+  try {
+    // Probe is best-effort (ffprobe may not be installed, file may be
+    // missing); a failure must not block the modal from rendering.
+    [rec, plugins, probe] = await Promise.all([
+      API.recordingOne(jobId),
+      API.plugins().catch(() => ({ plugins: [] })),
+      API.recordingProbe(jobId).catch(() => null),
+    ]);
+  } catch (e) {
+    overlay.querySelector(".modal-card").innerHTML =
+      `<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`;
+    return;
+  }
+
+  const state = stateLabel(rec.state);
+  const stateClass = stateClassName(rec.state);
+  const isFinished = stateClass === "finished";
+  const meta = (k, v) => `<dt>${escape(k)}</dt><dd>${v}</dd>`;
+  // Bullet-proof scope match: accept the canonical lowercase "recording",
+  // the Rust-debug form "Item(Recording)", or any string whose lowercase
+  // contains "recording". Keeps the SPA right whether the index handler
+  // hardcodes the string or eventually serializes the live enum.
+  const isRecordingScope = (s) => {
+    if (!s) return false;
+    const t = String(s).toLowerCase();
+    return t === "recording" || t.includes("recording");
+  };
+  const recordingVerbs = ((plugins && plugins.plugins) || [])
+    .flatMap((p) => (p.verbs || [])
+      .filter((v) => isRecordingScope(v.scope))
+      .map((v) => ({ ...v, plugin: p.name, available: p.available })))
+    .filter((v) => v.available);
+  // SPA-native action: if Crunchr is available, surface a transcript-view
+  // link rather than a no-op IPC dispatch. (`Show transcript` on the
+  // plugin returns TUI-only `ActivatePane` actions when handled headless,
+  // so we'd otherwise just queue and visibly do nothing.)
+  const crunchr = ((plugins && plugins.plugins) || []).find((p) => p.name === "crunchr");
+  const showTranscriptHtml = crunchr && crunchr.available
+    ? `<a class="sm rec-info-verb-link"
+          href="#/plugins/crunchr/rec/${encodeURIComponent(jobId)}"
+          data-action="rec-info-route-close">📜 Show transcript</a>`
+    : "";
+  const verbBtns = recordingVerbs.map((v) => `
+      <button class="sm" data-action="rec-info-verb"
+              data-plugin="${escape(v.plugin)}"
+              data-verb="${escape(v.verb)}">
+        ${escape(v.label || v.verb)}
+      </button>`).join("");
+  const actionsHtml = (verbBtns + showTranscriptHtml) ||
+    `<div class="empty sm">No plugin actions available.</div>`;
+
+  overlay.querySelector(".modal-card").innerHTML = `
+    <header class="rec-info-head">
+      <span class="state-pill ${stateClass}">${escape(state)}</span>
+      <h2>${escape(rec.stream_title || "(no title)")}</h2>
+      <button class="modal-close" aria-label="Close" data-action="modal-close">✕</button>
+    </header>
+    <div class="rec-info-body">
+      <div class="rec-info-thumb">${recThumb(rec)}</div>
+      <dl class="rec-info-stats">
+        ${meta("Channel", escape(rec.channel_name || ""))}
+        ${meta("Platform", `<span class="plat-${escape((rec.platform || "").toLowerCase())}">${escape(rec.platform || "")}</span>`)}
+        ${meta("Started", escape(rec.started_at ? new Date(rec.started_at).toLocaleString() : "—"))}
+        ${meta("Duration", escape(rec.duration_secs ? fmtClock(rec.duration_secs) : "—"))}
+        ${meta("Size", escape(formatBytes(rec.bytes_written || 0)))}
+        ${meta("Transcode", rec.transcode ? "yes" : "no")}
+        ${rec.source_url ? meta("Source", `<a href="${escape(rec.source_url)}" target="_blank" rel="noopener">${escape(rec.source_url)}</a>`) : ""}
+        ${rec.output_path ? meta("File", `<code class="rec-info-path">${escape(rec.output_path)}</code>`) : ""}
+        ${rec.error ? meta("Error", `<span class="cfg-badge err">${escape(rec.error)}</span>`) : ""}
+      </dl>
+    </div>
+    ${probeSectionHtml(probe)}
+    <section class="rec-info-actions">
+      <h3>Plugin actions</h3>
+      <div class="rec-info-verbs">${actionsHtml}</div>
+    </section>
+    <footer class="rec-info-foot">
+      ${isFinished ? `<button class="primary" data-action="rec-info-play">▶ Open in player</button>` : ""}
+      <button class="danger" data-action="rec-info-delete">✕ Delete</button>
+    </footer>`;
+
+  overlay.querySelectorAll("[data-action=modal-close]").forEach((b) =>
+    b.addEventListener("click", closeRecordingModals));
+  overlay.querySelector("[data-action=rec-info-play]")?.addEventListener("click", () => {
+    closeRecordingModals();
+    openRecordingPlayer(jobId);
+  });
+  overlay.querySelector("[data-action=rec-info-delete]")?.addEventListener("click", async (e) => {
+    if (!(await confirmDialog("Delete this recording? File moves to the 7-day trash.", { ok: "Delete", danger: true })))
+      return;
+    const btn = e.currentTarget;
+    await withBusy(btn, "Deleting…", async () => {
+      await API.deleteRecordingFile(jobId);
+      Toast.success("Deleted");
+      recCache = recCache.filter((r) => r.id !== jobId);
+      closeRecordingModals();
+      if (currentRoute() === "recordings") renderRecordings().catch(() => {});
+    }).catch((err) => Toast.error(`Delete failed: ${err.message}`));
+  });
+  overlay.querySelectorAll("[data-action=rec-info-route-close]").forEach((a) =>
+    a.addEventListener("click", () => closeRecordingModals()));
+  overlay.querySelectorAll("[data-action=rec-info-verb]").forEach((btn) => {
     btn.addEventListener("click", async () => {
-      try {
-        const r = await API.pluginRpc(btn.dataset.plugin, btn.dataset.verb, {
-          selection: [],
-        });
-        Toast.success(`${btn.dataset.plugin}: ${btn.dataset.verb} — ${r.note ? "dispatched" : "queued"}`);
-      } catch (e) {
-        Toast.error(`Plugin RPC failed: ${e.message}`);
-      }
+      await withBusy(btn, "Queued…", async () => {
+        await API.pluginRpc(btn.dataset.plugin, btn.dataset.verb, { selection: [jobId] });
+        Toast.success(`${btn.dataset.verb} queued`);
+      }).catch((err) => Toast.error(`${btn.dataset.verb} failed: ${err.message}`));
     });
   });
 }
 
-function pluginCard(slug, name, desc, verbs) {
-  const verbButtons = verbs
-    .map(
-      (v) => `
-    <button data-action="plugin-verb" data-plugin="${slug}" data-verb="${escape(v)}">${escape(v)}</button>
-  `,
-    )
-    .join("");
-  return `
-    <div class="channel-card">
-      <div class="row">
-        <span class="platform-icon" style="background: var(--secondary); color: var(--bg);">
-          ${escape(slug.toUpperCase())}
-        </span>
-        <span class="name">${escape(name)}</span>
-        <span class="status">ready</span>
+// ── In-app player ────────────────────────────────────────────────────
+// Custom controls — power-user keyboard maps mirror mpv where the HTML5
+// video API allows. State is owned by the modal; no globals (except the
+// modal-open class) leak out.
+
+async function openRecordingPlayer(jobId) {
+  closeRecordingModals();
+  const overlay = ensureModalContainer("rec-player-modal");
+  overlay.innerHTML = `<div class="modal-card rec-player-card"><div class="empty sm">Loading…</div></div>`;
+  document.body.classList.add("modal-open");
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeRecordingModals(); });
+
+  let rec;
+  try {
+    rec = await API.recordingOne(jobId);
+  } catch (e) {
+    overlay.querySelector(".modal-card").innerHTML =
+      `<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`;
+    return;
+  }
+
+  const src = `/api/v1/recordings/${encodeURIComponent(jobId)}/download`;
+  const captionsUrl = `/api/v1/recordings/${encodeURIComponent(jobId)}/captions.vtt`;
+  overlay.querySelector(".modal-card").innerHTML = `
+    <header class="rec-player-head">
+      <h2 class="rec-player-title">${escape(rec.stream_title || rec.channel_name || "Recording")}</h2>
+      <button class="modal-close" aria-label="Close" data-action="modal-close">✕</button>
+    </header>
+    <div class="rec-player-stage">
+      <video id="rec-player-vid" preload="metadata" tabindex="-1"></video>
+      <div class="rec-player-overlay" id="rec-player-overlay" hidden>
+        <div class="rec-player-overlay-msg" id="rec-player-overlay-msg"></div>
       </div>
-      <div class="stream-title">${escape(desc)}</div>
-      <div class="actions">${verbButtons || '<span style="color: var(--muted); font-size: 0.75rem">no item-scoped verbs</span>'}</div>
     </div>
-  `;
+    <div class="rec-player-controls">
+      <button class="rec-pc-btn" id="rec-pc-play" title="Play / Pause (Space)">▶</button>
+      <span class="rec-pc-time" id="rec-pc-cur">0:00</span>
+      <input type="range" class="rec-pc-seek" id="rec-pc-seek" min="0" max="1000" value="0" step="1" aria-label="Seek">
+      <span class="rec-pc-time" id="rec-pc-dur">0:00</span>
+      <span class="rec-pc-ab" id="rec-pc-ab" title="A-B loop (I / O / C)"></span>
+      <label class="rec-pc-speed">
+        Speed
+        <select id="rec-pc-speed-sel">
+          <option value="0.25">0.25×</option>
+          <option value="0.5">0.5×</option>
+          <option value="0.75">0.75×</option>
+          <option value="1" selected>1×</option>
+          <option value="1.25">1.25×</option>
+          <option value="1.5">1.5×</option>
+          <option value="1.75">1.75×</option>
+          <option value="2">2×</option>
+          <option value="3">3×</option>
+          <option value="4">4×</option>
+        </select>
+      </label>
+      <button class="rec-pc-btn" id="rec-pc-mute" title="Mute (M)">🔊</button>
+      <input type="range" class="rec-pc-vol" id="rec-pc-vol" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+      <button class="rec-pc-btn" id="rec-pc-cc" title="Captions (T)" hidden>CC</button>
+      <button class="rec-pc-btn" id="rec-pc-pip" title="Picture-in-picture (P)">⧉</button>
+      <button class="rec-pc-btn" id="rec-pc-fs" title="Fullscreen (F)">⛶</button>
+      <button class="rec-pc-btn" id="rec-pc-help" title="Keyboard help (?)">?</button>
+    </div>
+    <div class="rec-player-help" id="rec-player-help" hidden>
+      <div class="rec-player-help-card">
+        <h3>Keyboard</h3>
+        <dl>
+          <dt>Space</dt><dd>Play / Pause</dd>
+          <dt>← / →</dt><dd>Skip ±5 s</dd>
+          <dt>J / L</dt><dd>Skip ±10 s</dd>
+          <dt>K</dt><dd>Play / Pause</dd>
+          <dt>, / .</dt><dd>Frame step (1/30 s)</dd>
+          <dt>&lt; / &gt;</dt><dd>Speed −/+</dd>
+          <dt>↑ / ↓</dt><dd>Volume</dd>
+          <dt>M</dt><dd>Mute</dd>
+          <dt>I / O / C</dt><dd>Set A loop / Set B loop / Clear</dd>
+          <dt>F</dt><dd>Fullscreen</dd>
+          <dt>P</dt><dd>Picture-in-picture</dd>
+          <dt>T</dt><dd>Toggle captions</dd>
+          <dt>0 – 9</dt><dd>Seek to N · 10 %</dd>
+          <dt>Esc</dt><dd>Close player</dd>
+        </dl>
+      </div>
+    </div>`;
+
+  const v = overlay.querySelector("#rec-player-vid");
+  v.src = src;
+  v.focus();
+  // Probe captions sidecar; reveal the CC button only when present.
+  fetch(captionsUrl, { method: "HEAD", credentials: "same-origin" })
+    .then((r) => {
+      if (r.ok) {
+        const t = document.createElement("track");
+        t.kind = "subtitles";
+        t.src = captionsUrl;
+        t.default = true;
+        t.label = "Captions";
+        v.appendChild(t);
+        overlay.querySelector("#rec-pc-cc").hidden = false;
+      }
+    })
+    .catch(() => {});
+
+  wirePlayer(overlay, v);
+  overlay.querySelectorAll("[data-action=modal-close]").forEach((b) =>
+    b.addEventListener("click", closeRecordingModals));
+}
+
+function wirePlayer(overlay, v) {
+  const playBtn = overlay.querySelector("#rec-pc-play");
+  const seek = overlay.querySelector("#rec-pc-seek");
+  const cur = overlay.querySelector("#rec-pc-cur");
+  const dur = overlay.querySelector("#rec-pc-dur");
+  const speedSel = overlay.querySelector("#rec-pc-speed-sel");
+  const muteBtn = overlay.querySelector("#rec-pc-mute");
+  const vol = overlay.querySelector("#rec-pc-vol");
+  const ccBtn = overlay.querySelector("#rec-pc-cc");
+  const pipBtn = overlay.querySelector("#rec-pc-pip");
+  const fsBtn = overlay.querySelector("#rec-pc-fs");
+  const helpBtn = overlay.querySelector("#rec-pc-help");
+  const helpEl = overlay.querySelector("#rec-player-help");
+  const abEl = overlay.querySelector("#rec-pc-ab");
+  const overlayMsgEl = overlay.querySelector("#rec-player-overlay");
+  const overlayMsgText = overlay.querySelector("#rec-player-overlay-msg");
+  const state = { a: null, b: null, lastFlash: 0 };
+
+  function flash(msg) {
+    overlayMsgText.textContent = msg;
+    overlayMsgEl.hidden = false;
+    state.lastFlash = Date.now();
+    setTimeout(() => {
+      if (Date.now() - state.lastFlash >= 700) overlayMsgEl.hidden = true;
+    }, 750);
+  }
+  function paintAb() {
+    if (state.a == null && state.b == null) { abEl.textContent = ""; return; }
+    const fmt = (s) => s == null ? "—" : fmtClock(s);
+    abEl.textContent = `A ${fmt(state.a)} ↔ B ${fmt(state.b)}`;
+  }
+
+  v.addEventListener("loadedmetadata", () => {
+    dur.textContent = fmtClock(v.duration || 0);
+    seek.max = Math.max(1, Math.floor(v.duration * 10));
+  });
+  v.addEventListener("timeupdate", () => {
+    cur.textContent = fmtClock(v.currentTime || 0);
+    seek.value = Math.floor((v.currentTime || 0) * 10);
+    if (state.a != null && state.b != null && v.currentTime >= state.b) {
+      v.currentTime = state.a;
+    }
+  });
+  v.addEventListener("play", () => playBtn.textContent = "❚❚");
+  v.addEventListener("pause", () => playBtn.textContent = "▶");
+  v.addEventListener("error", () => {
+    flash("Playback failed — your browser may not support this codec. Try Download from the row menu.");
+    overlayMsgEl.hidden = false;
+  });
+
+  playBtn.addEventListener("click", () => { v.paused ? v.play() : v.pause(); });
+  seek.addEventListener("input", () => { v.currentTime = Number(seek.value) / 10; });
+  speedSel.addEventListener("change", () => { v.playbackRate = Number(speedSel.value); flash(`${v.playbackRate}×`); });
+  muteBtn.addEventListener("click", () => { v.muted = !v.muted; muteBtn.textContent = v.muted ? "🔇" : "🔊"; });
+  vol.addEventListener("input", () => { v.volume = Number(vol.value); v.muted = v.volume === 0; muteBtn.textContent = v.muted ? "🔇" : "🔊"; });
+  ccBtn.addEventListener("click", () => {
+    const tracks = v.textTracks;
+    if (!tracks.length) return;
+    const cur = tracks[0];
+    cur.mode = cur.mode === "showing" ? "hidden" : "showing";
+    ccBtn.classList.toggle("on", cur.mode === "showing");
+  });
+  pipBtn.addEventListener("click", async () => {
+    try {
+      if (document.pictureInPictureElement === v) await document.exitPictureInPicture();
+      else await v.requestPictureInPicture();
+    } catch (e) { flash(e.message); }
+  });
+  fsBtn.addEventListener("click", () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else overlay.querySelector(".rec-player-stage").requestFullscreen?.();
+  });
+  helpBtn.addEventListener("click", () => { helpEl.hidden = !helpEl.hidden; });
+
+  // Keyboard map.
+  function onKey(e) {
+    // Don't grab keystrokes inside the speed dropdown / sliders.
+    if (e.target.closest("select, input")) return;
+    const k = e.key;
+    if (k === "?") { helpEl.hidden = !helpEl.hidden; e.preventDefault(); return; }
+    if (k === " ") { v.paused ? v.play() : v.pause(); e.preventDefault(); return; }
+    if (k === "ArrowLeft") { v.currentTime = Math.max(0, v.currentTime - 5); e.preventDefault(); return; }
+    if (k === "ArrowRight") { v.currentTime = Math.min((v.duration || 0), v.currentTime + 5); e.preventDefault(); return; }
+    if (k === "j" || k === "J") { v.currentTime = Math.max(0, v.currentTime - 10); e.preventDefault(); return; }
+    if (k === "l" || k === "L") { v.currentTime = Math.min((v.duration || 0), v.currentTime + 10); e.preventDefault(); return; }
+    if (k === "k" || k === "K") { v.paused ? v.play() : v.pause(); e.preventDefault(); return; }
+    if (k === ",") { v.pause(); v.currentTime = Math.max(0, v.currentTime - 1/30); e.preventDefault(); return; }
+    if (k === ".") { v.pause(); v.currentTime = Math.min((v.duration || 0), v.currentTime + 1/30); e.preventDefault(); return; }
+    if (k === "<") { speedSel.selectedIndex = Math.max(0, speedSel.selectedIndex - 1); speedSel.dispatchEvent(new Event("change")); e.preventDefault(); return; }
+    if (k === ">") { speedSel.selectedIndex = Math.min(speedSel.options.length - 1, speedSel.selectedIndex + 1); speedSel.dispatchEvent(new Event("change")); e.preventDefault(); return; }
+    if (k === "ArrowUp") { vol.value = Math.min(1, Number(vol.value) + 0.05); vol.dispatchEvent(new Event("input")); e.preventDefault(); return; }
+    if (k === "ArrowDown") { vol.value = Math.max(0, Number(vol.value) - 0.05); vol.dispatchEvent(new Event("input")); e.preventDefault(); return; }
+    if (k === "m" || k === "M") { muteBtn.click(); e.preventDefault(); return; }
+    if (k === "i" || k === "I") { state.a = v.currentTime; paintAb(); flash(`A = ${fmtClock(state.a)}`); e.preventDefault(); return; }
+    if (k === "o" || k === "O") { state.b = v.currentTime; paintAb(); flash(`B = ${fmtClock(state.b)}`); e.preventDefault(); return; }
+    if (k === "c" || k === "C") { state.a = null; state.b = null; paintAb(); flash("A-B cleared"); e.preventDefault(); return; }
+    if (k === "f" || k === "F") { fsBtn.click(); e.preventDefault(); return; }
+    if (k === "p" || k === "P") { pipBtn.click(); e.preventDefault(); return; }
+    if (k === "t" || k === "T") { ccBtn.click(); e.preventDefault(); return; }
+    if (/^[0-9]$/.test(k)) {
+      const frac = Number(k) / 10;
+      if (v.duration) v.currentTime = v.duration * frac;
+      e.preventDefault(); return;
+    }
+  }
+  overlay.addEventListener("keydown", onKey);
+  // Tear the global keydown when modal closes — done implicitly because
+  // the overlay is removed from the DOM in closeRecordingModals.
 }
 
 // ── Stub routes ──────────────────────────────────────────────────────
@@ -2306,24 +3492,57 @@ function formatBytes(n) {
   if (n >= 1e3) return (n / 1e3).toFixed(0) + " KB";
   return n + " B";
 }
-// Compact relative age for the rail "last live" slot: 3d / 2w / 4mo / 1y.
+// Compact relative age for the rail "last live" slot. Progression:
+//   <1h  → "Xm ago"   (sub-hour, kept for usability on a freshly-offline row)
+//   <1d  → "Xh ago"
+//   <1mo → "Xd ago"
+//   <1y  → "Xm ago"   or "Xm Yd ago" when there's a calendar-day remainder
+//   ≥1y  → "Xy ago"   or "Xy Ym ago" when there's a calendar-month remainder
+// Months and years are calendar-aware so leap years and short months don't lie.
 function relTime(iso) {
-  const t = new Date(iso).getTime();
+  const past = new Date(iso);
+  const t = past.getTime();
   if (!t) return "";
-  const d = Math.floor((Date.now() - t) / 86400000);
-  if (d <= 0) return "today";
-  if (d < 7) return `${d}d`;
-  if (d < 30) return `${Math.floor(d / 7)}w`;
-  if (d < 365) return `${Math.floor(d / 30)}mo`;
-  return `${Math.floor(d / 365)}y`;
+  const now = new Date();
+  const secs = Math.max(0, Math.floor((now.getTime() - t) / 1000));
+  if (secs < 60) return "just now";
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+
+  // Calendar diff (UTC) — match by year / month / day fields so DST and
+  // leap years don't shift the answer by a day.
+  let years = now.getUTCFullYear() - past.getUTCFullYear();
+  let months = now.getUTCMonth() - past.getUTCMonth();
+  let days = now.getUTCDate() - past.getUTCDate();
+  if (days < 0) {
+    months -= 1;
+    // Borrow days from the previous calendar month.
+    const prev = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+    days += prev.getUTCDate();
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+
+  if (years >= 1) return months > 0 ? `${years}y ${months}m ago` : `${years}y ago`;
+  if (months >= 1) return days > 0 ? `${months}m ${days}d ago` : `${months}m ago`;
+  return `${days}d ago`;
 }
+
+// Tooltip companion — absolute local timestamp, since the rail label already
+// carries the relative form.
 function lastLiveLong(iso) {
-  const t = new Date(iso).getTime();
-  if (!t) return "unknown";
-  const d = Math.floor((Date.now() - t) / 86400000);
-  if (d <= 0) return "earlier today";
-  const unit = d === 1 ? "day" : "days";
-  return `${d} ${unit} ago`;
+  const d = new Date(iso);
+  if (!d.getTime()) return "unknown";
+  return d.toLocaleString(undefined, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 // ── W6 keyboard shortcuts ────────────────────────────────────────────
@@ -2565,6 +3784,14 @@ events.on((event) => {
     if (j) {
       j.bytes_written = p.bytes_written;
       j.duration_secs = p.duration_secs;
+      // VOD downloads carry yt-dlp progress; stash on the cached job so
+      // a re-render of the channel detail picks the latest values.
+      if (p.download_pct != null) j.download_pct = p.download_pct;
+      if (p.download_eta_secs != null) j.download_eta_secs = p.download_eta_secs;
+      if (p.download_rate_bps != null) j.download_rate_bps = p.download_rate_bps;
+      // Surgical DOM update for the matching VOD pill (avoids repainting
+      // the whole channel detail every 2s).
+      updateVodProgressDom(j);
     }
     updateLiveCount(recCache.filter((r) => isInProgress(r.state)).length);
     if (currentRoute() === "recordings") paintRecordings();
@@ -2578,14 +3805,36 @@ events.on((event) => {
       .then((d) => {
         recCache = d.recordings || [];
         dashRecordings = recCache;
+        seedVodDownloadStateFromRecCache();
         updateLiveCount(recCache.filter((r) => isInProgress(r.state)).length);
         if (currentRoute() === "recordings") renderRecordings().catch(() => {});
         else {
           paintDashboard();
           paintChannelList();
         }
+        // If a channel detail is open, refresh its VOD pills so any
+        // newly-Finished source_url flips the button to Downloaded
+        // (and any newly-Started one to Downloading).
+        if (selectedChannelKey) {
+          const [platform, id] = selectedChannelKey.split(":");
+          if (id) paintChannelVods(id, platform);
+        }
       })
       .catch(() => {});
+  }
+
+  // Explicit prune event from delete-recording / clear-errored — the daemon
+  // tells us exactly which job_ids it dropped from jobs.db. Surgically
+  // remove them from recCache + repaint, without an extra refetch.
+  if (event.RecordingsPruned) {
+    const ids = new Set(event.RecordingsPruned.job_ids || []);
+    if (ids.size) {
+      recCache = recCache.filter((r) => !ids.has(r.id));
+      dashRecordings = recCache;
+      updateLiveCount(recCache.filter((r) => isInProgress(r.state)).length);
+      if (currentRoute() === "recordings") renderRecordings().catch(() => {});
+      else { paintDashboard(); paintChannelList(); }
+    }
   }
 
   // #74 — bulk-download progress: update state + the rail bulk badge only.
