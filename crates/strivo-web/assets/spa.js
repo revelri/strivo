@@ -331,6 +331,15 @@ let recCache = [];
 // Item 22 — recordings index density (compact|comfortable) + multi-select.
 let recDensity = localStorage.getItem("strivo-rec-density") || "comfortable";
 let recSelected = new Set();
+// State chip filter — Set of state classnames the user has whitelisted
+// ("finished", "recording", "downloading", "failed", "file-error"…).
+// Empty = no filter (show everything). Persisted across page reloads.
+let recStateFilter = new Set(
+  (localStorage.getItem("strivo-rec-state-filter") || "")
+    .split(",").filter(Boolean),
+);
+// Group-by toggle — "none" or "channel". Persisted.
+let recGroupBy = localStorage.getItem("strivo-rec-groupby") || "none";
 // Anchor for shift+click range selection. Tracks the last row whose
 // selection state was toggled by direct interaction (click on checkbox or
 // modifier+click on row). Reset when the recordings page re-renders.
@@ -2027,6 +2036,9 @@ async function renderRecordings() {
       <input id="rec-filter" class="grid-filter" type="search"
              placeholder="Filter by channel or title… (/)"
              aria-label="Filter recordings" value="${escape(recFilter)}">
+      <button id="rec-groupby" class="sm" title="Group rows by channel">
+        ${recGroupBy === "channel" ? "▼ Grouped by channel" : "≣ Group by channel"}
+      </button>
       <button id="rec-density" class="sm" title="Toggle row density">
         ${recDensity === "compact" ? "≡ Comfortable rows" : "═ Compact rows"}
       </button>
@@ -2037,8 +2049,9 @@ async function renderRecordings() {
           : "";
       })()}
     </div>
+    <div id="rec-state-chips" class="rec-state-chips" role="group" aria-label="Filter by state"></div>
     <p class="page-subtitle" id="rec-count"></p>
-    <div id="rec-massbar" class="massbar" hidden></div>
+    <div id="rec-massbar" class="massbar"></div>
     <table class="recordings-table ${recDensity === "compact" ? "compact" : ""}">
       <thead>
         <tr>
@@ -2066,6 +2079,15 @@ async function renderRecordings() {
     localStorage.setItem("strivo-rec-density", recDensity);
     renderRecordings().catch((e) => Toast.error(e.message));
   });
+  document.getElementById("rec-groupby")?.addEventListener("click", () => {
+    recGroupBy = recGroupBy === "channel" ? "none" : "channel";
+    localStorage.setItem("strivo-rec-groupby", recGroupBy);
+    renderRecordings().catch((e) => Toast.error(e.message));
+  });
+  // Build state chips from the unique states currently in the cache, so
+  // we don't paint chips for states that have zero rows. Each chip is a
+  // toggle that AND-narrows the visible rows (empty filter = show all).
+  paintRecStateChips();
   document.getElementById("rec-clear-errored")?.addEventListener("click", async (e) => {
     const btn = e.currentTarget;
     const errored = recCache.filter((r) => {
@@ -2104,6 +2126,80 @@ async function renderRecordings() {
   });
 }
 
+function paintRecStateChips() {
+  const host = document.getElementById("rec-state-chips");
+  if (!host) return;
+  const counts = new Map();
+  for (const r of recCache) {
+    const key = stateClassName(r.state);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  if (counts.size <= 1) {
+    // Single state in cache → chips add no value; skip the row entirely.
+    host.innerHTML = "";
+    return;
+  }
+  const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+  const chips = sorted
+    .map(([state, n]) => {
+      const active = recStateFilter.size === 0 || recStateFilter.has(state);
+      return `<button class="rec-state-chip state-${escape(state)} ${active ? "active" : ""}"
+                data-state="${escape(state)}" type="button">
+        <span class="rec-state-chip-dot"></span>
+        ${escape(stateChipLabel(state))}
+        <span class="rec-state-chip-count">${n}</span>
+      </button>`;
+    })
+    .join("");
+  const allActive = recStateFilter.size === 0;
+  host.innerHTML = `
+    <button class="rec-state-chip rec-state-chip-all ${allActive ? "active" : ""}"
+            type="button" title="Show every state">
+      <span class="rec-state-chip-dot"></span>All <span class="rec-state-chip-count">${recCache.length}</span>
+    </button>
+    ${chips}`;
+  host.querySelector(".rec-state-chip-all")?.addEventListener("click", () => {
+    recStateFilter.clear();
+    localStorage.setItem("strivo-rec-state-filter", "");
+    paintRecStateChips();
+    paintRecordings();
+  });
+  host.querySelectorAll("[data-state]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const s = btn.dataset.state;
+      // Click pattern: starting from "all visible", a click selects ONLY
+      // that state. Subsequent clicks toggle additional states (AND-narrow
+      // turns into OR-additive — matches gmail's chip behaviour).
+      if (recStateFilter.size === 0) {
+        recStateFilter = new Set([s]);
+      } else if (recStateFilter.has(s)) {
+        recStateFilter.delete(s);
+      } else {
+        recStateFilter.add(s);
+      }
+      localStorage.setItem(
+        "strivo-rec-state-filter",
+        Array.from(recStateFilter).join(","),
+      );
+      paintRecStateChips();
+      paintRecordings();
+    });
+  });
+}
+
+// Human-friendly label for a state classname. Falls back to title-case.
+function stateChipLabel(cls) {
+  switch (cls) {
+    case "finished": return "Finished";
+    case "recording": return "Recording";
+    case "downloading": return "Downloading";
+    case "failed": return "Failed";
+    case "file-error": return "File missing";
+    case "scheduled": return "Scheduled";
+    default: return cls.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  }
+}
+
 function recHeader(key, label) {
   // Active column shows the direction arrow; inactive sortable columns
   // get a faint ↕ so the affordance is discoverable (R6 audit fix).
@@ -2120,6 +2216,7 @@ function paintRecordings() {
   if (!body) return;
   const q = recFilter.trim().toLowerCase();
   let rows = recCache.filter((r) => {
+    if (recStateFilter.size > 0 && !recStateFilter.has(stateClassName(r.state))) return false;
     if (!q) return true;
     return (
       (r.channel_name || "").toLowerCase().includes(q) ||
@@ -2142,7 +2239,30 @@ function paintRecordings() {
     return ka < kb ? -dir : ka > kb ? dir : 0;
   });
   recVisible = rows;
-  body.innerHTML = rows.map(recordingRow).join("");
+  if (recGroupBy === "channel") {
+    // Cluster rows by channel_name while preserving the active sort order
+    // within each cluster. Each cluster gets a heading row spanning every
+    // column — sticky-styled via CSS — so the table reads like a grouped
+    // ledger without needing a separate render pass per group.
+    const order = [];
+    const byChannel = new Map();
+    for (const r of rows) {
+      const k = r.channel_name || "(unknown)";
+      if (!byChannel.has(k)) { byChannel.set(k, []); order.push(k); }
+      byChannel.get(k).push(r);
+    }
+    const html = order.map((ch) => {
+      const list = byChannel.get(ch);
+      const totalBytes = list.reduce((a, b) => a + (b.bytes_written || 0), 0);
+      return `<tr class="rec-group-head"><td colspan="7">
+        <span class="rec-group-name">${escape(ch)}</span>
+        <span class="rec-group-meta">${list.length} recording${list.length === 1 ? "" : "s"} · ${formatBytes(totalBytes)}</span>
+      </td></tr>${list.map(recordingRow).join("")}`;
+    }).join("");
+    body.innerHTML = html;
+  } else {
+    body.innerHTML = rows.map(recordingRow).join("");
+  }
   const count = document.getElementById("rec-count");
   if (count) {
     count.textContent =
@@ -2269,10 +2389,20 @@ function updateMassbar() {
   const visible = new Set(visibleRecordingIds());
   const sel = recVisible.filter((r) => recSelected.has(r.id) && visible.has(r.id));
   if (sel.length === 0) {
-    bar.hidden = true;
-    bar.innerHTML = "";
+    // Audit fix: persistent toolbar so the bulk affordances are
+    // discoverable BEFORE selection. Disabled buttons show what's
+    // possible; selecting any row enables them.
+    bar.hidden = false;
+    bar.classList.add("massbar-empty");
+    bar.innerHTML = `
+      <span class="massbar-count muted">No rows selected — tick a checkbox to enable bulk actions</span>
+      <button class="sm" disabled>Stop active</button>
+      <button class="sm" disabled>Re-record</button>
+      <button class="sm" disabled>Remux</button>
+      <button class="danger sm" disabled>Delete</button>`;
     return;
   }
+  bar.classList.remove("massbar-empty");
   const active = sel.filter((r) => stateClassName(r.state) === "recording");
   bar.hidden = false;
   // Pre-compute which selected rows are finished + look browser-broken,

@@ -3625,3 +3625,59 @@ body.modal-open { overflow: hidden; }
  * the master switch is off the dependent group dims + becomes
  * non-interactive without removing it from the DOM. */
 .stg-subgroup-conditional { transition: opacity 0.18s ease; }
+
+/* State filter chips above the recordings table. Each chip is a pill
+ * with a coloured dot matching the state's pill colour + a count. */
+.rec-state-chips {
+  display: flex; flex-wrap: wrap; gap: 0.35rem;
+  margin: 0.5rem 0;
+}
+.rec-state-chip {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  padding: 0.18rem 0.6rem;
+  font-size: 0.78rem;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  color: inherit; cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+.rec-state-chip:hover { opacity: 0.85; }
+.rec-state-chip.active {
+  opacity: 1;
+  background: rgba(110,86,207,0.18);
+  border-color: rgba(110,86,207,0.5);
+}
+.rec-state-chip-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--muted);
+}
+.rec-state-chip.state-finished   .rec-state-chip-dot { background: #4ec9b0; }
+.rec-state-chip.state-recording  .rec-state-chip-dot { background: #f56565; }
+.rec-state-chip.state-downloading .rec-state-chip-dot { background: #3b82f6; }
+.rec-state-chip.state-failed     .rec-state-chip-dot { background: #ef4444; }
+.rec-state-chip.state-file-error .rec-state-chip-dot { background: #f59e0b; }
+.rec-state-chip.state-scheduled  .rec-state-chip-dot { background: #a78bfa; }
+.rec-state-chip-count {
+  font-size: 0.7rem; opacity: 0.7;
+  padding: 0 0.25rem;
+  background: rgba(0,0,0,0.25);
+  border-radius: 3px;
+}
+
+/* Group-by-channel sub-header row inside the recordings table. */
+.rec-group-head td {
+  padding: 0.6rem 0.55rem 0.3rem !important;
+  border-bottom: 1px solid var(--border-light) !important;
+  background: rgba(255,255,255,0.02);
+}
+.rec-group-name { font-weight: 600; font-size: 0.95em; }
+.rec-group-meta { margin-left: 0.6rem; opacity: 0.6; font-size: 0.82em; }
+
+/* Persistent bulk-action bar — disabled-button affordance state. */
+.massbar.massbar-empty {
+  opacity: 0.7;
+  background: rgba(255,255,255,0.02);
+}
+.massbar.massbar-empty .muted { opacity: 0.7; font-style: italic; }
