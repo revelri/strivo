@@ -129,6 +129,11 @@ const API = {
   // ── Strivo Pro licensing (Phase 1: status only; activate/trial 501) ──
   updateSetting: (path, value) =>
     API._fetch("/settings/update", { method: "POST", body: { path, value } }),
+  setPlatform: (name, body) =>
+    API._fetch(`/settings/platform/${encodeURIComponent(name)}`, {
+      method: "POST",
+      body,
+    }),
   licenceStatus: () => API._fetch("/licence/status"),
   licenceTrial: () => API._fetch("/licence/trial", { method: "POST" }),
   licenceActivate: (key) =>
@@ -3186,6 +3191,11 @@ async function renderSettings() {
 function wireSettingsControls() {
   const pane = document.getElementById("stg-pane");
   if (!pane) return;
+  // Configure / Reconfigure buttons on the Platforms section open a
+  // wizard modal per platform.
+  pane.querySelectorAll(".stg-cfg-btn").forEach((btn) => {
+    btn.addEventListener("click", () => openPlatformWizard(btn.dataset.platform));
+  });
   pane.querySelectorAll("[data-stg-path]").forEach((el) => {
     el.addEventListener("change", async (e) => {
       const path = el.getAttribute("data-stg-path");
@@ -3291,21 +3301,35 @@ function renderSettingsPane(slug, s) {
         ].join("")),
       ].join("");
 
-    case "platforms":
+    case "platforms": {
+      const platformRow = (key, statusOk) => `
+        <div class="stg-row">
+          <div class="stg-row-label">Status</div>
+          <div class="stg-row-value">
+            ${badge(statusOk, "configured", "not configured")}
+            <button class="stg-linkbtn stg-cfg-btn" data-platform="${escape(key)}" type="button">
+              ${statusOk ? "Reconfigure" : "Configure"} →
+            </button>
+          </div>
+        </div>`;
       return [
-        group("Twitch", [
-          row("Status", badge(s.twitch_configured, "configured", "not configured"),
-            "Client-id + secret + user-token. Configure via the TUI's platform wizard (Phase 2c will add an in-app wizard)."),
-        ].join("")),
-        group("YouTube", [
-          row("Status", badge(s.youtube_configured, "configured", "not configured"),
-            "OAuth2 client + refresh token. Required for live-state detection and VOD downloads on channels you subscribe to."),
-        ].join("")),
-        group("Patreon", [
-          row("Status", badge(s.patreon_configured, "configured", "not configured"),
-            "Optional. Enables Patreon-locked VOD pulls from creators you support."),
-        ].join("")),
+        group("Twitch",
+          platformRow("twitch", s.twitch_configured) +
+          `<div class="stg-row"><div class="stg-row-label">Setup
+            <span class="stg-hint" title="Create at dev.twitch.tv/console/apps — type=Other, OAuth Redirect URL http://localhost:8181/oauth/twitch">ⓘ</span>
+          </div><div class="stg-row-value muted">Twitch Developer Console → Register Your Application → Client ID + Secret.</div></div>`),
+        group("YouTube",
+          platformRow("youtube", s.youtube_configured) +
+          `<div class="stg-row"><div class="stg-row-label">Setup
+            <span class="stg-hint" title="Google Cloud Console → APIs &amp; Services → Credentials → OAuth client ID. Use Desktop type.">ⓘ</span>
+          </div><div class="stg-row-value muted">OAuth client (Desktop type). Optional Netscape cookies.txt for member-only / age-gated VODs.</div></div>`),
+        group("Patreon",
+          platformRow("patreon", s.patreon_configured) +
+          `<div class="stg-row"><div class="stg-row-label">Setup
+            <span class="stg-hint" title="patreon.com/portal/registration/register-clients">ⓘ</span>
+          </div><div class="stg-row-value muted">Optional. Enables Patreon-locked VOD pulls from creators you support.</div></div>`),
       ].join("");
+    }
 
     case "plugins":
       return [
@@ -3370,6 +3394,103 @@ function renderSettingsPane(slug, s) {
         ].join("")),
       ].join("");
   }
+}
+
+// Each platform's wizard form spec: the fields it needs + a docs link
+// the modal renders below the inputs. Kept tiny so it's obvious what
+// each platform asks for; if it grows we lift it to its own module.
+const PLATFORM_SPECS = {
+  twitch: {
+    title: "Configure Twitch",
+    docsLabel: "Twitch Developer Console",
+    docsUrl: "https://dev.twitch.tv/console/apps",
+    fields: [
+      { name: "client_id", label: "Client ID", type: "text", required: true },
+      { name: "client_secret", label: "Client Secret", type: "password", required: true },
+    ],
+    notes: "Register Your Application → type 'Other', OAuth Redirect URL <code>http://localhost:8181/oauth/twitch</code>.",
+  },
+  youtube: {
+    title: "Configure YouTube",
+    docsLabel: "Google Cloud Console",
+    docsUrl: "https://console.cloud.google.com/apis/credentials",
+    fields: [
+      { name: "client_id", label: "OAuth Client ID", type: "text", required: true },
+      { name: "client_secret", label: "OAuth Client Secret", type: "password", required: true },
+      { name: "cookies_path", label: "Cookies file (optional)", type: "text", placeholder: "/path/to/cookies.txt" },
+      { name: "websub_callback_url", label: "WebSub callback URL (optional)", type: "url", placeholder: "https://your.tld/yt-websub" },
+    ],
+    notes: "Create OAuth 2.0 client ID, application type <em>Desktop app</em>. Cookies file enables age-restricted + member-only VODs.",
+  },
+  patreon: {
+    title: "Configure Patreon",
+    docsLabel: "Patreon Platform",
+    docsUrl: "https://www.patreon.com/portal/registration/register-clients",
+    fields: [
+      { name: "client_id", label: "Client ID", type: "text", required: true },
+      { name: "client_secret", label: "Client Secret", type: "password", required: true },
+      { name: "cookies_path", label: "Cookies file (optional)", type: "text", placeholder: "/path/to/cookies.txt" },
+    ],
+    notes: "Cookies file is your logged-in patreon.com session — required to download VOD posts.",
+  },
+};
+
+function openPlatformWizard(platform) {
+  const spec = PLATFORM_SPECS[platform];
+  if (!spec) return;
+  const fieldHtml = spec.fields
+    .map(
+      (f) => `
+        <label class="modal-field">
+          <span class="modal-field-label">${escape(f.label)}${f.required ? " *" : ""}</span>
+          <input class="modal-input" name="${escape(f.name)}" type="${escape(f.type)}"
+            ${f.required ? "required" : ""}
+            ${f.placeholder ? `placeholder="${escape(f.placeholder)}"` : ""} />
+        </label>`,
+    )
+    .join("");
+  const dlg = document.createElement("div");
+  dlg.className = "modal-backdrop";
+  dlg.innerHTML = `
+    <form class="modal" role="dialog" aria-labelledby="pf-title">
+      <header class="modal-head">
+        <h2 id="pf-title">${escape(spec.title)}</h2>
+        <button type="button" class="modal-close" aria-label="Close">×</button>
+      </header>
+      <div class="modal-body">
+        ${fieldHtml}
+        <p class="modal-notes">${spec.notes}
+          <a href="${escape(spec.docsUrl)}" target="_blank" rel="noopener">${escape(spec.docsLabel)} →</a>
+        </p>
+      </div>
+      <footer class="modal-foot">
+        <button type="button" class="btn-ghost modal-cancel">Cancel</button>
+        <button type="submit" class="btn-primary">Save</button>
+      </footer>
+    </form>`;
+  document.body.appendChild(dlg);
+  const close = () => dlg.remove();
+  dlg.querySelector(".modal-close").addEventListener("click", close);
+  dlg.querySelector(".modal-cancel").addEventListener("click", close);
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) close(); });
+  dlg.querySelector(".modal").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = {};
+    spec.fields.forEach((f) => {
+      body[f.name] = e.target.elements[f.name].value.trim();
+    });
+    try {
+      await API.setPlatform(platform, body);
+      Toast.success(`${spec.title.replace("Configure ", "")} saved`);
+      close();
+      // Re-render the Settings page so the status badge flips green.
+      render();
+    } catch (err) {
+      Toast.error(`Couldn't save: ${err.message}`);
+    }
+  });
+  // Autofocus the first field for a keyboard-driven flow.
+  dlg.querySelector(".modal-input")?.focus();
 }
 
 // envOrDefault is a UI-side helper: the daemon doesn't expose env vars

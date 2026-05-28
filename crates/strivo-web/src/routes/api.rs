@@ -965,6 +965,91 @@ fn take_u32(v: &serde_json::Value) -> Result<u32, String> {
         .ok_or_else(|| "expected non-negative integer".into())
 }
 
+#[derive(Debug, Deserialize)]
+struct PlatformConfigPayload {
+    client_id: String,
+    client_secret: String,
+    /// Optional path on disk to a Netscape cookies file. Used by
+    /// YouTube + Patreon. Empty string = unchanged.
+    #[serde(default)]
+    cookies_path: String,
+    /// YouTube only — optional WebSub callback URL.
+    #[serde(default)]
+    websub_callback_url: String,
+}
+
+/// `POST /api/v1/settings/platform/<name>` — persist credentials for
+/// one of the three first-party platforms. Saves to config.toml and
+/// echoes the resulting "configured" flag so the SPA can update its
+/// status badge without a follow-up GET.
+async fn set_platform(
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<PlatformConfigPayload>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    if body.client_id.trim().is_empty() || body.client_secret.trim().is_empty() {
+        return crate::problem::Problem::bad_request(
+            "client_id and client_secret are required",
+        )
+        .into_response();
+    }
+    let mut cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+
+    let cookies_opt = (!body.cookies_path.trim().is_empty())
+        .then(|| std::path::PathBuf::from(body.cookies_path.clone()));
+
+    match name.as_str() {
+        "twitch" => {
+            cfg.twitch = Some(strivo_core::config::TwitchConfig {
+                client_id: body.client_id,
+                client_secret: body.client_secret,
+            });
+        }
+        "youtube" => {
+            cfg.youtube = Some(strivo_core::config::YouTubeConfig {
+                client_id: body.client_id,
+                client_secret: body.client_secret,
+                cookies_path: cookies_opt,
+                websub_callback_url: (!body.websub_callback_url.trim().is_empty())
+                    .then(|| body.websub_callback_url.clone()),
+            });
+        }
+        "patreon" => {
+            cfg.patreon = Some(strivo_core::config::PatreonConfig {
+                client_id: body.client_id,
+                client_secret: body.client_secret,
+                poll_interval_secs: cfg
+                    .patreon
+                    .as_ref()
+                    .map(|p| p.poll_interval_secs)
+                    .unwrap_or(300),
+                cookies_path: cookies_opt,
+            });
+        }
+        other => {
+            return crate::problem::Problem::bad_request(format!("unknown platform: {other}"))
+                .into_response()
+        }
+    }
+
+    let path = cfg.config_path.clone();
+    if let Err(e) = cfg.save(path.as_deref()) {
+        return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "ok": true, "platform": name, "configured": true })),
+    )
+        .into_response()
+}
+
 /// Numeric severity for a `tracing` level token, higher = more severe.
 fn level_rank(level: &str) -> u8 {
     match level.to_ascii_uppercase().as_str() {
@@ -1618,6 +1703,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/poll_now", post(poll_now))
         .route("/api/v1/settings/poll_interval", post(set_poll_interval))
         .route("/api/v1/settings/update", post(update_setting))
+        .route("/api/v1/settings/platform/{name}", post(set_platform))
         .route("/api/v1/logs", get(logs))
         .route("/api/v1/history", get(history))
         .route("/api/v1/backup", post(backup_create))
