@@ -1578,7 +1578,15 @@ async fn editor_render(
             .unwrap_or_default();
     let chain = branding_spec.build_filter_chain("[0:v]");
     let fc = chain.filter_complex.clone();
-    match strivo_editor::render_edl_with_filter(&edl, &output, Some(&fc)) {
+    // Same for the saved volume automation. Empty automation produces
+    // an `anull` filter which the renderer detects + falls back to `-c copy`.
+    let automation: strivo_automation::VolumeAutomation =
+        std::fs::read_to_string(automation_path(&recording_id))
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+    let audio_filter = automation.build_audio_filter(0.05);
+    match strivo_editor::render_edl_with_filters(&edl, &output, Some(&fc), Some(&audio_filter)) {
         Ok(bytes) => Json(json!({
             "ok": true,
             "output_path": output.to_string_lossy(),
@@ -1946,6 +1954,80 @@ async fn multistream_tiles(
     Json(json!({
         "streams": embeds,
         "tiles": tiles,
+    }))
+    .into_response()
+}
+
+fn automation_path(recording_id: &str) -> std::path::PathBuf {
+    strivo_core::config::AppConfig::data_dir()
+        .join("plugins")
+        .join("automation")
+        .join(format!("{recording_id}.json"))
+}
+
+/// `GET /api/v1/plugins/automation/<recording_id>` — load the saved
+/// volume automation; empty list when absent. Returns the live
+/// asendcmd preview alongside so the SPA can show the ffmpeg command
+/// without rebuilding it client-side.
+async fn automation_load(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("automation") { return r; }
+    let path = automation_path(&recording_id);
+    let automation: strivo_automation::VolumeAutomation =
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+    let asendcmd = automation.to_asendcmd(0.05);
+    let filter = automation.build_audio_filter(0.05);
+    Json(json!({
+        "recording_id": recording_id,
+        "automation": automation,
+        "asendcmd": asendcmd,
+        "audio_filter": filter,
+    }))
+    .into_response()
+}
+
+/// `POST /api/v1/plugins/automation/<recording_id>` — persist a volume
+/// automation curve. The Editor render path consults this file to
+/// decide whether to bake automation into the output.
+async fn automation_save(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+    Json(body): Json<strivo_automation::VolumeAutomation>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("automation") { return r; }
+    let path = automation_path(&recording_id);
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return Problem::internal(format!("mkdir: {e}")).into_response();
+        }
+    }
+    let json = match serde_json::to_string_pretty(&body) {
+        Ok(s) => s,
+        Err(e) => return Problem::internal(format!("serialise: {e}")).into_response(),
+    };
+    if let Err(e) = std::fs::write(&path, json) {
+        return Problem::internal(format!("write: {e}")).into_response();
+    }
+    let asendcmd = body.to_asendcmd(0.05);
+    let filter = body.build_audio_filter(0.05);
+    Json(json!({
+        "ok": true,
+        "point_count": body.points.len(),
+        "asendcmd": asendcmd,
+        "audio_filter": filter,
     }))
     .into_response()
 }
@@ -2882,4 +2964,5 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/chat/parse", axum::routing::post(chat_parse))
         .route("/api/v1/plugins/loudness/{id}", axum::routing::post(loudness_measure))
         .route("/api/v1/plugins/structure/{id}", axum::routing::post(structure_classify))
+        .route("/api/v1/plugins/automation/{id}", get(automation_load).post(automation_save))
 }

@@ -238,6 +238,19 @@ pub fn render_edl_with_filter(
     output: &Path,
     extra_filter_complex: Option<&str>,
 ) -> Result<u64> {
+    render_edl_with_filters(edl, output, extra_filter_complex, None)
+}
+
+/// Same as [`render_edl_with_filter`] but also accepts an audio-only
+/// filter chain (e.g. the asendcmd-driven volume automation the
+/// strivo-automation crate emits). When supplied, the concat path swaps
+/// from `-c copy` to a transcode with the audio filter applied.
+pub fn render_edl_with_filters(
+    edl: &Edl,
+    output: &Path,
+    extra_filter_complex: Option<&str>,
+    extra_audio_filter: Option<&str>,
+) -> Result<u64> {
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent).ok();
     }
@@ -308,21 +321,36 @@ pub fn render_edl_with_filter(
         .args(["-f", "concat", "-safe", "0"])
         .arg("-i")
         .arg(&list_path);
-    if let Some(fc) = extra_filter_complex {
-        // Passthrough chain is `[0:v]copy[vout]` — equivalent to `-c copy`
-        // but forces a video re-encode, so we only swap to filter mode when
-        // the chain actually does something.
-        let passthrough = fc.trim() == "[0:v]copy[vout]";
-        if passthrough {
-            concat.args(["-c", "copy"]);
-        } else {
-            concat
-                .args(["-filter_complex", fc])
-                .args(["-map", "[vout]", "-map", "0:a?"])
-                .args(["-c:v", "libx264", "-c:a", "aac"]);
-        }
-    } else {
+    // Passthrough detectors. strivo-automation emits "anull" + strivo-
+    // branding emits `[0:v]copy[vout]` when their input is empty; both
+    // round-trip to the fast `-c copy` path here.
+    let audio_pass = extra_audio_filter
+        .map(|a| a.trim() == "anull" || a.trim().is_empty())
+        .unwrap_or(true);
+    let video_pass = extra_filter_complex
+        .map(|fc| fc.trim() == "[0:v]copy[vout]")
+        .unwrap_or(true);
+    if video_pass && audio_pass {
         concat.args(["-c", "copy"]);
+    } else {
+        // Build a unified filter_complex so video + audio are routed via
+        // named labels and we don't have to worry about -af/-map ordering.
+        let video_chain = if video_pass {
+            "[0:v]copy[vout]".to_string()
+        } else {
+            extra_filter_complex.unwrap().to_string()
+        };
+        let audio_chain = if audio_pass {
+            "[0:a]anull[aout]".to_string()
+        } else {
+            format!("[0:a]{}[aout]", extra_audio_filter.unwrap())
+        };
+        let combined = format!("{video_chain};{audio_chain}");
+        concat
+            .args(["-filter_complex", &combined])
+            .args(["-map", "[vout]"])
+            .args(["-map", "[aout]"])
+            .args(["-c:v", "libx264", "-c:a", "aac"]);
     }
     let status = concat
         .arg(output)

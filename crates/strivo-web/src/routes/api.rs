@@ -1910,6 +1910,7 @@ async fn plugin_capabilities() -> impl IntoResponse {
         // they don't drift from the WELL_KNOWN_CAPABILITIES constant set.
         { "capability": "x.loudness",        "providers": [{"plugin": "loudness", "status": "available"}] },
         { "capability": "x.structure",       "providers": [{"plugin": "structure", "status": "available"}] },
+        { "capability": "x.audio_automation", "providers": [{"plugin": "automation", "status": "available"}] },
         { "capability": "x.multistream",     "providers": [{"plugin": "multistream", "status": "available"}] },
         { "capability": "x.chat",            "providers": [{"plugin": "chat",        "status": "available"}] },
         { "capability": "x.pipelines_dag",   "providers": [{"plugin": "pipelines-dag", "status": "available"}] },
