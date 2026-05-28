@@ -1,6 +1,6 @@
 # candy-icons (vendored subset)
 
-The nine SVGs in this directory are extracted from
+The twelve SVGs in this directory are extracted from
 **[EliverLara/candy-icons](https://github.com/EliverLara/candy-icons)**
 by Eliver Lara (`@EliverLara` on GitHub) — "🍭 Sweet gradient icons."
 
@@ -22,6 +22,9 @@ semantic slot names (e.g. `places/48/folder.svg` → `home.svg`).
 | `system.svg`      | `apps/scalable/utilities-system-monitor.svg`  |
 | `logs.svg`        | `apps/scalable/utilities-log-viewer.svg`      |
 | `logout.svg`      | `apps/scalable/system-log-out.svg`            |
+| `watch.svg`       | `apps/scalable/gnome-mpv.svg`                 |
+| `chat.svg`        | `apps/scalable/chatterino.svg`                |
+| `history.svg`     | `apps/scalable/preferences-system-time.svg`   |
 
 ## License posture
 

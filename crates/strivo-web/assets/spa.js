@@ -595,13 +595,13 @@ const TOPNAV = [
   // Pipelines now ships the DAW-vision cross-plugin DAG; restored to
   // the topnav (was hidden in the audit when the page was empty).
   ["pipelines", "🔁", "Pipelines", "d", "/assets/icons/candy/pipelines.svg"],
-  ["watch", "▦", "Watch", "w"],
-  ["chat", "💬", "Chat", "t"],
+  ["watch", "▦", "Watch", "w", "/assets/icons/candy/watch.svg"],
+  ["chat", "💬", "Chat", "t", "/assets/icons/candy/chat.svg"],
   ["plugins", "🧩", "Plugins", "g", "/assets/icons/candy/plugins.svg"],
   ["settings", "⚙", "Settings", "c", "/assets/icons/candy/settings.svg"],
   ["system", "🛠", "System", "y", "/assets/icons/candy/system.svg"],
   ["logs", "📜", "Logs", "o", "/assets/icons/candy/logs.svg"],
-  ["history", "🗂", "History", "h"],
+  ["history", "🗂", "History", "h", "/assets/icons/candy/history.svg"],
 ];
 
 function chrome(content) {
