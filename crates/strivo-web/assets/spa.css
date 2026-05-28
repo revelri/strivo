@@ -2234,6 +2234,13 @@ body.modal-open { overflow: hidden; }
 .stg-search:focus { outline: 0; border-color: var(--accent2); }
 .stg-rail-item.stg-rail-hidden { display: none; }
 .stg-row.stg-row-hidden { display: none; }
+.sys-reauth {
+  margin-left: 0.6rem;
+  color: var(--accent2);
+  text-decoration: none;
+  font-size: 0.78rem;
+}
+.sys-reauth:hover { text-decoration: underline; }
 .rec-th-sortable { cursor: pointer; user-select: none; }
 .rec-th-sortable:hover { color: var(--text); }
 .rec-th-sort-hint { color: var(--muted); opacity: 0.45; font-size: 0.75em; }

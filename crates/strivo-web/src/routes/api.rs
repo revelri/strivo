@@ -1238,6 +1238,55 @@ async fn backups_list(headers: HeaderMap, State(state): State<AppState>) -> impl
     Json(json!({ "backups": sets })).into_response()
 }
 
+/// `GET /api/v1/backups/<name>/download` — stream the backup as a
+/// tarball so the user can pull a copy off-box. Same name/safety rules
+/// as restore; no auth bypass.
+async fn backup_download(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    if !safe_backup_name(&name) {
+        return crate::problem::Problem::bad_request("invalid backup name").into_response();
+    }
+    let dir = backups_dir().join(&name);
+    if !dir.is_dir() {
+        return crate::problem::Problem::not_found("backup not found").into_response();
+    }
+    // Pipe `tar` and let it stream — handles arbitrary sizes without
+    // buffering. Conservative content-type so browsers do "Save As".
+    let child = std::process::Command::new("tar")
+        .args(["-C", &dir.parent().unwrap_or(&dir).to_string_lossy(), "-czf", "-", &name])
+        .stdout(std::process::Stdio::piped())
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(format!("tar: {e}")).into_response(),
+    };
+    let mut out = Vec::new();
+    use std::io::Read;
+    if let Some(mut s) = child.stdout.take() {
+        if let Err(e) = s.read_to_end(&mut out) {
+            return crate::problem::Problem::internal(e.to_string()).into_response();
+        }
+    }
+    let _ = child.wait();
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "application/gzip"),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                Box::leak(format!("attachment; filename=\"strivo-backup-{name}.tar.gz\"").into_boxed_str()),
+            ),
+        ],
+        out,
+    )
+        .into_response()
+}
+
 async fn backup_restore(
     headers: HeaderMap,
     State(state): State<AppState>,
@@ -1738,6 +1787,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/backup", post(backup_create))
         .route("/api/v1/backups", get(backups_list))
         .route("/api/v1/backups/{name}/restore", post(backup_restore))
+        .route("/api/v1/backups/{name}/download", get(backup_download))
         .route(
             "/api/v1/blocklist",
             get(blocklist_get).post(blocklist_add).delete(blocklist_remove),

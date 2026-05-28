@@ -3604,12 +3604,22 @@ async function renderSystem() {
       const rows = serverChecks
         .filter((c) => c.domain === domain)
         .map(
-          (c) => `
+          (c) => {
+            // Surface a Re-authenticate link on platform-auth checks
+            // (audit M9). When the token's healthy, the link is hidden;
+            // either way the Settings wizard is one click away.
+            const lc = c.name.toLowerCase();
+            const reauth =
+              c.domain === "Platform Auth" && ["twitch", "youtube", "patreon"].includes(lc)
+                ? ` <a class="sys-reauth" href="#/settings/platforms" title="Open the ${lc} setup wizard">Re-authenticate →</a>`
+                : "";
+            return `
     <div class="sys-check ${c.severity}">
       <span class="sys-sev">${sevGlyph[c.severity] || "•"}</span>
       <span class="sys-label">${escape(c.name)}</span>
-      <span class="sys-msg">${escape(c.message)}${c.fix ? ` <span class="sys-fix">— ${escape(c.fix)}</span>` : ""}</span>
-    </div>`,
+      <span class="sys-msg">${escape(c.message)}${c.fix ? ` <span class="sys-fix">— ${escape(c.fix)}</span>` : ""}${reauth}</span>
+    </div>`;
+          },
         )
         .join("");
       return `<div class="sys-domain"><h3 class="sys-domain-title">${escape(domain)}</h3>${rows}</div>`;
@@ -3640,9 +3650,6 @@ async function renderSystem() {
       <section class="cfg-card">
         <h2 class="cfg-title">Health</h2>
         <div class="sys-checks">${healthRows}</div>
-      </section>
-      <section class="cfg-card">
-        <h2 class="cfg-title">Storage</h2>
         ${gauge}
       </section>
       <section class="cfg-card" id="backup-card">
@@ -3666,7 +3673,7 @@ async function renderSystem() {
           <div class="task-info">
             <span class="task-name">Channel poll</span>
             <span class="task-cadence">every
-              <input id="poll-interval" type="number" min="15" step="5"
+              <input id="poll-interval" type="number" min="15" max="86400" step="5"
                      value="${settings ? settings.poll_interval_secs : 60}"
                      aria-label="Poll interval seconds" /> s
               <button id="poll-interval-save" class="sm" title="Apply poll interval">Save</button>
@@ -3693,7 +3700,7 @@ async function renderSystem() {
             <span class="task-name">Active recordings</span>
             <span class="task-cadence">${activeRec} running${activeRec ? " · stop from the dashboard" : ""}</span>
           </div>
-          ${activeRec ? '<a class="sm" href="#/library">View</a>' : ""}
+          <a class="sm" href="#/library">View</a>
         </div>
       </section>
     </div>
@@ -3796,6 +3803,9 @@ async function paintBackups() {
           <span class="task-name">${escape(b.name)}</span>
           <span class="task-cadence">${formatBytes(b.bytes || 0)} · ${(b.files || []).map(escape).join(", ")}</span>
         </div>
+        <a class="sm" href="/api/v1/backups/${encodeURIComponent(b.name)}/download"
+           download="strivo-backup-${escape(b.name)}.tar.gz"
+           title="Download backup as tarball">Download</a>
         <button class="sm restore-backup" data-name="${escape(b.name)}">Restore</button>
       </div>`,
       )
