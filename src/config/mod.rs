@@ -58,6 +58,11 @@ pub struct AppConfig {
     #[serde(default)]
     pub web: WebConfig,
 
+    /// Desktop notification preferences — what state changes the daemon
+    /// should fire a notify-rust banner for.
+    #[serde(default)]
+    pub notifications: NotificationsConfig,
+
     /// Tracks the path this config was loaded from, so save() can use it
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
@@ -602,6 +607,45 @@ impl ThemeRef {
     }
 }
 
+/// Desktop notification preferences. Wired by the daemon's existing
+/// notify-rust integration — each flag gates one class of banner.
+/// Defaults err on the side of useful-but-not-noisy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationsConfig {
+    /// Master switch. When false the daemon skips every notify call.
+    #[serde(default = "default_true")]
+    pub desktop_enabled: bool,
+    /// Banner when a tracked channel transitions offline → live.
+    #[serde(default = "default_true")]
+    pub on_go_live: bool,
+    /// Banner when a recording finishes successfully (Twitch / YT live
+    /// + Patreon VOD pull). Useful but can be noisy with bulk catalogs.
+    #[serde(default = "default_true")]
+    pub on_recording_finished: bool,
+    /// Banner when a recording dies in the middle. Always default-on:
+    /// silent failures are the worst class of bug in a PVR.
+    #[serde(default = "default_true")]
+    pub on_recording_failed: bool,
+    /// Banner when the Twitch auto-VOD-backfill pull lands. Off by
+    /// default because most users don't track it manually.
+    #[serde(default)]
+    pub on_vod_ready: bool,
+}
+
+fn default_true() -> bool { true }
+
+impl Default for NotificationsConfig {
+    fn default() -> Self {
+        Self {
+            desktop_enabled: true,
+            on_go_live: true,
+            on_recording_finished: true,
+            on_recording_failed: true,
+            on_vod_ready: false,
+        }
+    }
+}
+
 /// Motion / accessibility / verbosity preferences.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UiConfig {
@@ -657,6 +701,7 @@ impl Default for AppConfig {
             crunchr: CrunchrConfig::default(),
             archiver: ArchiverConfig::default(),
             web: WebConfig::default(),
+            notifications: NotificationsConfig::default(),
             config_path: None,
         }
     }

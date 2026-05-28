@@ -3620,3 +3620,8 @@ body.modal-open { overflow: hidden; }
   border-radius: 4px; color: inherit; font-family: monospace;
 }
 .pg-upsell-foot { margin: 0.8rem 0 0; }
+
+/* Conditional subgroup wrapper used by Settings → Notifications. When
+ * the master switch is off the dependent group dims + becomes
+ * non-interactive without removing it from the DOM. */
+.stg-subgroup-conditional { transition: opacity 0.18s ease; }

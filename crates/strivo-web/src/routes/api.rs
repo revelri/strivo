@@ -384,6 +384,7 @@ async fn settings(headers: HeaderMap, State(state): State<AppState>) -> impl Int
                 "capture_profiles": cfg.capture_profiles,
                 "schedule": cfg.schedule,
                 "archiver": cfg.archiver,
+                "notifications": cfg.notifications,
                 "twitch_configured": cfg.twitch.is_some(),
                 "youtube_configured": cfg.youtube.is_some(),
                 "patreon_configured": cfg.patreon.is_some(),
@@ -1069,6 +1070,23 @@ async fn update_setting(
         "ui.reduce_motion" => take_bool(&body.value).map(|v| cfg.ui.reduce_motion = v),
         "ui.verbose_status" => take_bool(&body.value).map(|v| cfg.ui.verbose_status = v),
         "archiver.enabled" => take_bool(&body.value).map(|v| cfg.archiver.enabled = v),
+        // Notifications — every flag is a bool the daemon's notify-rust
+        // integration consults before firing a banner.
+        "notifications.desktop_enabled" => {
+            take_bool(&body.value).map(|v| cfg.notifications.desktop_enabled = v)
+        }
+        "notifications.on_go_live" => {
+            take_bool(&body.value).map(|v| cfg.notifications.on_go_live = v)
+        }
+        "notifications.on_recording_finished" => {
+            take_bool(&body.value).map(|v| cfg.notifications.on_recording_finished = v)
+        }
+        "notifications.on_recording_failed" => {
+            take_bool(&body.value).map(|v| cfg.notifications.on_recording_failed = v)
+        }
+        "notifications.on_vod_ready" => {
+            take_bool(&body.value).map(|v| cfg.notifications.on_vod_ready = v)
+        }
         "archiver.concurrent_fragments" => {
             // Clamp to 1..=16 — yt-dlp accepts more but past 16 you're
             // just thrashing the platform's rate limiter.

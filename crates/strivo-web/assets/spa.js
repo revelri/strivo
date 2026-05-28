@@ -5378,6 +5378,7 @@ function renderStub(title, msg) {
 const SETTINGS_SECTIONS = [
   { slug: "general", label: "General", icon: "⚙" },
   { slug: "recording", label: "Recording", icon: "⏺" },
+  { slug: "notifications", label: "Notifications", icon: "🔔" },
   { slug: "platforms", label: "Platforms", icon: "🔌" },
   { slug: "plugins", label: "Plugins", icon: "🧩" },
   { slug: "interface", label: "Interface", icon: "🎨" },
@@ -5458,6 +5459,22 @@ function wireSettingsControls() {
   pane.querySelectorAll(".stg-cfg-btn").forEach((btn) => {
     btn.addEventListener("click", () => openPlatformWizard(btn.dataset.platform));
   });
+  // Master toggle on Notifications dims the dependent Events group when
+  // off. We do this in JS rather than re-rendering so users see immediate
+  // visual feedback during the save round-trip.
+  const masterEl = pane.querySelector('[data-stg-path="notifications.desktop_enabled"]');
+  const condEl = pane.querySelector(".stg-subgroup-conditional");
+  const syncMaster = () => {
+    if (!masterEl || !condEl) return;
+    if (masterEl.checked) {
+      condEl.style.opacity = "";
+      condEl.style.pointerEvents = "";
+    } else {
+      condEl.style.opacity = "0.55";
+      condEl.style.pointerEvents = "none";
+    }
+  };
+  if (masterEl) masterEl.addEventListener("change", syncMaster);
   pane.querySelectorAll("[data-stg-path]").forEach((el) => {
     el.addEventListener("change", async (e) => {
       const path = el.getAttribute("data-stg-path");
@@ -5533,6 +5550,23 @@ function renderSettingsPane(slug, s) {
   switch (slug) {
     case "general":
       return [
+        group("At a glance", [
+          row(
+            "Tracked channels",
+            `<a href="#/library" class="stg-linkbtn">${channelCache.length} channel${channelCache.length === 1 ? "" : "s"} →</a>`,
+            "Click to manage channels in Library.",
+          ),
+          row(
+            "Active recordings",
+            `<a href="#/recordings" class="stg-linkbtn">${recCache.filter((r) => isInProgress(r.state)).length} in progress →</a>`,
+            "Live captures + VOD pulls in flight.",
+          ),
+          row(
+            "Patreon creators",
+            `${(patreonState.creators || []).length}`,
+            "Followed Patreon creators (read-only here; manage via the rail).",
+          ),
+        ].join("")),
         group("Polling", [
           row(
             "Channel poll interval",
@@ -5553,6 +5587,45 @@ function renderSettingsPane(slug, s) {
           ),
         ].join("")),
       ].join("");
+
+    case "notifications": {
+      const n = s.notifications || {};
+      const masterOn = n.desktop_enabled !== false;
+      const noteAttr = masterOn ? "" : ' style="opacity:0.55;pointer-events:none"';
+      return [
+        group("Desktop notifications", [
+          row(
+            "Master switch",
+            toggle("notifications.desktop_enabled", n.desktop_enabled !== false),
+            "When off, the daemon skips every notify-rust banner regardless of the toggles below. Useful for headless / kiosk setups.",
+          ),
+        ].join("")),
+        `<div class="stg-subgroup-conditional"${noteAttr}>${[
+          group("Events", [
+            row(
+              "Channel goes live",
+              toggle("notifications.on_go_live", n.on_go_live !== false),
+              "Banner when a tracked channel transitions offline → live.",
+            ),
+            row(
+              "Recording finished",
+              toggle("notifications.on_recording_finished", n.on_recording_finished !== false),
+              "Banner when a live capture or VOD pull completes successfully.",
+            ),
+            row(
+              "Recording failed",
+              toggle("notifications.on_recording_failed", n.on_recording_failed !== false),
+              "Always recommended: silent failures are the worst class of PVR bug.",
+            ),
+            row(
+              "VOD backfill ready",
+              toggle("notifications.on_vod_ready", n.on_vod_ready === true),
+              "Banner when the Twitch auto-VOD-backfill pull lands. Off by default — most users don't track it manually.",
+            ),
+          ].join("")),
+        ].join("")}</div>`,
+      ].join("");
+    }
 
     case "recording":
       return [
