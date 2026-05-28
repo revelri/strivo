@@ -1616,6 +1616,61 @@ async fn broll_suggest(
     .into_response()
 }
 
+#[derive(Debug, Deserialize)]
+struct ChatDensityPayload {
+    /// Chat log payload. One of `log` (IRC dump) or `csv` (CSV with
+    /// `time_sec,user,message`) must be set.
+    #[serde(default)]
+    log: Option<String>,
+    #[serde(default)]
+    csv: Option<String>,
+    /// Stream-start epoch-ms; used to convert IRC `tmi-sent-ts` tags
+    /// into relative seconds. Unused for CSV input.
+    #[serde(default)]
+    stream_start_ts_ms: u64,
+    /// Bucket size in seconds (default 30).
+    #[serde(default = "default_bucket_secs_chat")]
+    bucket_secs: f32,
+}
+
+fn default_bucket_secs_chat() -> f32 { 30.0 }
+
+/// `POST /api/v1/plugins/chat-density/<recording_id>` — parse an IRC
+/// dump or CSV log, bucket events, and return the density / engagement
+/// curve. Pure transform; no persistence today (the SPA owns the
+/// upload). Wires the `x.chat_density` capability that Heatmap reserves.
+async fn chat_density_compute(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+    Json(body): Json<ChatDensityPayload>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("chat_density") { return r; }
+    let events = if let Some(csv) = &body.csv {
+        strivo_chat_density::parse_csv_log(csv)
+    } else if let Some(log) = &body.log {
+        strivo_chat_density::parse_irc_log(log, body.stream_start_ts_ms)
+    } else {
+        return Problem::bad_request("supply either `csv` or `log` body").into_response();
+    };
+    // Duration = max event time + 5% pad so the strip isn't clipped.
+    let max_t = events.iter().map(|e| e.time_sec).fold(0.0_f32, f32::max);
+    let duration_sec = (max_t * 1.05).max(body.bucket_secs * 2.0);
+    let bucket_secs = body.bucket_secs.max(5.0);
+    let points = strivo_chat_density::compute_density(&events, duration_sec, bucket_secs);
+    Json(json!({
+        "recording_id": recording_id,
+        "event_count": events.len(),
+        "duration_sec": duration_sec,
+        "bucket_secs": bucket_secs,
+        "points": points,
+    }))
+    .into_response()
+}
+
 /// Open a plugin DB read-only. Returns None when the file is absent (plugin
 /// idle) so callers can serve an empty payload.
 fn open_ro(path: &std::path::Path) -> Option<Connection> {
@@ -2346,4 +2401,5 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/editor/{id}/render", axum::routing::post(editor_render))
         .route("/api/v1/plugins/viewguard/trend", get(viewguard_trend))
         .route("/api/v1/plugins/broll/{id}", axum::routing::post(broll_suggest))
+        .route("/api/v1/plugins/chat-density/{id}", axum::routing::post(chat_density_compute))
 }

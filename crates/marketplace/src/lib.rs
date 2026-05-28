@@ -211,7 +211,9 @@ pub fn default_catalog() -> Catalog {
                     description: "Real audience-retention from chat density (Twitch IRC tap).".into(),
                     capabilities: vec!["audience_retention".into(), "x.chat_density".into()],
                     consumes: vec![],
-                    entry_point: EntryPoint::Roadmap,
+                    // Promoted from Roadmap → available in iter 19: the
+                    // strivo-chat-density crate ships with the host.
+                    entry_point: EntryPoint::Cdylib { path: "chat_density.so".into() },
                     min_host_version: "0.3.0".into(),
                     price_cents: None,
                     repository: Some("https://github.com/Chorosyne/twitch-chat-density".into()),
@@ -220,7 +222,7 @@ pub fn default_catalog() -> Catalog {
                     category: Some("Analytics".into()),
                 },
                 source: "first_party".into(),
-                installed: false,
+                installed: true,
             },
             CatalogEntry {
                 manifest: PluginManifest {
