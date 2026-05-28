@@ -617,9 +617,15 @@ async fn start_recording(
     }
 }
 
-/// `GET /api/v1/recordings/{id}/thumb` — serve the recording's cached source
-/// thumbnail (snapshotted at record-start). 404 when none exists so the SPA
-/// falls back to a placeholder. Authenticated; id is a Uuid so no traversal.
+/// `GET /api/v1/recordings/{id}/thumb` — serve the recording's source thumbnail.
+///
+/// Resolution order:
+///   1. Cached jpg at `<data_dir>/thumbs/<id>.jpg` (snapshotted at record-start
+///      for new recordings).
+///   2. Lazy ffmpeg extraction from the recording's `output_path` for old
+///      recordings that pre-date the start-time snapshot. Result is cached
+///      next to (1) so subsequent hits are fast.
+///   3. 404 — the SPA falls back to a channel-initials placeholder.
 async fn recording_thumb(
     headers: HeaderMap,
     State(state): State<AppState>,
@@ -628,20 +634,112 @@ async fn recording_thumb(
     if check_key(&headers, &state).is_err() {
         return crate::problem::Problem::unauthorized().into_response();
     }
-    let path = strivo_core::config::AppConfig::data_dir()
+    let cache_path = strivo_core::config::AppConfig::data_dir()
         .join("thumbs")
         .join(format!("{id}.jpg"));
-    match tokio::fs::read(&path).await {
-        Ok(bytes) => (
-            [
-                (axum::http::header::CONTENT_TYPE, "image/jpeg"),
-                (axum::http::header::CACHE_CONTROL, "public, max-age=86400"),
-            ],
-            bytes,
-        )
-            .into_response(),
-        Err(_) => crate::problem::Problem::not_found("no thumbnail").into_response(),
+    if let Ok(bytes) = tokio::fs::read(&cache_path).await {
+        return thumb_response(bytes);
     }
+
+    // Fall through to ffmpeg extraction.
+    let source = match state.ipc.snapshot().await {
+        Ok(ServerMessage::StateSnapshot { recordings, .. }) => recordings
+            .get(&id)
+            .map(|r| (r.output_path.clone(), r.bytes_written)),
+        _ => None,
+    };
+    let Some((output_path, bytes_written)) = source else {
+        return crate::problem::Problem::not_found("no thumbnail: not in snapshot").into_response();
+    };
+    if bytes_written == 0 {
+        return crate::problem::Problem::not_found("no thumbnail: zero bytes").into_response();
+    }
+    if !output_path.exists() {
+        return crate::problem::Problem::not_found(format!(
+            "no thumbnail: file missing ({})",
+            output_path.display()
+        ))
+        .into_response();
+    }
+
+    match extract_thumb_with_ffmpeg(&output_path, &cache_path).await {
+        Ok(bytes) => thumb_response(bytes),
+        Err(e) => crate::problem::Problem::not_found(format!("no thumbnail: ffmpeg: {e}"))
+            .into_response(),
+    }
+}
+
+fn thumb_response(bytes: Vec<u8>) -> axum::response::Response {
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "image/jpeg"),
+            (axum::http::header::CACHE_CONTROL, "public, max-age=86400"),
+        ],
+        bytes,
+    )
+        .into_response()
+}
+
+/// Extract a single jpg frame at ~10s into the file and cache it. Writes to
+/// `<cache_path>.tmp` then atomic-renames so concurrent requests for the same
+/// id can't tear a half-written file (last writer wins, both readers see a
+/// complete jpg). Returns the freshly-written bytes.
+async fn extract_thumb_with_ffmpeg(
+    source: &std::path::Path,
+    cache_path: &std::path::Path,
+) -> anyhow::Result<Vec<u8>> {
+    if let Some(parent) = cache_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    // Temp filename ends in `.jpg` (with `.tmp` BEFORE it) — `.jpg.tmp`
+    // masks the extension and ffmpeg's muxer-auto-detection fails with
+    // "Unable to choose an output format". Keeping `.jpg` last and
+    // `-f image2 -update 1` belt-and-suspenders works on every ffmpeg
+    // we ship against.
+    let tmp = cache_path.with_extension("tmp.jpg");
+
+    // -ss before -i is the fast keyframe seek; -frames:v 1 caps output;
+    // scale=440:-2 matches the cd-poster width and keeps an even height for
+    // mjpeg. -q:v 5 is a good size/quality midpoint. -f image2 -update 1
+    // pins the muxer to single-image jpeg.
+    let mut cmd = tokio::process::Command::new("ffmpeg");
+    cmd.args(["-nostdin", "-y", "-ss", "10", "-i"])
+        .arg(source)
+        .args([
+            "-frames:v", "1", "-vf", "scale=440:-2", "-q:v", "5",
+            "-f", "image2", "-update", "1",
+        ])
+        .arg(&tmp);
+    let status = cmd.output().await?;
+    if !status.status.success() || tokio::fs::metadata(&tmp).await.is_err() {
+        // Stream may be <10s; retry at 0s before giving up.
+        let _ = tokio::fs::remove_file(&tmp).await;
+        let mut cmd = tokio::process::Command::new("ffmpeg");
+        cmd.args(["-nostdin", "-y", "-ss", "0", "-i"])
+            .arg(source)
+            .args([
+                "-frames:v", "1", "-vf", "scale=440:-2", "-q:v", "5",
+                "-f", "image2", "-update", "1",
+            ])
+            .arg(&tmp);
+        let status = cmd.output().await?;
+        if !status.status.success() {
+            return Err(anyhow::anyhow!(
+                "ffmpeg exit {}: {}",
+                status.status,
+                String::from_utf8_lossy(&status.stderr).trim()
+            ));
+        }
+    }
+    let bytes = tokio::fs::read(&tmp).await?;
+    if bytes.is_empty() {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(anyhow::anyhow!("ffmpeg produced no frame"));
+    }
+    // Atomic rename; ignore the case where another concurrent extract already
+    // landed (read above succeeded so we have the bytes either way).
+    let _ = tokio::fs::rename(&tmp, cache_path).await;
+    Ok(bytes)
 }
 
 /// `DELETE /api/v1/recordings/<id>` — stop the recording with the
