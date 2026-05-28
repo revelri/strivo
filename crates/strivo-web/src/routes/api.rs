@@ -1879,7 +1879,10 @@ async fn plugin_capabilities() -> impl IntoResponse {
         { "capability": cap::HIGHLIGHT_DETECTION,  "providers": [{"plugin": "clipper", "status": "available"}] },
         { "capability": cap::CLIP_EXTRACTION,      "providers": [{"plugin": "clipper", "status": "available"}] },
         { "capability": cap::TRANSLATION,          "providers": [{"plugin": "captions", "status": "available"}] },
-        { "capability": cap::CAPTIONS,             "providers": [{"plugin": "captions", "status": "available"}] },
+        { "capability": cap::CAPTIONS,             "providers": [
+            {"plugin": "captions",       "status": "available"},
+            {"plugin": "captions-ass",   "status": "available"}
+        ] },
         { "capability": cap::AUDIENCE_RETENTION,   "providers": [
             {"plugin": "heatmap",      "status": "available"},
             {"plugin": "chat-density", "status": "available"}

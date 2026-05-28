@@ -126,6 +126,169 @@ pub fn to_vtt(segments: &[Segment]) -> String {
     out
 }
 
+/// Styled caption export options — surfaces in the Editor "Styled
+/// subtitles" panel and persists with the recording. Designed for the
+/// YouTube Shorts / TikTok / Reels cut where styled captions drive
+/// watch-time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssStyle {
+    /// Title in the ASS header.
+    pub title: String,
+    /// Default font face. Picks one that the player is likely to have;
+    /// system fallback resolves the missing-font case.
+    pub font: String,
+    /// Default font size in script-resolution points.
+    pub font_size: u32,
+    /// Outline thickness in pixels. Heavy outline = readable over busy
+    /// video; lower outline = aesthetic.
+    pub outline_px: f32,
+    /// Drop-shadow distance in pixels.
+    pub shadow_px: f32,
+    /// 1..=9 numpad-style alignment. 2 = bottom-centre (default).
+    pub alignment: u8,
+    /// Bottom margin in pixels. Shorts / Reels usually want 80-120 to
+    /// avoid the UI overlays.
+    pub margin_v_px: u32,
+    /// Optional per-speaker colour map — speaker label → ASS BGR hex
+    /// (e.g. "FFFFFF" for white, "00FFFF" for yellow). When present,
+    /// each cue gets the speaker's colour via a `{\c}` override.
+    #[serde(default)]
+    pub speaker_colors: std::collections::BTreeMap<String, String>,
+}
+
+impl Default for AssStyle {
+    fn default() -> Self {
+        Self {
+            title: "StriVo styled captions".into(),
+            font: "Inter".into(),
+            font_size: 56,
+            outline_px: 2.0,
+            shadow_px: 1.5,
+            alignment: 2,
+            margin_v_px: 80,
+            speaker_colors: Default::default(),
+        }
+    }
+}
+
+/// One word with its sub-segment timing — drives karaoke-style `\k`
+/// highlight in ASS dialogue lines. Optional; absent karaoke = the
+/// whole cue text appears at once.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WordTiming {
+    pub text: String,
+    pub start_sec: f32,
+    pub end_sec: f32,
+}
+
+/// A caption cue enriched with optional per-word timing for karaoke
+/// rendering. The plain SRT/VTT/TXT paths still work off the simpler
+/// [`Segment`] shape.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KaraokeSegment {
+    pub start_sec: f32,
+    pub end_sec: f32,
+    pub speaker: Option<String>,
+    pub words: Vec<WordTiming>,
+}
+
+/// Format an ASS time as `H:MM:SS.cc` (centiseconds, single-digit hour).
+fn fmt_ass_time(sec: f32) -> String {
+    let cs = (sec.max(0.0) * 100.0).round() as u64;
+    let h = cs / 360_000;
+    let m = (cs / 6000) % 60;
+    let s = (cs / 100) % 60;
+    let c = cs % 100;
+    format!("{h}:{m:02}:{s:02}.{c:02}")
+}
+
+/// Emit an Advanced SubStation Alpha (.ass) caption file. ASS supports
+/// per-cue colour, outline, drop shadow, positioning, and the karaoke
+/// `\k` highlight tag — everything you need for YouTube Shorts /
+/// TikTok / Reels-style "bold readable captions".
+///
+/// Pass a `karaoke` list when word-level timing is available; the cue
+/// for each segment is built from the matching `KaraokeSegment` if its
+/// start/end roughly aligns (within 0.05s). Cues with no karaoke fall
+/// back to the segment's plain text.
+pub fn to_ass(
+    segments: &[Segment],
+    style: &AssStyle,
+    karaoke: &[KaraokeSegment],
+) -> String {
+    let mut out = String::new();
+    out.push_str("[Script Info]\n");
+    out.push_str(&format!("Title: {}\n", ass_escape(&style.title)));
+    out.push_str("ScriptType: v4.00+\n");
+    out.push_str("PlayResX: 1920\nPlayResY: 1080\n");
+    out.push_str("ScaledBorderAndShadow: yes\n\n");
+    out.push_str("[V4+ Styles]\n");
+    out.push_str("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n");
+    // ASS colours are &HAABBGGRR (alpha + BGR). White text, black
+    // outline, 50% black shadow — classic high-contrast preset.
+    out.push_str(&format!(
+        "Style: Default,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H7F000000,1,0,0,0,100,100,0,0,1,{outline:.2},{shadow:.2},{align},20,20,{marginv},1\n\n",
+        font = style.font,
+        size = style.font_size,
+        outline = style.outline_px,
+        shadow = style.shadow_px,
+        align = style.alignment,
+        marginv = style.margin_v_px,
+    ));
+    out.push_str("[Events]\n");
+    out.push_str("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n");
+    // Build a fast lookup so we can match karaoke entries by their
+    // (rounded) start time without an O(n*m) scan.
+    let kar_by_start: std::collections::HashMap<u32, &KaraokeSegment> = karaoke
+        .iter()
+        .map(|k| ((k.start_sec * 100.0).round() as u32, k))
+        .collect();
+    for s in segments {
+        let key = (s.start_sec * 100.0).round() as u32;
+        let kar = kar_by_start.get(&key).filter(|k| {
+            (k.end_sec - s.end_sec).abs() < 0.05
+        });
+        let speaker_override = match &s.speaker {
+            Some(spk) => style
+                .speaker_colors
+                .get(spk)
+                .map(|hex| format!("{{\\c&H00{hex}&}}", hex = hex.to_uppercase())),
+            None => None,
+        }
+        .unwrap_or_default();
+        let text = if let Some(k) = kar {
+            karaoke_text(k, &speaker_override)
+        } else {
+            format!("{}{}", speaker_override, ass_escape(s.text.trim()))
+        };
+        let line = format!(
+            "Dialogue: 0,{start},{end},Default,,0,0,0,,{text}\n",
+            start = fmt_ass_time(s.start_sec),
+            end = fmt_ass_time(s.end_sec),
+        );
+        out.push_str(&line);
+    }
+    out
+}
+
+fn karaoke_text(seg: &KaraokeSegment, color_prefix: &str) -> String {
+    // ASS \k takes centisecond durations.
+    let mut out = String::new();
+    out.push_str(color_prefix);
+    for w in &seg.words {
+        let cs = ((w.end_sec - w.start_sec).max(0.0) * 100.0).round() as u32;
+        out.push_str(&format!("{{\\k{cs}}}{} ", ass_escape(w.text.trim())));
+    }
+    out.trim_end().to_string()
+}
+
+/// Minimal ASS escape — guard the two characters that break dialogue
+/// parsing: `\N` is the line-break sequence (we keep newlines literal
+/// by replacing them), and `{` opens override blocks.
+fn ass_escape(s: &str) -> String {
+    s.replace('\n', "\\N").replace('{', "\\{").replace('}', "\\}")
+}
+
 /// Plain-text export — drops timestamps + tags, useful for show-notes
 /// drafts or to feed a separate summarisation pipeline. Keeps speaker
 /// labels because they read well in markdown.
@@ -236,6 +399,103 @@ mod tests {
         assert_eq!(to_srt(&[]), "");
         assert_eq!(to_vtt(&[]), "WEBVTT\n\n");
         assert_eq!(to_txt(&[]), "");
+    }
+
+    fn kar(start: f32, end: f32, spk: Option<&str>, words: &[(&str, f32, f32)]) -> KaraokeSegment {
+        KaraokeSegment {
+            start_sec: start,
+            end_sec: end,
+            speaker: spk.map(|s| s.into()),
+            words: words.iter().map(|(t, s, e)| WordTiming {
+                text: (*t).into(), start_sec: *s, end_sec: *e,
+            }).collect(),
+        }
+    }
+
+    #[test]
+    fn ass_header_carries_style_knobs() {
+        let mut style = AssStyle::default();
+        style.font = "Helvetica".into();
+        style.font_size = 72;
+        style.outline_px = 3.0;
+        style.shadow_px = 2.0;
+        style.margin_v_px = 120;
+        let s = to_ass(&[], &style, &[]);
+        assert!(s.contains("Title: StriVo styled captions"));
+        assert!(s.contains("Helvetica,72,"));
+        assert!(s.contains(",3.00,2.00,2,20,20,120,"));
+        assert!(s.contains("PlayResX: 1920"));
+    }
+
+    #[test]
+    fn ass_dialogue_line_emits_centisecond_timestamps() {
+        let segs = vec![seg(1.0, 5.5, "hello world", None)];
+        let s = to_ass(&segs, &AssStyle::default(), &[]);
+        assert!(s.contains("Dialogue: 0,0:00:01.00,0:00:05.50,Default,,0,0,0,,hello world"));
+    }
+
+    #[test]
+    fn ass_per_speaker_color_overrides_cue() {
+        let mut style = AssStyle::default();
+        style.speaker_colors.insert("Alice".into(), "00FFFF".into()); // yellow (BGR)
+        let segs = vec![seg(0.0, 1.0, "hi", Some("Alice"))];
+        let s = to_ass(&segs, &style, &[]);
+        // Cue should carry the colour override before the text.
+        assert!(s.contains(r"{\c&H0000FFFF&}hi"));
+    }
+
+    #[test]
+    fn ass_karaoke_emits_per_word_k_tags() {
+        let segs = vec![seg(0.0, 2.0, "hello world", None)];
+        let k = vec![kar(0.0, 2.0, None, &[("hello", 0.0, 0.5), ("world", 0.5, 2.0)])];
+        let s = to_ass(&segs, &AssStyle::default(), &k);
+        // hello = 50cs, world = 150cs.
+        assert!(s.contains(r"{\k50}hello"));
+        assert!(s.contains(r"{\k150}world"));
+    }
+
+    #[test]
+    fn ass_karaoke_falls_back_to_plain_text_on_mismatch() {
+        let segs = vec![seg(0.0, 2.0, "hello world", None)];
+        // Karaoke entry with mismatched end time → not used.
+        let k = vec![kar(0.0, 3.0, None, &[("hello", 0.0, 0.5)])];
+        let s = to_ass(&segs, &AssStyle::default(), &k);
+        assert!(s.contains(",hello world"));
+        assert!(!s.contains(r"{\k"));
+    }
+
+    #[test]
+    fn ass_escape_handles_braces_and_newlines() {
+        let segs = vec![seg(0.0, 1.0, "use {0} and\n{1}", None)];
+        let s = to_ass(&segs, &AssStyle::default(), &[]);
+        // Newline → \N; braces → escaped.
+        assert!(s.contains(r"use \{0\} and\N\{1\}"));
+    }
+
+    #[test]
+    fn ass_empty_segments_still_produce_valid_header() {
+        let s = to_ass(&[], &AssStyle::default(), &[]);
+        assert!(s.contains("[Script Info]"));
+        assert!(s.contains("[V4+ Styles]"));
+        assert!(s.contains("[Events]"));
+        // No dialogue lines.
+        assert!(!s.contains("\nDialogue:"));
+    }
+
+    #[test]
+    fn ass_combines_color_and_karaoke_on_same_cue() {
+        let mut style = AssStyle::default();
+        style.speaker_colors.insert("Bob".into(), "0080FF".into());
+        let segs = vec![seg(0.0, 1.0, "go go", Some("Bob"))];
+        let k = vec![kar(0.0, 1.0, Some("Bob"), &[("go", 0.0, 0.5), ("go", 0.5, 1.0)])];
+        let s = to_ass(&segs, &style, &k);
+        assert!(s.contains(r"{\c&H000080FF&}{\k50}go {\k50}go"));
+    }
+
+    #[test]
+    fn fmt_ass_time_handles_centisecond_rounding() {
+        assert_eq!(fmt_ass_time(0.0), "0:00:00.00");
+        assert_eq!(fmt_ass_time(3666.789), "1:01:06.79");
     }
 
     #[test]

@@ -773,6 +773,49 @@ async fn captions_export(
     let (body, mime, ext) = match q.fmt.as_str() {
         "vtt" => (strivo_captions::to_vtt(&translated), "text/vtt", "vtt"),
         "txt" => (strivo_captions::to_txt(&translated), "text/plain", "txt"),
+        "ass" => {
+            // Pull the styled-subtitles spec from the plugin store if the
+            // user has saved customisations; otherwise use defaults. Word
+            // timings come from the Crunchr detail when available.
+            let style: strivo_captions::AssStyle = std::fs::read_to_string(captions_style_path(&recording_id))
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+            // Per-recording word timings are loaded on demand from the
+            // crunchr SQLite; the detail's segments carry `words: Option<…>`
+            // which is None until hydrated. Pull them now so karaoke
+            // exports get word-level highlight.
+            let karaoke: Vec<strivo_captions::KaraokeSegment> = detail
+                .segments
+                .iter()
+                .filter_map(|s| {
+                    let words = s.words.as_ref()?;
+                    if words.is_empty() {
+                        return None;
+                    }
+                    Some(strivo_captions::KaraokeSegment {
+                        start_sec: s.start_sec as f32,
+                        end_sec: s.end_sec as f32,
+                        speaker: s.speaker.clone(),
+                        // Crunchr's wire shape uses single-letter fields
+                        // (w, s, e, c) to keep the SQLite blob tight.
+                        words: words
+                            .iter()
+                            .map(|w| strivo_captions::WordTiming {
+                                text: w.w.clone(),
+                                start_sec: w.s as f32,
+                                end_sec: w.e as f32,
+                            })
+                            .collect(),
+                    })
+                })
+                .collect();
+            (
+                strivo_captions::to_ass(&translated, &style, &karaoke),
+                "text/x-ssa",
+                "ass",
+            )
+        }
         _ /* srt */ => (
             strivo_captions::to_srt(&translated),
             "application/x-subrip",
@@ -1958,6 +2001,59 @@ async fn multistream_tiles(
     .into_response()
 }
 
+fn captions_style_path(recording_id: &str) -> std::path::PathBuf {
+    strivo_core::config::AppConfig::data_dir()
+        .join("plugins")
+        .join("captions")
+        .join(format!("{recording_id}.style.json"))
+}
+
+/// `GET /api/v1/plugins/captions/<id>/style` — load the saved ASS style
+/// spec for this recording; returns the default when none saved.
+async fn captions_style_load(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("captions") { return r; }
+    let style: strivo_captions::AssStyle = std::fs::read_to_string(captions_style_path(&recording_id))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    Json(json!({ "recording_id": recording_id, "style": style })).into_response()
+}
+
+/// `POST /api/v1/plugins/captions/<id>/style` — persist the ASS style
+/// spec for this recording. The next `?fmt=ass` export consults this.
+async fn captions_style_save(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+    Json(body): Json<strivo_captions::AssStyle>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("captions") { return r; }
+    let path = captions_style_path(&recording_id);
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return Problem::internal(format!("mkdir: {e}")).into_response();
+        }
+    }
+    let json = match serde_json::to_string_pretty(&body) {
+        Ok(s) => s,
+        Err(e) => return Problem::internal(format!("serialise: {e}")).into_response(),
+    };
+    if let Err(e) = std::fs::write(&path, json) {
+        return Problem::internal(format!("write: {e}")).into_response();
+    }
+    Json(json!({ "ok": true })).into_response()
+}
+
 fn automation_path(recording_id: &str) -> std::path::PathBuf {
     strivo_core::config::AppConfig::data_dir()
         .join("plugins")
@@ -2940,6 +3036,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/insights/compare", get(insights_compare))
         .route("/api/v1/plugins/insights/retention/{id}", get(insights_retention))
         .route("/api/v1/plugins/captions/{id}", get(captions_export))
+        .route("/api/v1/plugins/captions/{id}/style", get(captions_style_load).post(captions_style_save))
         .route("/api/v1/plugins/multitrack/{id}", get(multitrack_list))
         .route("/api/v1/plugins/multitrack/{id}/extract", axum::routing::post(multitrack_extract))
         .route("/api/v1/plugins/brandsafe/{id}", get(brandsafe_scan))
