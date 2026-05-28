@@ -1398,6 +1398,32 @@ a.media-pill:hover,
 .recordings-table.compact .rec-thumb-wrap { width: 56px; height: 32px; }
 .recordings-table.compact .rec-thumb-wrap::before { font-size: 0.7rem; }
 
+/* File-missing badge — translucent black over the thumb (or initials tile,
+ * if the jpg also 404s and self-removes), red caps centred. ::after stacks
+ * above the .rec-thumb img (z-index 1) so it survives extraction success. */
+.rec-thumb-missing::after {
+  content: "FILE MISSING";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--recording);
+  font-weight: 800;
+  font-size: 0.62rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  z-index: 2;
+  pointer-events: none;
+  border-radius: inherit;
+}
+/* Slightly tighter type when the thumb is in the compact table density. */
+.recordings-table.compact .rec-thumb-missing::after { font-size: 0.5rem; }
+/* When the info modal's larger thumb shows it, scale up so the label
+ * matches the 220px tile. */
+.rec-info-thumb .rec-thumb-missing::after { font-size: 1rem; letter-spacing: 0.15em; }
+
 /* Recordings index density + multi-select mass-edit (item 22). */
 .rec-toolbar { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.5rem; }
 .rec-toolbar .grid-filter { flex: 1; }

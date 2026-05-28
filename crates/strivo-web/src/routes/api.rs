@@ -72,6 +72,21 @@ async fn patreon(headers: HeaderMap, State(state): State<AppState>) -> impl Into
     }
 }
 
+/// Serialise a RecordingJob and inject a `file_exists` flag computed from
+/// the on-disk state of its `output_path`. The webui surfaces this as a
+/// "FILE MISSING" overlay over the thumb so dead journal rows (file moved
+/// or deleted out from under the daemon) are visible without a route probe.
+fn augment_recording(job: &strivo_core::recording::job::RecordingJob) -> serde_json::Value {
+    let mut v = serde_json::to_value(job).unwrap_or(serde_json::Value::Null);
+    if let Some(obj) = v.as_object_mut() {
+        obj.insert(
+            "file_exists".to_string(),
+            serde_json::Value::Bool(job.output_path.exists()),
+        );
+    }
+    v
+}
+
 async fn recordings(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
     if check_key(&headers, &state).is_err() {
         return crate::problem::Problem::unauthorized().into_response();
@@ -82,7 +97,8 @@ async fn recordings(headers: HeaderMap, State(state): State<AppState>) -> impl I
             // so the response is stable and order-by-newest-first.
             let mut items: Vec<_> = recordings.into_values().collect();
             items.sort_by_key(|r| std::cmp::Reverse(r.started_at));
-            Json(json!({ "recordings": items })).into_response()
+            let augmented: Vec<_> = items.iter().map(augment_recording).collect();
+            Json(json!({ "recordings": augmented })).into_response()
         }
         Ok(_) => Json(json!({ "recordings": [] })).into_response(),
         Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
@@ -99,7 +115,7 @@ async fn recording_one(
     }
     match state.ipc.snapshot().await {
         Ok(ServerMessage::StateSnapshot { recordings, .. }) => match recordings.get(&id) {
-            Some(j) => Json(j.clone()).into_response(),
+            Some(j) => Json(augment_recording(j)).into_response(),
             None => crate::problem::Problem::not_found("recording not found").into_response(),
         },
         Ok(_) => crate::problem::Problem::internal("unexpected response").into_response(),

@@ -1994,7 +1994,11 @@ function recThumb(r) {
     .map((w) => w[0].toUpperCase())
     .join("") || "?";
   const hue = thumbHue(r.channel_name || r.id || "");
-  return `<span class="rec-thumb-wrap" data-init="${escape(initials)}"
+  // r.file_exists is set by the backend's augment_recording; when false the
+  // recording's output_path is gone from disk (moved / deleted / external
+  // drive offline) so we surface it as a red-caps overlay over the thumb.
+  const missing = r.file_exists === false ? " rec-thumb-missing" : "";
+  return `<span class="rec-thumb-wrap${missing}" data-init="${escape(initials)}"
     style="--ch-hue:${hue}deg">
     <img class="rec-thumb" loading="lazy" alt=""
       src="/api/v1/recordings/${encodeURIComponent(r.id)}/thumb"
