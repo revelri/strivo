@@ -3610,6 +3610,20 @@ body.modal-open { overflow: hidden; }
   background: rgba(255,255,255,0.12);
   font-size: 0.7em; vertical-align: middle;
 }
+/* Twitch badge image — 18×18 raster fits the existing line height. */
+.chat-badge-img {
+  width: 18px; height: 18px;
+  margin-right: 0.2rem;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+/* Twitch + BTTV emote raster. 28×28 keeps lines readable; sticks to
+ * the same vertical baseline as text. */
+.chat-emote {
+  height: 28px; width: auto; max-width: 80px;
+  vertical-align: middle;
+  margin: 0 0.1rem;
+}
 .chat-sender { font-weight: 700; }
 .chat-sep { opacity: 0.6; margin-right: 0.2rem; }
 .chat-mention { color: #6e56cf; font-weight: 600; }

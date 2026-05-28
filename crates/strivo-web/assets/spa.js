@@ -2982,8 +2982,18 @@ function parseTwitchIrc(line) {
     text = text.slice("ACTION ".length);
     is_action = true;
   }
+  // Badges with versions: 'subscriber/12,vip/1' → [{id:'subscriber',v:'12'},…]
   const badges = (tags["badges"] || "")
-    .split(",").map((b) => b.split("/")[0]).filter(Boolean);
+    .split(",")
+    .filter(Boolean)
+    .map((b) => {
+      const [id, v] = b.split("/");
+      return { id, version: v || "1" };
+    });
+  // Twitch native emote ranges: 'emote_id:start-end,start-end/emote_id:…'.
+  // Parsed client-side mirroring strivo-chat::parse_twitch_emotes; the SPA
+  // can't round-trip through the host parser cheaply on the live firehose.
+  const emote_ranges = parseTwitchEmotes(tags["emotes"] || "");
   return {
     id: tags["id"] || `${channel}-${tags["tmi-sent-ts"] || Date.now()}`,
     room: channel,
@@ -2992,10 +3002,50 @@ function parseTwitchIrc(line) {
     text,
     timestamp_ms: parseInt(tags["tmi-sent-ts"] || "0", 10),
     badges,
+    emote_ranges,
     is_action,
     is_system: false,
     deleted: false,
   };
+}
+
+function parseTwitchEmotes(raw) {
+  if (!raw) return [];
+  const out = [];
+  for (const group of raw.split("/")) {
+    const colon = group.indexOf(":");
+    if (colon < 0) continue;
+    const id = group.slice(0, colon);
+    for (const run of group.slice(colon + 1).split(",")) {
+      const dash = run.indexOf("-");
+      if (dash < 0) continue;
+      const s = parseInt(run.slice(0, dash), 10);
+      const e = parseInt(run.slice(dash + 1), 10);
+      if (!isFinite(s) || !isFinite(e) || e < s) continue;
+      out.push({ id, start: s, end: e });
+    }
+  }
+  out.sort((a, b) => a.start - b.start);
+  return out;
+}
+
+// BTTV global emotes — fetched once per session, keyed by emote code so
+// the per-message tokenizer can substitute them inline. We don't pull
+// channel-scoped BTTV/FFZ here (that needs the Twitch user id resolved
+// at chat-join time; a future iter).
+const bttvCache = { ready: false, map: new Map() };
+async function ensureBttvGlobal() {
+  if (bttvCache.ready) return bttvCache.map;
+  try {
+    const r = await fetch("https://api.betterttv.net/3/cached/emotes/global");
+    if (!r.ok) throw new Error("bttv fetch failed");
+    const list = await r.json();
+    for (const e of list) {
+      bttvCache.map.set(e.code, `https://cdn.betterttv.net/emote/${e.id}/1x`);
+    }
+  } catch (_) { /* graceful: chat works without BTTV */ }
+  bttvCache.ready = true;
+  return bttvCache.map;
 }
 
 function connectChatRoom(room) {
@@ -3074,10 +3124,8 @@ function paintChatBody() {
     .map((m) => {
       const cls = `chat-msg${m.deleted ? " deleted" : ""}${m.is_action ? " action" : ""}`;
       const senderCol = m.sender_color ? `style="color:${escape(m.sender_color)}"` : "";
-      const badges = (m.badges || [])
-        .map((b) => `<span class="chat-badge">${escape(b)}</span>`)
-        .join("");
-      const tokens = renderChatTokens(m.text);
+      const badges = renderChatBadges(m.badges || []);
+      const tokens = renderChatTokens(m.text, m.emote_ranges || []);
       const mentioned = chatState.watched_user && msgMentionsUser(m.text, chatState.watched_user)
         ? " mentioned" : "";
       return `<div class="${cls}${mentioned}">
@@ -3090,24 +3138,67 @@ function paintChatBody() {
   paintChatTabs();
 }
 
-function renderChatTokens(text) {
-  // Simple inline tokenizer for the SPA hot path. Emote substitution
-  // requires an emote map per room (BTTV/FFZ/Twitch), which is a future
-  // iter; for now mentions + links are good enough.
-  const parts = text.split(/(\s+)/);
-  return parts.map((p) => {
-    if (!p) return "";
-    if (p.startsWith("@")) {
-      const user = p.replace(/[.,!?]+$/, "").slice(1);
+// Render badges as small images served from twitch's CDN. Falls back to
+// the text chip for non-standard ids the SPA doesn't know URLs for.
+const BADGE_CDN = (id, version) =>
+  `https://static-cdn.jtvnw.net/badges/v1/${BADGE_UUIDS[id] || id}/${version}`;
+// Mapping from semantic badge id → twitch CDN uuid. The handful of
+// global badges have stable uuids; channel-scoped sub badges resolve
+// at fetch time (a future iter — they need the broadcaster's id).
+const BADGE_UUIDS = {
+  // Empty by default — CDN URL pattern works for global badges by id
+  // (subscriber/12, moderator/1, vip/1 etc.) so the fallback is fine
+  // for the live firehose. Channel-scoped uuids land in a future iter.
+};
+function renderChatBadges(badges) {
+  return badges.map((b) => {
+    const url = BADGE_CDN(b.id, b.version);
+    return `<img class="chat-badge-img" alt="${escape(b.id)}" title="${escape(b.id)}/${escape(b.version)}" src="${escape(url)}" onerror="this.outerHTML='<span class=&quot;chat-badge&quot;>${escape(b.id)}</span>'">`;
+  }).join("");
+}
+
+// Token renderer with Twitch emote-range overlay + BTTV global emote
+// substitution. Mirrors strivo-chat::tokenize_text_with_ranges so a
+// future host parser switch keeps the same shape.
+function renderChatTokens(text, ranges = []) {
+  // Helper that classifies a single whitespace-split run.
+  const classifyRun = (run) => {
+    if (!run) return "";
+    if (run.startsWith("@")) {
+      const user = run.replace(/[.,!?]+$/, "").slice(1);
       if (/^[A-Za-z0-9_]+$/.test(user)) {
         return `<span class="chat-mention">@${escape(user)}</span>`;
       }
     }
-    if (/^https?:\/\//.test(p)) {
-      return `<a class="chat-link" href="${escape(p)}" target="_blank" rel="noopener noreferrer">${escape(p)}</a>`;
+    if (/^https?:\/\//.test(run)) {
+      return `<a class="chat-link" href="${escape(run)}" target="_blank" rel="noopener noreferrer">${escape(run)}</a>`;
     }
-    return escape(p);
-  }).join("");
+    const bttv = bttvCache.map.get(run);
+    if (bttv) {
+      return `<img class="chat-emote" loading="lazy" alt="${escape(run)}" title="${escape(run)}" src="${escape(bttv)}">`;
+    }
+    return escape(run);
+  };
+  // Plain text path when there are no Twitch emote ranges.
+  const renderPlain = (s) =>
+    s.split(/(\s+)/).map((p) => /^\s+$/.test(p) ? p : classifyRun(p)).join("");
+  if (!ranges.length) return renderPlain(text);
+  // Twitch ranges are in CODE-POINT indices, not byte offsets. Walk by
+  // chars so multi-byte codepoints (emoji-prefixed messages) stay aligned.
+  const chars = Array.from(text);
+  const out = [];
+  let cursor = 0;
+  for (const r of ranges) {
+    if (r.start >= chars.length) continue;
+    if (r.start > cursor) out.push(renderPlain(chars.slice(cursor, r.start).join("")));
+    const end = Math.min(r.end + 1, chars.length);
+    const name = chars.slice(r.start, end).join("");
+    const url = `https://static-cdn.jtvnw.net/emoticons/v2/${r.id}/default/dark/1.0`;
+    out.push(`<img class="chat-emote" loading="lazy" alt="${escape(name)}" title="${escape(name)}" src="${escape(url)}">`);
+    cursor = end;
+  }
+  if (cursor < chars.length) out.push(renderPlain(chars.slice(cursor).join("")));
+  return out.join("");
 }
 
 function paintChatTabs() {
@@ -3162,6 +3253,11 @@ async function renderChat() {
       </main>
     </div>
   `);
+  // Kick off the BTTV global emote fetch in the background; we don't
+  // await it because the chat firehose should never block on a third
+  // party. ensureBttvGlobal() populates a module-level cache the
+  // tokenizer consults on each repaint.
+  ensureBttvGlobal().then(() => schedulePaintChat());
   let rooms;
   try {
     rooms = (await API.chatRooms()).rooms || [];

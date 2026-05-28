@@ -163,6 +163,102 @@ pub enum Token {
 
 pub type EmoteMap = HashMap<String, String>;
 
+/// One span from Twitch's IRC `emotes=` tag — an emote id and the
+/// character range (inclusive on both ends) in the message text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmoteRange {
+    pub id: String,
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Parse a Twitch `emotes=` tag value into a flat list of ranges. The
+/// tag shape is `emote_id:start-end[,start-end[,…]][/emote_id:…]`. Any
+/// malformed run is silently dropped so a single bad sub-range doesn't
+/// nuke an otherwise good list.
+pub fn parse_twitch_emotes(raw: &str) -> Vec<EmoteRange> {
+    let mut out = Vec::new();
+    if raw.is_empty() {
+        return out;
+    }
+    for group in raw.split('/') {
+        let Some((id, runs)) = group.split_once(':') else { continue };
+        for run in runs.split(',') {
+            let Some((start, end)) = run.split_once('-') else { continue };
+            let (Ok(start), Ok(end)) = (start.parse::<usize>(), end.parse::<usize>()) else { continue };
+            if end < start { continue }
+            out.push(EmoteRange { id: id.to_string(), start, end });
+        }
+    }
+    out.sort_by_key(|r| r.start);
+    out
+}
+
+/// Build the Twitch CDN URL for an emote id. The v2 endpoint serves
+/// modern dark-mode 1x assets which suit the chat tile UI; tooling can
+/// switch to 2.0 / 3.0 by changing the trailing component.
+pub fn twitch_emote_url(id: &str) -> String {
+    format!(
+        "https://static-cdn.jtvnw.net/emoticons/v2/{}/default/dark/1.0",
+        id
+    )
+}
+
+/// Tokenise `text` while honouring a list of [`EmoteRange`]s. The ranges
+/// take priority over the name-based [`EmoteMap`] for the spans they
+/// cover (which is what Twitch sends when a message contains a
+/// channel-subscriber emote). Non-emote runs fall through to the regular
+/// classification (mention / link / emote-by-name / plain text).
+pub fn tokenize_text_with_ranges(
+    text: &str,
+    emotes: &EmoteMap,
+    ranges: &[EmoteRange],
+) -> Vec<Token> {
+    if ranges.is_empty() {
+        return tokenize_text(text, emotes);
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut out: Vec<Token> = Vec::new();
+    let mut cursor = 0usize;
+    let push_text_run = |out: &mut Vec<Token>, run: &str, emotes: &EmoteMap| {
+        if run.is_empty() {
+            return;
+        }
+        let toks = tokenize_text(run, emotes);
+        for tok in toks {
+            match (out.last_mut(), &tok) {
+                (Some(Token::Text { text: prev }), Token::Text { text: next }) => {
+                    prev.push(' ');
+                    prev.push_str(next);
+                }
+                _ => out.push(tok),
+            }
+        }
+    };
+    for range in ranges {
+        if range.start >= chars.len() {
+            continue;
+        }
+        // Flush plain text up to this emote.
+        if range.start > cursor {
+            let between: String = chars[cursor..range.start].iter().collect();
+            push_text_run(&mut out, between.trim(), emotes);
+        }
+        let end = (range.end + 1).min(chars.len());
+        let name: String = chars[range.start..end].iter().collect();
+        out.push(Token::Emote {
+            name: name.trim().to_string(),
+            url: twitch_emote_url(&range.id),
+        });
+        cursor = end;
+    }
+    if cursor < chars.len() {
+        let tail: String = chars[cursor..].iter().collect();
+        push_text_run(&mut out, tail.trim(), emotes);
+    }
+    out
+}
+
 /// Tokenise a message body. Splits on whitespace, then classifies each
 /// run: `@foo` → Mention, known emote name → Emote, `http(s)://…` → Link,
 /// else Text. Adjacent Text tokens are merged so the SPA doesn't paint a
@@ -559,6 +655,99 @@ mod tests {
         let mut b = RoomBuffer::new("cohh", Platform::Twitch, 10);
         b.push(msg("a", "x", false));
         assert!(!b.soft_delete("nope"));
+    }
+
+    #[test]
+    fn parse_emotes_handles_single_run() {
+        let v = parse_twitch_emotes("25:0-4");
+        assert_eq!(v, vec![EmoteRange { id: "25".into(), start: 0, end: 4 }]);
+    }
+
+    #[test]
+    fn parse_emotes_handles_multiple_groups_and_runs() {
+        let v = parse_twitch_emotes("25:0-4,6-10/1902:12-17");
+        assert_eq!(
+            v,
+            vec![
+                EmoteRange { id: "25".into(), start: 0, end: 4 },
+                EmoteRange { id: "25".into(), start: 6, end: 10 },
+                EmoteRange { id: "1902".into(), start: 12, end: 17 },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_emotes_drops_malformed_runs_but_keeps_good_ones() {
+        let v = parse_twitch_emotes("25:0-4,broken/1902:12-17");
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].id, "25");
+        assert_eq!(v[1].id, "1902");
+    }
+
+    #[test]
+    fn parse_emotes_empty_string_returns_empty() {
+        assert!(parse_twitch_emotes("").is_empty());
+    }
+
+    #[test]
+    fn twitch_emote_url_is_v2_dark_1x() {
+        assert_eq!(
+            twitch_emote_url("25"),
+            "https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/1.0"
+        );
+    }
+
+    #[test]
+    fn tokenize_with_ranges_substitutes_emote_in_middle() {
+        let toks = tokenize_text_with_ranges(
+            "hey Kappa nice",
+            &EmoteMap::new(),
+            &[EmoteRange { id: "25".into(), start: 4, end: 8 }],
+        );
+        // 3 tokens: "hey", emote "Kappa", "nice"
+        assert_eq!(toks.len(), 3);
+        assert!(matches!(&toks[0], Token::Text { text } if text == "hey"));
+        match &toks[1] {
+            Token::Emote { name, url } => {
+                assert_eq!(name, "Kappa");
+                assert!(url.contains("/v2/25/"));
+            }
+            _ => panic!("expected emote token"),
+        }
+        assert!(matches!(&toks[2], Token::Text { text } if text == "nice"));
+    }
+
+    #[test]
+    fn tokenize_with_ranges_handles_leading_emote() {
+        let toks = tokenize_text_with_ranges(
+            "Kappa hello",
+            &EmoteMap::new(),
+            &[EmoteRange { id: "25".into(), start: 0, end: 4 }],
+        );
+        assert!(matches!(&toks[0], Token::Emote { name, .. } if name == "Kappa"));
+        assert!(matches!(&toks[1], Token::Text { text } if text == "hello"));
+    }
+
+    #[test]
+    fn tokenize_with_ranges_falls_back_to_name_map_outside_ranges() {
+        let mut m = EmoteMap::new();
+        m.insert("PogChamp".into(), "https://cdn/p.png".into());
+        let toks = tokenize_text_with_ranges(
+            "Kappa PogChamp",
+            &m,
+            &[EmoteRange { id: "25".into(), start: 0, end: 4 }],
+        );
+        // 2 tokens — Twitch emote then name-mapped emote
+        assert_eq!(toks.len(), 2);
+        assert!(matches!(&toks[0], Token::Emote { name, .. } if name == "Kappa"));
+        assert!(matches!(&toks[1], Token::Emote { name, url } if name == "PogChamp" && url == "https://cdn/p.png"));
+    }
+
+    #[test]
+    fn tokenize_with_empty_ranges_is_equivalent_to_plain_tokenize() {
+        let plain = tokenize_text("hello @bob https://x.com", &EmoteMap::new());
+        let ranged = tokenize_text_with_ranges("hello @bob https://x.com", &EmoteMap::new(), &[]);
+        assert_eq!(plain.len(), ranged.len());
     }
 
     #[test]
