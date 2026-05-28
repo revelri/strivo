@@ -77,6 +77,7 @@ pub async fn serve(cfg: ServeConfig) -> Result<()> {
         .merge(routes::events::router())
         .merge(routes::api::router())
         .merge(routes::plugins::router())
+        .merge(routes::recordings::router())
         .merge(routes::login::router())
         .merge(routes::assets::router())
         .layer(middleware::from_fn_with_state(

@@ -1,147 +1,27 @@
-//! /recordings list + stream-back endpoint (webui phase 5).
+//! Recording file-serving endpoints.
 //!
-//! - GET /recordings                          full page
-//! - GET /_partials/recordings-list?q=<...>   filtered list (htmx)
-//! - GET /recordings/<id>/download            raw file stream
-//! - GET /recordings/<id>/play                redirect to download
+//! - GET /api/v1/recordings/<id>/download   raw file stream (range requests)
+//! - GET /api/v1/recordings/<id>/play       redirect to /download
 //!
-//! Search is server-side via the upgraded score+spans fuzzy matcher
-//! (strivo_core::search::fuzzy_match). Results sort by score
-//! descending so the user's best match floats to the top — same
-//! ordering as the TUI sidebar / recording list (M4.2.c).
-//!
-//! Streaming uses tower-http::services::ServeFile so range requests
-//! work; browsers' default media element can scrub a long recording
-//! without buffering the whole file.
+//! Earlier iterations of this module rendered the recordings page server-
+//! side via askama; that surface was retired when the SPA took over. The
+//! file-serving handlers, the path-containment guard (with its tests), and
+//! the extension → Content-Type map remain because they're the only path
+//! through which the webui's player and download links touch real bytes on
+//! disk.
 
 use std::path::PathBuf;
 
-use askama::Template;
 use axum::body::Body;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::{header, StatusCode};
-use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
-use serde::Deserialize;
 use strivo_core::ipc::ServerMessage;
-use strivo_core::recording::job::RecordingState;
 use uuid::Uuid;
 
 use crate::server::AppState;
-
-#[derive(Debug, Clone)]
-pub struct RecRow {
-    pub id: String,
-    pub state: String,
-    pub channel_name: String,
-    pub title: String,
-    pub started_at: String,
-    pub bytes: String,
-    pub is_finished: bool,
-}
-
-#[derive(Template)]
-#[template(path = "recordings.html")]
-struct RecordingsTemplate {
-    title: &'static str,
-    rows: Vec<RecRow>,
-    empty_msg: &'static str,
-}
-
-#[derive(Template)]
-#[template(path = "_recordings_list.html")]
-struct RecordingsListPartial {
-    rows: Vec<RecRow>,
-    empty_msg: &'static str,
-}
-
-#[derive(Deserialize, Default)]
-struct ListQuery {
-    #[serde(default)]
-    q: String,
-}
-
-async fn snapshot_rows(state: &AppState, query: &str) -> Result<Vec<RecRow>, String> {
-    let snap = state.ipc.snapshot().await.map_err(|e| e.to_string())?;
-    let ServerMessage::StateSnapshot { recordings, .. } = snap else {
-        return Err("unexpected ServerMessage".into());
-    };
-    let mut jobs: Vec<_> = recordings.into_values().collect();
-
-    if query.is_empty() {
-        // Default: newest first.
-        jobs.sort_by_key(|j| std::cmp::Reverse(j.started_at));
-    } else {
-        // Score every candidate; drop misses; sort by score desc.
-        let mut scored: Vec<(_, i32)> = jobs
-            .into_iter()
-            .filter_map(|j| {
-                let hay = format!(
-                    "{} {}",
-                    j.channel_name,
-                    j.stream_title.as_deref().unwrap_or("")
-                );
-                let score = strivo_core::search::fuzzy_match(query, &hay).map(|m| m.score)?;
-                Some((j, score))
-            })
-            .collect();
-        scored.sort_by_key(|s| std::cmp::Reverse(s.1));
-        jobs = scored.into_iter().map(|(j, _)| j).collect();
-    }
-
-    let rows = jobs
-        .into_iter()
-        .map(|j| RecRow {
-            id: j.id.to_string(),
-            state: format!("{:?}", j.state).to_lowercase(),
-            channel_name: j.channel_name.clone(),
-            title: j.stream_title.clone().unwrap_or_default(),
-            started_at: j
-                .started_at
-                .with_timezone(&chrono::Local)
-                .format("%Y-%m-%d %H:%M")
-                .to_string(),
-            bytes: human_bytes(j.bytes_written),
-            is_finished: matches!(j.state, RecordingState::Finished),
-        })
-        .collect();
-    Ok(rows)
-}
-
-async fn page(State(state): State<AppState>) -> Response {
-    match snapshot_rows(&state, "").await {
-        Ok(rows) => render(
-            RecordingsTemplate {
-                title: "Recordings",
-                rows,
-                empty_msg: "No recordings yet.",
-            }
-            .render(),
-        ),
-        Err(e) => Html(format!("<h1>daemon unreachable</h1><pre>{e}</pre>"))
-            .into_response(),
-    }
-}
-
-async fn list_partial(
-    State(state): State<AppState>,
-    Query(q): Query<ListQuery>,
-) -> Response {
-    let trimmed = q.q.trim().to_string();
-    let empty_msg: &'static str = if trimmed.is_empty() {
-        "No recordings yet."
-    } else {
-        "No matches."
-    };
-    match snapshot_rows(&state, &trimmed).await {
-        Ok(rows) => render(
-            RecordingsListPartial { rows, empty_msg }.render(),
-        ),
-        Err(e) => Html(format!("<ul id=recordings-list><li class=err>{e}</li></ul>"))
-            .into_response(),
-    }
-}
 
 async fn lookup_path(state: &AppState, id: Uuid) -> Result<PathBuf, String> {
     let snap = state.ipc.snapshot().await.map_err(|e| e.to_string())?;
@@ -157,8 +37,7 @@ async fn lookup_path(state: &AppState, id: Uuid) -> Result<PathBuf, String> {
 /// Reject any path that, once canonicalised, escapes the recording root.
 /// `output_path` is daemon-set, but a corrupted snapshot/DB (or a future
 /// caller that does take user input) must never let the web process stream
-/// a file outside the recording directory — symlinks included. Defense in
-/// depth (roadmap Phase 1 item 2).
+/// a file outside the recording directory — symlinks included.
 fn contain_in_root(
     candidate: &std::path::Path,
     root: &std::path::Path,
@@ -174,10 +53,33 @@ fn contain_in_root(
     }
 }
 
-async fn download(
-    State(state): State<AppState>,
-    Path(id): Path<Uuid>,
-) -> Response {
+/// Map a file extension to a Content-Type the browser will play happily.
+/// Old behaviour hard-coded `video/x-matroska` on every download, which (a)
+/// is wrong for audio-only pulls (yt-dlp may write .m4a / .mp3 / .opus when
+/// the source is a Patreon audio post) and (b) Firefox refuses the mismatch.
+fn guess_mime(p: &std::path::Path) -> &'static str {
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    match ext.as_deref() {
+        Some("mkv") => "video/x-matroska",
+        Some("mp4" | "m4v") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("ts") => "video/mp2t",
+        Some("mov") => "video/quicktime",
+        Some("avi") => "video/x-msvideo",
+        Some("m4a") => "audio/mp4",
+        Some("mp3") => "audio/mpeg",
+        Some("ogg" | "oga" | "opus") => "audio/ogg",
+        Some("flac") => "audio/flac",
+        Some("wav") => "audio/wav",
+        Some("aac") => "audio/aac",
+        _ => "application/octet-stream",
+    }
+}
+
+async fn download(State(state): State<AppState>, Path(id): Path<Uuid>) -> Response {
     let raw = match lookup_path(&state, id).await {
         Ok(p) => p,
         Err(e) => return (StatusCode::NOT_FOUND, e).into_response(),
@@ -196,11 +98,7 @@ async fn download(
         Ok(f) => f,
         Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     };
-    let len = file
-        .metadata()
-        .await
-        .map(|m| m.len())
-        .ok();
+    let len = file.metadata().await.map(|m| m.len()).ok();
     let stream = tokio_util::io::ReaderStream::new(file);
     let body = Body::from_stream(stream);
     let filename = path
@@ -210,7 +108,9 @@ async fn download(
     let mut resp = Response::new(body);
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
-        "video/x-matroska".parse().unwrap(),
+        guess_mime(&path)
+            .parse()
+            .unwrap_or_else(|_| header::HeaderValue::from_static("application/octet-stream")),
     );
     resp.headers_mut().insert(
         header::CONTENT_DISPOSITION,
@@ -227,37 +127,13 @@ async fn download(
 }
 
 async fn play(Path(id): Path<Uuid>) -> Redirect {
-    Redirect::temporary(&format!("/recordings/{id}/download"))
-}
-
-fn render(r: Result<String, askama::Error>) -> Response {
-    match r {
-        Ok(html) => Html(html).into_response(),
-        Err(e) => Html(format!("<pre>{e}</pre>")).into_response(),
-    }
-}
-
-fn human_bytes(b: u64) -> String {
-    const KB: u64 = 1024;
-    const MB: u64 = 1024 * KB;
-    const GB: u64 = 1024 * MB;
-    if b >= GB {
-        format!("{:.2} GB", b as f64 / GB as f64)
-    } else if b >= MB {
-        format!("{:.1} MB", b as f64 / MB as f64)
-    } else if b >= KB {
-        format!("{:.0} KB", b as f64 / KB as f64)
-    } else {
-        format!("{b} B")
-    }
+    Redirect::temporary(&format!("/api/v1/recordings/{id}/download"))
 }
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/recordings", get(page))
-        .route("/_partials/recordings-list", get(list_partial))
-        .route("/recordings/{id}/download", get(download))
-        .route("/recordings/{id}/play", get(play))
+        .route("/api/v1/recordings/{id}/download", get(download))
+        .route("/api/v1/recordings/{id}/play", get(play))
 }
 
 #[cfg(test)]
@@ -266,7 +142,6 @@ mod tests {
     use axum::http::StatusCode;
     use std::fs;
 
-    /// Unique temp dir for one test, auto-namespaced by pid + a counter.
     fn temp_root(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("strivo-contain-{}-{}", std::process::id(), tag));
         let _ = fs::remove_dir_all(&dir);
@@ -287,11 +162,8 @@ mod tests {
     #[test]
     fn rejects_traversal_outside_root() {
         let root = temp_root("escape");
-        // A path that climbs out of the root to a real file elsewhere.
         let outside = root.join("..").join("..").join("etc").join("hostname");
         let err = contain_in_root(&outside, &root).unwrap_err();
-        // Either it doesn't exist (NOT_FOUND) or resolves outside (FORBIDDEN);
-        // both refuse to stream. Never Ok.
         assert!(err == StatusCode::FORBIDDEN || err == StatusCode::NOT_FOUND);
         fs::remove_dir_all(&root).ok();
     }
@@ -310,5 +182,22 @@ mod tests {
         }
         fs::remove_dir_all(&root).ok();
         fs::remove_dir_all(&secret).ok();
+    }
+
+    #[test]
+    fn mime_map_covers_audio_and_video_extensions() {
+        let cases = [
+            ("/tmp/x.mkv", "video/x-matroska"),
+            ("/tmp/x.mp4", "video/mp4"),
+            ("/tmp/x.webm", "video/webm"),
+            ("/tmp/x.m4a", "audio/mp4"),
+            ("/tmp/x.mp3", "audio/mpeg"),
+            ("/tmp/x.opus", "audio/ogg"),
+            ("/tmp/x.flac", "audio/flac"),
+            ("/tmp/x.unknown", "application/octet-stream"),
+        ];
+        for (path, want) in cases {
+            assert_eq!(guess_mime(std::path::Path::new(path)), want, "for {path}");
+        }
     }
 }
