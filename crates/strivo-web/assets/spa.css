@@ -4080,3 +4080,105 @@ body.modal-open { overflow: hidden; }
   grid-column: 2; grid-row: 1 / span 2;
   display: inline-flex; gap: 0.35rem; align-items: center;
 }
+
+/* Schedule-optimizer panel — 7×24 heatmap + top-pick cards. */
+.sopt-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 0.8rem;
+  margin-top: 0.5rem;
+}
+@media (max-width: 900px) { .sopt-grid { grid-template-columns: 1fr; } }
+.sopt-input, .sopt-output { display: flex; flex-direction: column; gap: 0.6rem; }
+.sopt-samples {
+  width: 100%; min-height: 240px; resize: vertical;
+  padding: 0.55rem 0.7rem;
+  font-family: monospace; font-size: 0.78em;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border-light);
+  border-radius: 4px; color: inherit;
+}
+.sopt-controls {
+  display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;
+}
+.sopt-controls label {
+  display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85em;
+}
+.sopt-controls input, .sopt-controls select {
+  padding: 0.35rem 0.5rem;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid var(--border-light);
+  border-radius: 4px; color: inherit;
+}
+.sopt-picks {
+  display: flex; flex-direction: column; gap: 0.45rem;
+  margin-bottom: 0.6rem;
+}
+.sopt-pick {
+  display: grid;
+  grid-template-columns: 40px 130px 100px 1fr;
+  grid-template-rows: auto auto;
+  gap: 0.3rem 0.6rem;
+  padding: 0.45rem 0.6rem;
+  background: rgba(0,0,0,0.18);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+}
+.sopt-pick-rank { font-weight: 700; opacity: 0.6; align-self: center; }
+.sopt-pick-when { align-self: center; }
+.sopt-pick-mean { align-self: center; font-size: 0.85em; }
+.sopt-pick-bars { display: flex; flex-direction: column; gap: 0.15rem; align-self: center; }
+.sopt-pick-bar {
+  height: 6px; border-radius: 3px;
+  background: rgba(255,255,255,0.08);
+  overflow: hidden;
+}
+.sopt-pick-bar > span {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, #4cc9f0, #6e56cf);
+}
+.sopt-pick-bar.coverage > span {
+  background: linear-gradient(90deg, #4ec9b0, #fbbf24);
+}
+.sopt-pick-meta {
+  grid-column: 2 / span 3;
+  font-size: 0.75em;
+}
+.sopt-heatmap-h { margin: 0.5rem 0 0.3rem; font-size: 0.95em; }
+.sopt-heatmap {
+  display: grid;
+  grid-template-columns: 40px repeat(24, 1fr);
+  gap: 1px;
+  background: rgba(255,255,255,0.04);
+  padding: 1px;
+  border-radius: 4px;
+}
+.sopt-corner { background: transparent; }
+.sopt-hour-label, .sopt-day-label {
+  background: transparent;
+  font-size: 0.65em;
+  opacity: 0.7;
+  text-align: center;
+  padding: 0.15rem 0;
+}
+.sopt-day-label { text-align: right; padding-right: 0.4rem; }
+.sopt-cell {
+  height: 18px;
+  background: rgba(255,255,255,0.04);
+  cursor: default;
+}
+.sopt-cell-empty { background: rgba(255,255,255,0.02); }
+.sopt-cell-pick {
+  outline: 2px solid white;
+  outline-offset: -2px;
+  z-index: 1;
+}
+.sopt-legend {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin-top: 0.4rem;
+  font-size: 0.78em;
+}
+.sopt-legend-bar {
+  flex: 1; height: 8px; border-radius: 4px;
+  background: linear-gradient(90deg, rgb(76, 201, 240), rgb(251, 191, 36), rgb(239, 68, 68));
+}
