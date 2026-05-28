@@ -3942,3 +3942,59 @@ body.modal-open { overflow: hidden; }
   opacity: 1;
   background: rgba(110,86,207,0.15);
 }
+
+/* Onboarding tour overlay + per-page hint banner. The tour spotlight
+ * lifts the focused topnav slot above a translucent backdrop; the card
+ * floats next to it. Per-page hints are a small dismissible banner just
+ * under the topbar. */
+.tour-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.55);
+  pointer-events: auto;
+}
+.tour-spotlight {
+  position: fixed;
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 9999px rgba(0,0,0,0.55),
+    0 0 0 3px rgba(110,86,207,0.8),
+    0 0 24px rgba(110,86,207,0.6);
+  pointer-events: none;
+  transition: all 0.18s ease;
+}
+.tour-card {
+  position: fixed; width: 360px; max-width: calc(100vw - 24px);
+  background: var(--bg, #1a1a2e);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 0.9rem 1rem;
+  box-shadow: 0 6px 30px rgba(0,0,0,0.5);
+}
+.tour-step-meta { font-size: 0.72em; opacity: 0.55; letter-spacing: 0.06em; text-transform: uppercase; }
+.tour-title { margin: 0.3rem 0 0.4rem; font-size: 1.05em; }
+.tour-body { margin: 0 0 0.8rem; font-size: 0.9em; opacity: 0.9; }
+.tour-actions { display: flex; gap: 0.4rem; align-items: center; }
+.tour-actions .spacer { flex: 1; }
+.tour-skip { opacity: 0.7; }
+
+.page-hint {
+  display: flex; align-items: center; gap: 0.6rem;
+  margin: 0.5rem 0.9rem 0.2rem;
+  padding: 0.4rem 0.7rem;
+  background: linear-gradient(90deg, rgba(110,86,207,0.18), rgba(0,188,212,0.08));
+  border: 1px solid rgba(110,86,207,0.32);
+  border-radius: 6px;
+  font-size: 0.85em;
+}
+.page-hint-icon { font-size: 1.1em; }
+.page-hint-text { flex: 1; }
+.page-hint-dismiss {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.15);
+  color: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  opacity: 0.7;
+}
+.page-hint-dismiss:hover { opacity: 1; }

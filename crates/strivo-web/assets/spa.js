@@ -539,6 +539,10 @@ const root = document.getElementById("app");
 
 async function render() {
   const r = currentRoute();
+  // Clear any prior per-page hint before the new route paints; it'll be
+  // re-mounted (if applicable) by maybeMountPageHint after the route
+  // renderer finishes. Avoids stale Library copy bleeding onto Chat etc.
+  document.getElementById("page-hint")?.remove();
   // Probe auth — if /health returns 401-ish, we land on login.
   if (r !== "login") {
     try {
@@ -589,6 +593,13 @@ async function render() {
       await renderHistory();
       break;
   }
+  // After whichever route renderer finishes, mount its per-page hint
+  // unconditionally. Renderers that already call setupChromeHandlers()
+  // (most of them) mounted earlier; this is a belt for the few that
+  // bypass it (renderChat, renderWatch). maybeMountPageHint short-
+  // circuits when a hint is already present, so the double call is
+  // safe + idempotent.
+  maybeMountPageHint(r);
 }
 
 // Top-bar route nav (functional pages). The left rail is the channel
@@ -674,6 +685,9 @@ function setupChromeHandlers() {
   refreshHealthPill();
   // Channel list lives in the left rail on every page.
   paintChannelList();
+  // Per-page first-visit hint banner. No-op when this route's hint has
+  // already been dismissed or no hint copy exists for the route.
+  maybeMountPageHint(currentRoute());
 }
 
 // Topbar health pill: only shown when the worst check is warn/error, so a
@@ -6010,6 +6024,18 @@ function wireSettingsControls() {
     }
   };
   if (masterEl) masterEl.addEventListener("change", syncMaster);
+  // Onboarding controls — replay the welcome tour / reset per-page hints.
+  pane.querySelector("#stg-replay-tour")?.addEventListener("click", () => {
+    localStorage.removeItem("strivo-tour-done");
+    startOnboardingTour();
+  });
+  pane.querySelector("#stg-reset-hints")?.addEventListener("click", () => {
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith("strivo-hint-")) localStorage.removeItem(k);
+    }
+    Toast.success("Per-page hints reset · will reappear next visit");
+    render().catch(() => {});
+  });
   pane.querySelectorAll("[data-stg-path]").forEach((el) => {
     el.addEventListener("change", async (e) => {
       const path = el.getAttribute("data-stg-path");
@@ -6276,6 +6302,14 @@ function renderSettingsPane(slug, s) {
 
     case "interface":
       return [
+        group("Onboarding", [
+          row("Welcome tour",
+            `<button class="sm" id="stg-replay-tour" type="button">Replay tour</button>`,
+            "Walk through the topbar one stop at a time. Useful after a major UI change."),
+          row("Per-page hints",
+            `<button class="sm" id="stg-reset-hints" type="button">Reset dismissed hints</button>`,
+            "Make every per-page hint banner show up again on the next visit."),
+        ].join("")),
         group("Accessibility", [
           row("Reduce motion", toggle("ui.reduce_motion", ui.reduce_motion),
             "Disables non-essential transitions across the UI. Mirrors the OS-level prefers-reduced-motion."),
@@ -7944,6 +7978,112 @@ function runCmdk(i) {
   if (item) item.run();
 }
 
+// ── Onboarding tour + per-page hint banners ──────────────────────────
+// LocalStorage keys:
+//   strivo-tour-done                → seen the welcome walkthrough
+//   strivo-hint-<route>             → dismissed the per-page hint
+// Hint copy is intentionally one line each — the goal is "I know what
+// this surface is for", not full docs.
+const PAGE_HINTS = {
+  library:    "Live channels in the rail + the current capture dashboard. Click any rail row to see channel detail.",
+  recordings: "Every recording past + present. Tick rows to enable bulk actions, click headers to sort, chips filter by state.",
+  schedule:   "Per-channel record-when-live + auto-download switches. Capture limits + disk gauge live up top.",
+  pipelines:  "Cross-plugin pipelines as DAGs. Click any node to open the plugin, or Run on a recording to fire the chain.",
+  watch:      "Tile any subset of currently live channels. Unmute one tile at a time; Shift+I shows shortcuts.",
+  chat:       "Twitch IRC over WSS. Tab strip picks a room; filter chips narrow live. BTTV globals + Twitch emotes render as images.",
+  plugins:    "Plugin hub. Each card opens the plugin; ⚙ deep-links to the per-plugin Settings panel.",
+  settings:   "Live daemon config. Toggles persist to ~/.config/strivo/config.toml on change.",
+  system:     "Health checks + storage gauge + platform-auth status + Backup/Restore.",
+  logs:       "Rolling daemon log. Toggle Follow for tail mode; Copy / Download exports the filtered view.",
+  history:    "Durable per-recording journal that survives daemon restarts.",
+};
+
+// Top-bar slots the tour walks. Order matches the natural left-to-right
+// flow; each step pins to the corresponding .topnav-link by data-route.
+const TOUR_STEPS = [
+  { route: "library",    title: "Library",    body: "Your home. Live channel rail on the left; current captures + recent recordings in the centre." },
+  { route: "recordings", title: "Recordings", body: "Every past + active recording in a sortable / filterable / groupable table. Bulk actions on selection." },
+  { route: "schedule",   title: "Monitor",    body: "Tell StriVo which channels to auto-record + auto-download. Capture limits + disk-budget circuit breaker live here." },
+  { route: "watch",      title: "Watch",      body: "Multi-stream viewer with auto-tile, focus, and PiP modes. One tile unmuted at a time." },
+  { route: "chat",       title: "Chat",       body: "Twitch IRC client with filter chips, mention highlighting, BTTV global emotes." },
+  { route: "pipelines",  title: "Pipelines",  body: "Cross-plugin DAGs. Click a node to open it; 'Run on…' picks a recording + opens the right plugin." },
+  { route: "plugins",    title: "Plugins",    body: "The shipped plugin set + marketplace catalog. Click any card to open; gear icon → per-plugin Settings." },
+  { route: "settings",   title: "Settings",   body: "All daemon config: Notifications, Platforms, plugin enable/disable, theme, advanced paths." },
+];
+
+function tourDone() { return localStorage.getItem("strivo-tour-done") === "1"; }
+function markTourDone() { localStorage.setItem("strivo-tour-done", "1"); }
+function hintDismissed(route) { return localStorage.getItem(`strivo-hint-${route}`) === "1"; }
+function dismissHint(route) { localStorage.setItem(`strivo-hint-${route}`, "1"); }
+
+function startOnboardingTour() {
+  if (tourDone()) return;
+  let idx = 0;
+  const overlay = document.createElement("div");
+  overlay.id = "tour-overlay";
+  overlay.className = "tour-overlay";
+  document.body.appendChild(overlay);
+
+  const paint = () => {
+    const step = TOUR_STEPS[idx];
+    const target = document.querySelector(`.topnav-link[data-route="${step.route}"]`);
+    const rect = target?.getBoundingClientRect();
+    const cardLeft = rect ? Math.max(12, Math.min(window.innerWidth - 380, rect.left + rect.width / 2 - 180)) : 24;
+    const cardTop = rect ? rect.bottom + 12 : 80;
+    overlay.innerHTML = `
+      <div class="tour-spotlight" style="${rect ? `left:${rect.left - 6}px;top:${rect.top - 6}px;width:${rect.width + 12}px;height:${rect.height + 12}px;` : "display:none"}"></div>
+      <div class="tour-card" style="left:${cardLeft}px;top:${cardTop}px;">
+        <div class="tour-step-meta">Step ${idx + 1} of ${TOUR_STEPS.length}</div>
+        <h3 class="tour-title">${escape(step.title)}</h3>
+        <p class="tour-body">${escape(step.body)}</p>
+        <div class="tour-actions">
+          <button class="sm tour-skip" type="button">Skip tour</button>
+          <span class="spacer"></span>
+          ${idx > 0 ? `<button class="sm tour-prev" type="button">← Back</button>` : ""}
+          <button class="btn-primary sm tour-next" type="button">
+            ${idx === TOUR_STEPS.length - 1 ? "Finish" : "Next →"}
+          </button>
+        </div>
+      </div>`;
+    overlay.querySelector(".tour-skip").addEventListener("click", finish);
+    overlay.querySelector(".tour-prev")?.addEventListener("click", () => { idx = Math.max(0, idx - 1); paint(); });
+    overlay.querySelector(".tour-next").addEventListener("click", () => {
+      if (idx >= TOUR_STEPS.length - 1) { finish(); return; }
+      idx += 1;
+      paint();
+    });
+  };
+  const finish = () => {
+    markTourDone();
+    overlay.remove();
+  };
+  paint();
+}
+
+// Mount a per-page hint banner above the current route's main content
+// IFF the user hasn't dismissed this route's hint yet. Idempotent —
+// called after each render() and short-circuits when already mounted.
+function maybeMountPageHint(route) {
+  if (!route || hintDismissed(route) || !PAGE_HINTS[route]) return;
+  if (document.getElementById("page-hint")) return;
+  const banner = document.createElement("div");
+  banner.id = "page-hint";
+  banner.className = "page-hint";
+  banner.innerHTML = `
+    <span class="page-hint-icon" aria-hidden="true">💡</span>
+    <span class="page-hint-text">${escape(PAGE_HINTS[route])}</span>
+    <button class="page-hint-dismiss sm" type="button" aria-label="Dismiss this hint">✕</button>`;
+  // Insert as the first child of the main chrome region so it sits
+  // above any page-specific page-title / subtitle.
+  const chrome = document.querySelector(".chrome");
+  if (!chrome) return;
+  chrome.insertBefore(banner, chrome.children[1] || null);
+  banner.querySelector(".page-hint-dismiss").addEventListener("click", () => {
+    dismissHint(route);
+    banner.remove();
+  });
+}
+
 function injectKeyboardHelp() {
   if (document.getElementById("kbd-help")) return;
   const div = document.createElement("div");
@@ -8132,4 +8272,10 @@ events.start();
 injectKeyboardHelp();
 // Seed Patreon from the daemon snapshot before first paint, then render,
 // so the Patreon section is populated on load (not after the next poll).
-seedPatreon().finally(render);
+seedPatreon()
+  .finally(render)
+  .finally(() => {
+    // Fire the welcome tour once per machine — runs after the first
+    // paint settles so the topnav slots have their bounding rects.
+    setTimeout(startOnboardingTour, 600);
+  });
