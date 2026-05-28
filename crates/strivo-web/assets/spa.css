@@ -2640,6 +2640,26 @@ body.modal-open { overflow: hidden; }
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .cr-chapters-actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.cr-caption-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: 0.5rem;
+  padding-left: 0.5rem;
+  border-left: 1px solid var(--border-light);
+  flex-wrap: wrap;
+}
+.cr-caption-label { color: var(--muted); font-size: 0.82rem; }
+#cr-caption-lang {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 0.25rem 0.45rem;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+#cr-caption-lang:focus { outline: 0; border-color: var(--accent2); }
 /* Cuepoints strip on the recording info modal (iter 4). */
 .rec-info-cuepoints-btn { margin-top: 0.5rem; }
 .rec-cuepoints { margin-top: 0.7rem; }

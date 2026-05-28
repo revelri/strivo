@@ -159,6 +159,8 @@ const API = {
     API._fetch(`/plugins/insights/compare?recs=${encodeURIComponent(recordingA + "," + recordingB)}`),
   insightsRetention: (recordingId, bucketSecs = 30) =>
     API._fetch(`/plugins/insights/retention/${encodeURIComponent(recordingId)}?bucket_secs=${bucketSecs}`),
+  captionsExportUrl: (recordingId, fmt = "srt", lang = "en") =>
+    `/api/v1/plugins/captions/${encodeURIComponent(recordingId)}?fmt=${encodeURIComponent(fmt)}&lang=${encodeURIComponent(lang)}`,
   patreonPull: (body) =>
     API._fetch("/patreon/pull", { method: "POST", body }),
   vodDownload: (body) =>
@@ -2823,6 +2825,20 @@ async function renderCrunchrRecording(id) {
       <button id="cr-export-vtt" class="pg-linkbtn" type="button">Export .vtt</button>
       <button id="cr-export-md" class="pg-linkbtn" type="button">Copy as markdown</button>
       <button id="cr-chapters" class="pg-linkbtn" type="button" title="Generate YouTube/Twitch chapter markers from the transcript">Generate chapters</button>
+      <div class="cr-caption-export">
+        <span class="cr-caption-label">Captions:</span>
+        <a class="pg-linkbtn" download href="${escape(API.captionsExportUrl(d.recording_id, "srt", "en"))}">.srt</a>
+        <a class="pg-linkbtn" download href="${escape(API.captionsExportUrl(d.recording_id, "vtt", "en"))}">.vtt</a>
+        <a class="pg-linkbtn" download href="${escape(API.captionsExportUrl(d.recording_id, "txt", "en"))}">.txt</a>
+        <select id="cr-caption-lang" title="Target language (translation backend ships in a follow-up; today returns identity)">
+          <option value="en">en (identity)</option>
+          <option value="es">es</option>
+          <option value="pt">pt</option>
+          <option value="ja">ja</option>
+          <option value="de">de</option>
+          <option value="fr">fr</option>
+        </select>
+      </div>
     </div>
     <section class="cfg-card" id="cr-chapters-card" hidden>
       <h2 class="cfg-title">Chapters</h2>
@@ -2949,6 +2965,19 @@ async function renderCrunchrRecording(id) {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     Toast.success("WebVTT exported");
+  });
+
+  // Caption language selector — rewrites the .srt/.vtt/.txt URLs so a
+  // change reflects in all three download links. Identity-only today
+  // (Pro plugin backend ships in a follow-up).
+  document.getElementById("cr-caption-lang")?.addEventListener("change", (e) => {
+    const lang = e.target.value;
+    document
+      .querySelectorAll(".cr-caption-export a[download]")
+      .forEach((a) => {
+        const fmt = a.textContent.replace(".", "");
+        a.href = API.captionsExportUrl(d.recording_id, fmt, lang);
+      });
   });
 
   // Chapters — POST to /api/v1/plugins/chapters/<id>, render the result.

@@ -718,6 +718,82 @@ async fn insights_retention(
     .into_response()
 }
 
+#[derive(Debug, Deserialize)]
+struct CaptionsQuery {
+    /// Output format. One of `srt`, `vtt`, `txt`.
+    #[serde(default = "default_captions_fmt")]
+    fmt: String,
+    /// Optional target language. Default `en` = identity.
+    #[serde(default = "default_captions_lang")]
+    lang: String,
+}
+
+fn default_captions_fmt() -> String { "srt".to_string() }
+fn default_captions_lang() -> String { "en".to_string() }
+
+/// `GET /api/v1/plugins/captions/<recording_id>?fmt=srt&lang=en` —
+/// emit a caption file for the recording in the requested format. The
+/// `lang` knob is currently routed through an identity translator; the
+/// pluggable `Translator` trait will get a real backend in a follow-up.
+async fn captions_export(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+    Query(q): Query<CaptionsQuery>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("captions") { return r; }
+    let Some(conn) = open_ro(&crunchr_db()) else {
+        return Problem::not_found("crunchr has no data yet").into_response();
+    };
+    let detail = match strivo_plugins::crunchr::db::recording_detail(&conn, &recording_id) {
+        Ok(Some(d)) => d,
+        Ok(None) => return Problem::not_found("recording not transcribed").into_response(),
+        Err(e) => return Problem::internal(e.to_string()).into_response(),
+    };
+    let segments: Vec<strivo_captions::Segment> = detail
+        .segments
+        .iter()
+        .map(|s| strivo_captions::Segment {
+            start_sec: s.start_sec as f32,
+            end_sec: s.end_sec as f32,
+            text: s.text.clone(),
+            speaker: s.speaker.clone(),
+        })
+        .collect();
+    // Apply translation. Today only IdentityTranslator ships; a future
+    // iteration registers real backends (NLLB / Argos / OpenAI).
+    let translator = strivo_captions::IdentityTranslator;
+    let translated = match strivo_captions::apply_translation(&segments, &translator) {
+        Ok(out) => out,
+        Err(e) => return Problem::internal(format!("translate: {e}")).into_response(),
+    };
+    let (body, mime, ext) = match q.fmt.as_str() {
+        "vtt" => (strivo_captions::to_vtt(&translated), "text/vtt", "vtt"),
+        "txt" => (strivo_captions::to_txt(&translated), "text/plain", "txt"),
+        _ /* srt */ => (
+            strivo_captions::to_srt(&translated),
+            "application/x-subrip",
+            "srt",
+        ),
+    };
+    let safe = recording_id.replace(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_', "_");
+    let filename = format!("{safe}.{}.{ext}", q.lang);
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, mime),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                Box::leak(format!("attachment; filename=\"{filename}\"").into_boxed_str()),
+            ),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 /// Open a plugin DB read-only. Returns None when the file is absent (plugin
 /// idle) so callers can serve an empty payload.
 fn open_ro(path: &std::path::Path) -> Option<Connection> {
@@ -1436,4 +1512,5 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/thumbnails/file", get(thumbnails_serve_file))
         .route("/api/v1/plugins/insights/compare", get(insights_compare))
         .route("/api/v1/plugins/insights/retention/{id}", get(insights_retention))
+        .route("/api/v1/plugins/captions/{id}", get(captions_export))
 }
