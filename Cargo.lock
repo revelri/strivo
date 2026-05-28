@@ -4036,6 +4036,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "strivo-viewguard-trend"
+version = "0.3.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "strivo-web"
 version = "0.3.0"
 dependencies = [
@@ -4071,6 +4079,7 @@ dependencies = [
  "strivo-plugins",
  "strivo-reuse",
  "strivo-thumbnails",
+ "strivo-viewguard-trend",
  "tempfile",
  "tokio",
  "tokio-util",

@@ -1511,6 +1511,58 @@ async fn editor_render(
     }
 }
 
+/// `GET /api/v1/plugins/viewguard/trend` — pull every verdict row
+/// from the viewguard DB and run the cross-stream trend analyzer.
+/// Returns a watchlist banded by Critical/Warning/Watch/Clear.
+async fn viewguard_trend(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("viewguard") { return r; }
+    let Some(conn) = viewguard_db().as_deref().and_then(open_ro) else {
+        return Json(json!({
+            "watchlist": {
+                "critical": [], "warning": [], "watch": [], "clear": []
+            },
+            "samples": 0,
+        }))
+        .into_response();
+    };
+    // Pull verdict rows directly via SQL — the strivo_plugins::viewguard
+    // crate doesn't expose a "list every verdict" helper today.
+    let mut stmt = match conn.prepare(
+        "SELECT channel_id, channel_name, final_score, stream_started_at
+         FROM verdicts
+         ORDER BY stream_started_at",
+    ) {
+        Ok(s) => s,
+        Err(e) => return Problem::internal(format!("prepare: {e}")).into_response(),
+    };
+    let rows: Vec<strivo_viewguard_trend::VerdictRow> = match stmt
+        .query_map([], |r| {
+            Ok(strivo_viewguard_trend::VerdictRow {
+                channel_id: r.get::<_, String>(0)?,
+                channel_name: r.get::<_, Option<String>>(1)?,
+                final_score: r.get::<_, f64>(2)? as f32,
+                stream_started_at: r.get::<_, String>(3)?,
+            })
+        })
+        .and_then(|mapped| mapped.collect::<rusqlite::Result<Vec<_>>>())
+    {
+        Ok(v) => v,
+        Err(e) => return Problem::internal(format!("query: {e}")).into_response(),
+    };
+    let watchlist = strivo_viewguard_trend::build_watchlist(&rows);
+    Json(json!({
+        "watchlist": watchlist,
+        "samples": rows.len(),
+    }))
+    .into_response()
+}
+
 /// Open a plugin DB read-only. Returns None when the file is absent (plugin
 /// idle) so callers can serve an empty payload.
 fn open_ro(path: &std::path::Path) -> Option<Connection> {
@@ -2239,4 +2291,5 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/heatmap/{id}", get(heatmap_compute))
         .route("/api/v1/plugins/editor/{id}", get(editor_load).post(editor_save))
         .route("/api/v1/plugins/editor/{id}/render", axum::routing::post(editor_render))
+        .route("/api/v1/plugins/viewguard/trend", get(viewguard_trend))
 }

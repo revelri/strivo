@@ -183,6 +183,7 @@ const API = {
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}`, { method: "POST", body: edl }),
   editorRender: (recordingId) =>
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/render`, { method: "POST" }),
+  viewguardTrend: () => API._fetch("/plugins/viewguard/trend"),
   patreonPull: (body) =>
     API._fetch("/patreon/pull", { method: "POST", body }),
   vodDownload: (body) =>
@@ -3254,10 +3255,71 @@ async function renderViewguard() {
     .join("");
   root.innerHTML = chrome(`
     ${pluginHeader("Viewguard", "Latest viewbot-fraud verdict per channel. Higher = more suspicious.", "#/plugins")}
+    <div id="vg-trend-summary"></div>
     <div class="cfg-grid">${cards || `<div class="empty">No verdicts yet — viewers are sampled while channels are live.</div>
       <div class="pg-getstarted"><strong>Get started:</strong> Viewguard runs automatically during live Twitch captures. Verdicts appear here after a stream ends and samples are scored.</div>`}</div>
   `);
   setupChromeHandlers();
+  // Lazy-load the trend dashboard so the per-channel cards paint
+  // first. Pure render; the summary inserts above the grid when ready.
+  API.viewguardTrend().then(renderViewguardTrend).catch(() => {});
+}
+
+// Render the cross-stream trend dashboard above the per-channel grid.
+// Shows banded watchlists (Critical / Warning / Watch) — Clear is
+// hidden by default since there's nothing actionable there.
+function renderViewguardTrend(resp) {
+  const host = document.getElementById("vg-trend-summary");
+  if (!host || !resp || !resp.watchlist) return;
+  const wl = resp.watchlist;
+  const bandSpec = [
+    ["critical", "Critical", "hsl(0, 80%, 60%)"],
+    ["warning", "Warning", "hsl(20, 80%, 60%)"],
+    ["watch", "Watch", "hsl(40, 80%, 60%)"],
+  ];
+  const actionLabel = {
+    no_action: "No action",
+    keep_monitoring: "Keep monitoring",
+    manual_review: "Manual review",
+    escalate_and_report: "Escalate + report",
+  };
+  const directionGlyph = {
+    improving: "↓",
+    stable: "→",
+    worsening: "↑",
+  };
+  const bands = bandSpec
+    .map(([key, label, colour]) => {
+      const list = wl[key] || [];
+      if (!list.length) return "";
+      const rows = list
+        .map(
+          (t) => `
+        <div class="vg-trend-row" style="--vg-c:${colour}">
+          <span class="vg-trend-name">${escape(t.channel_name)}</span>
+          <span class="vg-trend-score">${(t.latest_score * 100).toFixed(0)}%</span>
+          <span class="vg-trend-dir" title="latest ${t.latest_score.toFixed(2)} vs rolling mean ${t.rolling_mean.toFixed(2)} (Δ ${t.delta >= 0 ? "+" : ""}${(t.delta * 100).toFixed(0)}pp)">
+            ${escape(directionGlyph[t.direction] || "→")} ${escape(t.direction)}
+          </span>
+          ${t.anomaly ? '<span class="vg-trend-anomaly" title="latest deviates from rolling mean by >20pp">anomaly</span>' : ""}
+          <span class="vg-trend-samples">${t.samples} sample${t.samples === 1 ? "" : "s"}</span>
+          <span class="vg-trend-action">${escape(actionLabel[t.suggested_action] || t.suggested_action)}</span>
+        </div>`,
+        )
+        .join("");
+      return `<details class="vg-trend-band" open data-band="${escape(key)}" style="--vg-c:${colour}">
+        <summary><strong>${escape(label)}</strong> <span class="pg-cap-hint">${list.length} channel${list.length === 1 ? "" : "s"}</span></summary>
+        <div class="vg-trend-list">${rows}</div>
+      </details>`;
+    })
+    .filter(Boolean)
+    .join("");
+  const clearCount = (wl.clear || []).length;
+  host.innerHTML = `
+    <section class="cfg-card vg-trend-card">
+      <h2 class="cfg-title">Cross-stream trend <span class="pg-cap-hint">${resp.samples} verdict sample${resp.samples === 1 ? "" : "s"} · ${clearCount} clear channel${clearCount === 1 ? "" : "s"} hidden</span></h2>
+      ${bands || '<div class="empty sm">No actionable trends right now — every channel is in the Clear band.</div>'}
+    </section>`;
 }
 
 // ── Insights ─────────────────────────────────────────────────────────

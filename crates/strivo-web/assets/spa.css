@@ -3060,6 +3060,55 @@ body.modal-open { overflow: hidden; }
 .rec-ed-src { font-size: 0.85rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rec-ed-time { font-size: 0.76rem; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .rec-ed-row .danger { color: hsl(0, 70%, 65%); }
+/* Viewguard cross-stream trend dashboard (iter 15). */
+.vg-trend-card { margin-bottom: 1rem; }
+.vg-trend-band {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-light);
+  border-left: 3px solid var(--vg-c, var(--accent2));
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  margin-bottom: 0.5rem;
+}
+.vg-trend-band summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.15rem 0;
+  font-size: 0.9rem;
+  color: var(--vg-c, var(--text));
+}
+.vg-trend-band summary::-webkit-details-marker { display: none; }
+.vg-trend-band summary::before { content: "▾ "; color: var(--muted); }
+.vg-trend-band:not([open]) summary::before { content: "▸ "; }
+.vg-trend-list { display: flex; flex-direction: column; gap: 0.25rem; margin-top: 0.4rem; }
+.vg-trend-row {
+  display: grid;
+  grid-template-columns: 1fr 70px 110px 80px 90px 140px;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: 0.85rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.15);
+}
+.vg-trend-name { color: var(--text); }
+.vg-trend-score { font-weight: 600; color: var(--vg-c, var(--accent2)); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.vg-trend-dir { color: var(--muted); font-size: 0.78rem; }
+.vg-trend-anomaly {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  background: rgba(255, 105, 0, 0.18);
+  color: hsl(20, 90%, 65%);
+  text-align: center;
+}
+.vg-trend-samples { color: var(--muted); font-size: 0.78rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.vg-trend-action { color: var(--text); font-size: 0.82rem; text-align: right; }
+@media (max-width: 900px) {
+  .vg-trend-row { grid-template-columns: 1fr; }
+}
 @media (max-width: 720px) {
   .rec-ed-row { grid-template-columns: 1fr; }
 }
