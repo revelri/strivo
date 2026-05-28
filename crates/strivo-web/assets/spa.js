@@ -1890,7 +1890,7 @@ async function renderRecordings() {
              placeholder="Filter by channel or title… (/)"
              aria-label="Filter recordings" value="${escape(recFilter)}">
       <button id="rec-density" class="sm" title="Toggle row density">
-        ${recDensity === "compact" ? "▤ Comfortable" : "▥ Compact"}
+        ${recDensity === "compact" ? "≡ Comfortable rows" : "═ Compact rows"}
       </button>
       ${(() => {
         const errored = recCache.filter((r) => stateClassName(r.state) === "failed" || stateLabel(r.state).toLowerCase().includes("interrupt")).length;
@@ -3116,7 +3116,7 @@ async function openRecordingInfo(jobId) {
         ${meta("Size", escape(formatBytes(rec.bytes_written || 0)))}
         ${meta("Transcode", rec.transcode ? "yes" : "no")}
         ${rec.source_url ? meta("Source", `<a href="${escape(rec.source_url)}" target="_blank" rel="noopener">${escape(rec.source_url)}</a>`) : ""}
-        ${rec.output_path ? meta("File", `<code class="rec-info-path">${escape(rec.output_path)}</code>`) : ""}
+        ${rec.output_path ? meta("File", `<span class="rec-info-pathwrap"><code class="rec-info-path">${escape(rec.output_path)}</code><button class="rec-copy" data-copy="${escape(rec.output_path)}" title="Copy path">⧉</button></span>`) : ""}
         ${rec.error ? meta("Error", `<span class="cfg-badge err">${escape(rec.error)}</span>`) : ""}
       </dl>
     </div>
@@ -3163,6 +3163,14 @@ async function openRecordingInfo(jobId) {
   });
   overlay.querySelectorAll("[data-action=rec-info-route-close]").forEach((a) =>
     a.addEventListener("click", () => closeRecordingModals()));
+  overlay.querySelectorAll(".rec-copy").forEach((b) =>
+    b.addEventListener("click", () => {
+      const v = b.dataset.copy || "";
+      navigator.clipboard?.writeText(v).then(
+        () => Toast.success("Path copied"),
+        () => Toast.error("Couldn't copy to clipboard"),
+      );
+    }));
   overlay.querySelectorAll("[data-action=rec-info-verb]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       await withBusy(btn, "Queued…", async () => {
@@ -3706,7 +3714,11 @@ function renderSettingsPane(slug, s) {
         group("Build", [
           row("Application", "StriVo",
             "Live-stream PVR for Twitch and YouTube."),
-          row("Source", `<a href="https://github.com/Chorosyne/strivo" class="stg-linkbtn">github.com/Chorosyne/strivo →</a>`),
+          // Source link points at the home docs site to survive the
+          // private-repo flip (audit U19). chorosyne.com → strivo will
+          // 404 today but won't link to a 404'd github repo after the
+          // visibility flip.
+          row("Project", `<a href="https://chorosyne.com" class="stg-linkbtn" target="_blank" rel="noopener">chorosyne.com →</a>`),
           row("Plugins", `<a href="#/plugins" class="stg-linkbtn">Plugin hub →</a>`),
         ].join("")),
         group("Licence", [

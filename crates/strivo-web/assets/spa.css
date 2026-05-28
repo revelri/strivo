@@ -1632,6 +1632,26 @@ a.media-pill:hover,
 .mp-thumb { position: relative; }
 .mp-broken .mp-title,
 .mp-broken .mp-sub { opacity: 0.6; }
+.rec-info-pathwrap { display: inline-flex; gap: 0.4rem; align-items: center; max-width: 100%; }
+.rec-info-pathwrap code {
+  background: rgba(0, 0, 0, 0.25);
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  word-break: break-all;
+  overflow: hidden;
+}
+.rec-copy {
+  background: transparent;
+  border: 1px solid var(--border-light);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.rec-copy:hover { color: var(--text); border-color: var(--accent2); }
 .mp-source {
   font-size: 0.62rem;
   letter-spacing: 0.08em;
