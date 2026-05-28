@@ -1,45 +1,47 @@
-//! Strivo Pro licence status endpoint (Phase 1 stub).
+//! Strivo Pro licence routes.
 //!
-//! Returns the current entitlement so the SPA can decide whether to show
-//! the upgrade card. The real implementation lives behind the activation
-//! backend (CF Workers + D1) and the in-app licence cache (Phase 3).
-//! Until then this returns a hard-coded "free, not entitled" payload so
-//! the UI surface lights up.
+//! status — read entitlement from the local cache + dev override.
+//! activate — POST {licence_key} → backend, persist token on 200.
+//! trial    — POST {} → backend (machine_hash added server-side),
+//!            persist a 3-day token.
+//! refresh  — POST {} → backend, re-sign + extend last_refreshed.
+//!
+//! Backend URL is taken from the `STRIVO_LICENCE_URL` env var (or
+//! `[licence].backend_url` in config.toml — Phase 4). When unset the
+//! mutating routes return 501 so a self-hosted user without a Pro
+//! account sees a clean "backend not configured" rather than a
+//! confusing network error.
+//!
+//! JWT signature verification is intentionally deferred: the cache is
+//! bound to `machine_hash` (so a lifted file fails immediately), and
+//! the server is consulted every 72h refresh anyway. Adding full
+//! ES256 verify is a hardening task tracked in TODO(licence-verify).
 
-use axum::routing::get;
+use axum::extract::State;
+use axum::response::IntoResponse;
+use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use strivo_core::licence::{cache::Licence, gate, machine_id, LicenceCache, Tier};
 
 use crate::server::AppState;
 
 #[derive(Serialize)]
 struct LicenceStatus {
-    /// True if any Pro feature should unlock.
     entitled: bool,
-    /// "free" | "pro" | "trial".
     tier: &'static str,
-    /// Present when a trial is active; null otherwise.
     trial: Option<serde_json::Value>,
-    /// ISO-8601 expiry for paid/trial; null for free.
     expires_at: Option<String>,
-    /// Set once Phase 3 is wired up.
     machine_id: Option<String>,
-    /// Tells the SPA the real backend is offline — show the upgrade card
-    /// but disable the "Activate" button (the trial CTA stays live).
+    /// True iff the activation backend URL is configured. Lets the SPA
+    /// keep the "Activate / Start trial" buttons disabled with a clean
+    /// hint when the user hasn't pointed at a backend yet.
     implemented: bool,
 }
 
 async fn status() -> Json<LicenceStatus> {
-    use strivo_core::licence::{gate, machine_id, LicenceCache, Tier};
-
-    // Surface the hashed machine_id so the activation flow can pin it
-    // without ever sending the raw OS-level identifier. Read once per
-    // request; the underlying call memoises.
     let mh = machine_id::hashed_machine_id();
-
-    // gate::entitled handles the dev override + cache check in one
-    // place so the UI and the runtime gate stay in lockstep.
     let entitled = gate::entitled();
     let cache = LicenceCache::load().ok().flatten();
 
@@ -51,13 +53,13 @@ async fn status() -> Json<LicenceStatus> {
                 Tier::Free => "free",
             };
             let trial = if matches!(lic.tier, Tier::Trial) {
-                Some(serde_json::json!({ "expires_at": lic.expires_at }))
+                Some(json!({ "expires_at": lic.expires_at }))
             } else {
                 None
             };
             (tier, lic.expires_at.clone(), trial)
         }
-        _ if entitled => ("pro", None, None), // dev override w/o cache
+        _ if entitled => ("pro", None, None),
         _ => ("free", None, None),
     };
 
@@ -67,35 +69,167 @@ async fn status() -> Json<LicenceStatus> {
         trial,
         expires_at,
         machine_id: Some(mh),
-        // Real reads now wired; mutating routes (activate/trial/refresh)
-        // still 501 until the CF Workers backend (Phase 3b) is up.
-        implemented: false,
+        implemented: backend_url().is_some(),
     })
 }
 
-async fn not_implemented() -> (axum::http::StatusCode, Json<serde_json::Value>) {
-    (
-        axum::http::StatusCode::NOT_IMPLEMENTED,
-        Json(json!({
-            "error": "not_implemented",
-            "message": "Activation backend is not wired yet — coming in Phase 3."
-        })),
+fn backend_url() -> Option<String> {
+    std::env::var("STRIVO_LICENCE_URL").ok().filter(|v| !v.is_empty())
+}
+
+#[derive(Deserialize)]
+struct ActivateRequest {
+    /// Lemon Squeezy licence key the user pasted.
+    key: String,
+}
+
+#[derive(Deserialize)]
+struct BackendTokenResponse {
+    token: String,
+    tier: String,
+    /// Set only for trials.
+    #[serde(default)]
+    expires_at: Option<String>,
+}
+
+async fn activate(
+    State(_state): State<AppState>,
+    Json(body): Json<ActivateRequest>,
+) -> impl IntoResponse {
+    let Some(url) = backend_url() else {
+        return crate::problem::Problem::unavailable("licence backend not configured")
+            .into_response();
+    };
+    let resp = match post_backend(
+        &format!("{url}/activate"),
+        json!({
+            "licence_key": body.key,
+            "machine_hash": machine_id::hashed_machine_id(),
+        }),
     )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return crate::problem::Problem::unavailable(e).into_response(),
+    };
+    persist_and_reply(resp, Tier::Pro, body.key).await
+}
+
+async fn trial(State(_state): State<AppState>) -> impl IntoResponse {
+    let Some(url) = backend_url() else {
+        return crate::problem::Problem::unavailable("licence backend not configured")
+            .into_response();
+    };
+    let resp = match post_backend(
+        &format!("{url}/trial"),
+        json!({ "machine_hash": machine_id::hashed_machine_id() }),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return crate::problem::Problem::unavailable(e).into_response(),
+    };
+    persist_and_reply(resp, Tier::Trial, String::new()).await
+}
+
+async fn refresh(State(_state): State<AppState>) -> impl IntoResponse {
+    let Some(url) = backend_url() else {
+        return crate::problem::Problem::unavailable("licence backend not configured")
+            .into_response();
+    };
+    let cache = match LicenceCache::load() {
+        Ok(Some(c)) => c,
+        _ => {
+            return crate::problem::Problem::bad_request("no licence on file to refresh")
+                .into_response()
+        }
+    };
+    let resp = match post_backend(
+        &format!("{url}/refresh"),
+        json!({
+            "licence_key": cache.licence_key.clone(),
+            "machine_hash": machine_id::hashed_machine_id(),
+        }),
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => return crate::problem::Problem::unavailable(e).into_response(),
+    };
+    persist_and_reply(resp, cache.tier, cache.licence_key).await
+}
+
+async fn post_backend(url: &str, body: serde_json::Value) -> Result<BackendResponse, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let r = client
+        .post(url)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("backend unreachable: {e}"))?;
+    let status = r.status();
+    let raw = r.text().await.map_err(|e| e.to_string())?;
+    Ok(BackendResponse { status, raw })
+}
+
+struct BackendResponse {
+    status: reqwest::StatusCode,
+    raw: String,
+}
+
+async fn persist_and_reply(
+    resp: BackendResponse,
+    fallback_tier: Tier,
+    licence_key: String,
+) -> axum::response::Response {
+    if !resp.status.is_success() {
+        // Pass the backend's status + body through so the SPA gets the
+        // real reason ("licence revoked", "trial already claimed", …)
+        // instead of a generic 500.
+        return (resp.status, [(axum::http::header::CONTENT_TYPE, "application/json")], resp.raw)
+            .into_response();
+    }
+    let parsed: BackendTokenResponse = match serde_json::from_str(&resp.raw) {
+        Ok(p) => p,
+        Err(e) => {
+            return crate::problem::Problem::internal(format!("malformed backend response: {e}"))
+                .into_response()
+        }
+    };
+    let tier = match parsed.tier.as_str() {
+        "pro" => Tier::Pro,
+        "trial" => Tier::Trial,
+        _ => fallback_tier,
+    };
+    // TODO(licence-verify): verify JWT signature with embedded P-256
+    // public key before trusting the payload. Until then we rely on
+    // the machine_hash binding + the 72h forced-refresh window.
+    let lic = Licence {
+        tier,
+        machine_hash: machine_id::hashed_machine_id(),
+        expires_at: parsed.expires_at.clone(),
+        last_refreshed: chrono::Utc::now().to_rfc3339(),
+        token: parsed.token,
+        licence_key,
+    };
+    if let Err(e) = LicenceCache::save(&lic) {
+        return crate::problem::Problem::internal(format!("save cache: {e}")).into_response();
+    }
+    Json(json!({
+        "ok": true,
+        "tier": parsed.tier,
+        "expires_at": parsed.expires_at,
+    }))
+    .into_response()
 }
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/licence/status", get(status))
-        .route(
-            "/api/v1/licence/activate",
-            axum::routing::post(not_implemented),
-        )
-        .route(
-            "/api/v1/licence/trial",
-            axum::routing::post(not_implemented),
-        )
-        .route(
-            "/api/v1/licence/refresh",
-            axum::routing::post(not_implemented),
-        )
+        .route("/api/v1/licence/activate", post(activate))
+        .route("/api/v1/licence/trial", post(trial))
+        .route("/api/v1/licence/refresh", post(refresh))
 }

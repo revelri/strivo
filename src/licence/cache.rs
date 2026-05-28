@@ -45,6 +45,11 @@ pub struct Licence {
     /// caches and Phase 3 stubs.
     #[serde(default)]
     pub token: String,
+    /// Original Lemon Squeezy licence key used to activate. Empty
+    /// for trials. Needed for `/refresh` — the backend looks up the
+    /// row by (licence_key, machine_hash).
+    #[serde(default)]
+    pub licence_key: String,
 }
 
 impl Licence {
@@ -121,6 +126,7 @@ mod tests {
             expires_at: None,
             last_refreshed: chrono::Utc::now().to_rfc3339(),
             token: String::new(),
+            licence_key: String::new(),
         };
         assert!(l.is_entitled());
         assert!(!l.is_expired());
@@ -134,6 +140,7 @@ mod tests {
             expires_at: Some("2000-01-01T00:00:00Z".into()),
             last_refreshed: chrono::Utc::now().to_rfc3339(),
             token: String::new(),
+            licence_key: String::new(),
         };
         assert!(!l.is_entitled());
         assert!(l.is_expired());
@@ -147,6 +154,7 @@ mod tests {
             expires_at: None,
             last_refreshed: chrono::Utc::now().to_rfc3339(),
             token: String::new(),
+            licence_key: String::new(),
         };
         assert!(!l.is_entitled());
     }

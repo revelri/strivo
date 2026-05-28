@@ -3929,6 +3929,7 @@ dependencies = [
  "hyper",
  "libc",
  "rand 0.8.6",
+ "reqwest",
  "rusqlite",
  "rust-embed",
  "serde",
