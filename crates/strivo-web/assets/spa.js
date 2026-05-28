@@ -884,7 +884,7 @@ function recordingPillHtml(j) {
       <div class="mp-thumb"><img class="mp-thumb-img" loading="lazy" alt=""
         src="/api/v1/recordings/${encodeURIComponent(j.id)}/thumb" onerror="this.remove()"></div>
       <div class="mp-info">
-        <div class="mp-title">${escape(j.stream_title || j.channel_name || "(recording)")}</div>
+        <div class="mp-title">${escape(niceTitle(j.stream_title) || j.channel_name || "(recording)")}</div>
         <div class="mp-sub">${escape(j.channel_name || "")} · ${escape(when)}</div>
       </div>
       <div class="mp-meta">
@@ -1364,7 +1364,7 @@ function vodSectionHtml(title, vods, ctx) {
       <a class="mp-link" href="${href}" target="_blank" rel="noopener">
         <div class="mp-thumb">${thumb ? `<img class="mp-thumb-img" loading="lazy" alt="" src="${escape(thumb)}" onerror="this.remove()">` : ""}</div>
         <div class="mp-info">
-          <div class="mp-title">${escape(v.title)}</div>
+          <div class="mp-title">${escape(niceTitle(v.title))}</div>
           <div class="mp-sub">${meta}</div>
         </div>
         <div class="mp-meta">${live ? '<span class="mp-badge live">LIVE VOD</span>' : '<span class="mp-badge">Upload</span>'}</div>
@@ -1780,9 +1780,13 @@ async function renderRecordings() {
 }
 
 function recHeader(key, label) {
+  // Active column shows the direction arrow; inactive sortable columns
+  // get a faint ↕ so the affordance is discoverable (R6 audit fix).
   const arrow =
-    recSort.col === key ? (recSort.dir === "asc" ? " ▲" : " ▼") : "";
-  return `<th data-sort="${key}" style="cursor:pointer">${label}${arrow}</th>`;
+    recSort.col === key
+      ? (recSort.dir === "asc" ? " ▲" : " ▼")
+      : ' <span class="rec-th-sort-hint" aria-hidden="true">↕</span>';
+  return `<th data-sort="${key}" class="rec-th-sortable">${label}${arrow}</th>`;
 }
 
 // Apply the live filter + sort to recCache and repaint the table body.
@@ -1794,7 +1798,7 @@ function paintRecordings() {
     if (!q) return true;
     return (
       (r.channel_name || "").toLowerCase().includes(q) ||
-      (r.stream_title || "").toLowerCase().includes(q)
+      niceTitle(r.stream_title).toLowerCase().includes(q)
     );
   });
   const dir = recSort.dir === "asc" ? 1 : -1;
@@ -1802,7 +1806,7 @@ function paintRecordings() {
     switch (recSort.col) {
       case "state": return stateLabel(r.state).toLowerCase();
       case "channel": return (r.channel_name || "").toLowerCase();
-      case "title": return (r.stream_title || "").toLowerCase();
+      case "title": return niceTitle(r.stream_title).toLowerCase();
       case "size": return r.bytes_written || 0;
       case "started":
       default: return new Date(r.started_at).getTime() || 0;
@@ -2050,7 +2054,7 @@ function recordingRow(r) {
       <td class="rec-check"><input type="checkbox" class="rec-row-check" data-job-id="${escape(r.id)}" ${recSelected.has(r.id) ? "checked" : ""} aria-label="Select recording"></td>
       <td><span class="state-pill ${stateClass}">${state}</span></td>
       <td>${escape(r.channel_name)}</td>
-      <td><div class="rec-title-cell">${recThumb(r)}<span>${escape(r.stream_title || "(no title)")}</span></div></td>
+      <td><div class="rec-title-cell">${recThumb(r)}<span>${escape(niceTitle(r.stream_title) || "(no title)")}</span></div></td>
       <td>${new Date(r.started_at).toLocaleString()}</td>
       <td>${formatBytes(r.bytes_written || 0)}</td>
       <td class="rec-actions"><div class="rec-actions-inner">${actions}</div></td>
@@ -2268,7 +2272,12 @@ async function renderPluginHub() {
   root.innerHTML = chrome(`
     ${pluginHeader("Plugins", "First-party plugins. Pick one to browse what it has produced.")}
     ${upgrade}
-    <div class="pg-grid">${cards || '<div class="empty">No plugins loaded.</div>'}</div>
+    <div class="pg-grid">${
+      cards ||
+      (upgrade
+        ? '<div class="empty">Activate Strivo Pro above to populate this grid.</div>'
+        : '<div class="empty">No plugins loaded.</div>')
+    }</div>
   `);
   setupChromeHandlers();
   wireUpgradeCard();
@@ -2344,7 +2353,7 @@ async function renderCrunchr() {
       return `
         <a class="pg-row" href="#/plugins/crunchr/rec/${encodeURIComponent(r.recording_id)}">
           <span class="pg-row-main">
-            <span class="pg-row-title">${escape(r.title || "(untitled)")}</span>
+            <span class="pg-row-title">${escape(niceTitle(r.title) || "(untitled)")}</span>
             <span class="pg-row-sub">${escape(r.channel_name)} · ${escape(r.created_at || "")}</span>
           </span>
           <span class="pg-row-meta">
@@ -2495,7 +2504,7 @@ async function renderArchiverVideos(channelId) {
       (v) => `
       <div class="pg-row pg-row-static">
         <span class="pg-row-main">
-          <span class="pg-row-title">${escape(v.title)}</span>
+          <span class="pg-row-title">${escape(niceTitle(v.title))}</span>
           <span class="pg-row-sub">${escape(v.upload_date || "")}${v.playlist ? " · " + escape(v.playlist) : ""}${v.duration ? " · " + fmtClock(v.duration) : ""}</span>
         </span>
         <span class="pg-row-meta">
@@ -2839,7 +2848,7 @@ async function openRecordingInfo(jobId) {
   overlay.querySelector(".modal-card").innerHTML = `
     <header class="rec-info-head">
       <span class="state-pill ${stateClass}">${escape(state)}</span>
-      <h2>${escape(rec.stream_title || "(no title)")}</h2>
+      <h2>${escape(niceTitle(rec.stream_title) || "(no title)")}</h2>
       <button class="modal-close" aria-label="Close" data-action="modal-close">✕</button>
     </header>
     <div class="rec-info-body">
@@ -2921,7 +2930,7 @@ async function openRecordingPlayer(jobId) {
   const captionsUrl = `/api/v1/recordings/${encodeURIComponent(jobId)}/captions.vtt`;
   overlay.querySelector(".modal-card").innerHTML = `
     <header class="rec-player-head">
-      <h2 class="rec-player-title">${escape(rec.stream_title || rec.channel_name || "Recording")}</h2>
+      <h2 class="rec-player-title">${escape(niceTitle(rec.stream_title) || rec.channel_name || "Recording")}</h2>
       <button class="modal-close" aria-label="Close" data-action="modal-close">✕</button>
     </header>
     <div class="rec-player-stage">
@@ -3174,7 +3183,7 @@ async function renderSettings() {
 
   root.innerHTML = chrome(`
     <h1 class="page-title">Settings</h1>
-    <p class="page-subtitle">Live daemon configuration. Toggles and numeric knobs persist to <code>~/.config/strivo/config.toml</code> on change. Path-typed fields land in Phase 2c with a wizard.</p>
+    <p class="page-subtitle">Live daemon configuration. Toggles and numeric knobs persist to <code>~/.config/strivo/config.toml</code> on change.</p>
     <div class="stg-shell">
       <nav class="stg-rail" aria-label="Settings sections">${rail}</nav>
       <div class="stg-pane" id="stg-pane">${pane}</div>
@@ -3908,6 +3917,51 @@ function escape(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+// niceTitle — strip filename-derived noise from a recording title so the
+// UI shows the semantic title only. The on-disk filename is untouched.
+//
+// Strips:
+//   - leading HHMMSS_ timestamp prefix from ffmpeg filename templates
+//   - trailing API/source decorations like "_Video_", "[Video]", "_AUDIO_"
+//   - underscores standing in for spaces (filesystem-safe substitution)
+//   - editorial appendations Patreon/YouTube auto-tag (BONUS Video, etc.)
+//   - bracketed/parens descriptors that are non-semantic
+// Then collapses double-spaces and trims.
+const TITLE_TRAILING_TAGS = [
+  // Order matters: most specific (multi-word) first.
+  "BONUS Video", "BONUS Audio", "BONUS [Video]", "BONUS [Audio]",
+  "Full Episode", "Patreon Exclusive", "Patreon Only", "Members Only",
+  "BONUS", "FREE", "EXCLUSIVE", "VOD",
+  "_Video_", "[Video]", "_VIDEO_", "[VIDEO]",
+  "_Audio_", "[Audio]", "_AUDIO_", "[AUDIO]",
+];
+function niceTitle(t) {
+  if (t == null) return "";
+  let s = String(t);
+  // 4-6 digit timestamp prefix produced by {date}/{time} in the template.
+  s = s.replace(/^\d{4,6}_+/, "");
+  // Underscore → space (filename-safe substitution).
+  s = s.replace(/_+/g, " ");
+  // Strip each known trailing tag, repeatedly, with surrounding punctuation.
+  for (let i = 0; i < 4; i++) {
+    let before = s;
+    for (const tag of TITLE_TRAILING_TAGS) {
+      const re = new RegExp(
+        "[\\s\\-\\u2013\\u2014:,\\(\\[]*" +
+          tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") +
+          "[\\s\\)\\]]*$",
+        "i",
+      );
+      s = s.replace(re, "");
+    }
+    if (s === before) break;
+  }
+  // Collapse double-spaces; tidy stray punctuation tails like " - " " — ".
+  s = s.replace(/\s+/g, " ")
+       .replace(/[\s\-–—:,]+$/g, "")
+       .trim();
+  return s;
 }
 function formatCount(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";

@@ -2171,6 +2171,9 @@ body.modal-open { overflow: hidden; }
   font-size: 0.9rem;
 }
 .stg-num:focus { outline: 0; border-color: var(--accent2); }
+.rec-th-sortable { cursor: pointer; user-select: none; }
+.rec-th-sortable:hover { color: var(--text); }
+.rec-th-sort-hint { color: var(--muted); opacity: 0.45; font-size: 0.75em; }
 .stg-cfg-btn {
   margin-left: 0.6rem;
   border: 0;
