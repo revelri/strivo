@@ -3121,65 +3121,217 @@ function renderStub(title, msg) {
   setupChromeHandlers();
 }
 
-// ── Settings (item 7) — real, domain-grouped read of the daemon config.
-// Editing still lives in the TUI / config.toml; this surfaces the live
-// configuration so the page is informative rather than a stub.
+// ── Settings (Jellyfin-style two-pane shell) ────────────────────────
+// Left rail = section nav (sub-route via #/settings/<section>).
+// Right pane = section content. All knobs the daemon exposes get a
+// visible row — read-only for now (Phase 2a). Phase 2b wires writes;
+// Phase 2c adds the platforms wizard + keyring. Tooltip hints (the
+// `title` attribute on .stg-hint) explain non-obvious knobs without
+// cluttering the layout.
+const SETTINGS_SECTIONS = [
+  { slug: "general", label: "General", icon: "⚙" },
+  { slug: "recording", label: "Recording", icon: "⏺" },
+  { slug: "platforms", label: "Platforms", icon: "🔌" },
+  { slug: "plugins", label: "Plugins", icon: "🧩" },
+  { slug: "interface", label: "Interface", icon: "🎨" },
+  { slug: "advanced", label: "Advanced", icon: "🛠" },
+  { slug: "about", label: "About", icon: "ℹ" },
+];
+
 async function renderSettings() {
+  const parts = routeParts(); // ["settings", <slug?>]
+  const slug = parts[1] || "general";
+  const known = SETTINGS_SECTIONS.find((s) => s.slug === slug)
+    ? slug
+    : "general";
+
   let s = {};
   try {
     s = await API.settings();
   } catch (e) {
-    if (e.message.includes("unauthorized")) return;
+    if (e.message && e.message.includes("unauthorized")) return;
   }
   root.removeAttribute("aria-busy");
 
-  const yesno = (b) => (b ? "yes" : "no");
-  const badge = (ok, okText, noText) =>
-    `<span class="cfg-badge ${ok ? "ok" : "warn"}">${ok ? okText : noText}</span>`;
-  const rec = s.recording || {};
-  const arc = s.archiver || {};
-  const ui = s.ui || {};
+  const rail = SETTINGS_SECTIONS.map((sec) => `
+    <a class="stg-rail-item ${sec.slug === known ? "is-active" : ""}"
+       href="#/settings/${sec.slug}">
+      <span class="stg-rail-icon" aria-hidden="true">${sec.icon}</span>
+      <span class="stg-rail-label">${escape(sec.label)}</span>
+    </a>`).join("");
 
-  const card = (title, rows) => `
-    <section class="cfg-card">
-      <h2 class="cfg-title">${title}</h2>
-      <dl class="cfg-list">${rows}</dl>
-    </section>`;
-  const kv = (k, v) => `<dt>${escape(k)}</dt><dd>${v}</dd>`;
+  const pane = renderSettingsPane(known, s);
 
   root.innerHTML = chrome(`
     <h1 class="page-title">Settings</h1>
-    <p class="page-subtitle">Live daemon configuration. Edit via the TUI or <code>~/.config/strivo/config.toml</code>.</p>
-    <div class="cfg-grid">
-      ${card("Platforms", [
-        kv("Twitch", badge(s.twitch_configured, "configured", "not configured")),
-        kv("YouTube", badge(s.youtube_configured, "configured", "not configured")),
-        kv("Patreon", badge(s.patreon_configured, "configured", "not configured")),
-        kv("Auto-record channels", `${(s.auto_record_channels || []).length}`),
-        kv("Poll interval", `${s.poll_interval_secs ?? "?"}s`),
-      ].join(""))}
-      ${card("Recording", [
-        kv("Directory", `<code>${escape(s.recording_dir || "?")}</code>`),
-        kv("Filename template", `<code>${escape(rec.filename_template || "?")}</code>`),
-        kv("Transcode", yesno(rec.transcode)),
-        kv("Twitch from-start", yesno(rec.twitch_live_from_start)),
-        kv("Auto VOD backfill", yesno(rec.auto_vod_backfill)),
-        kv("Auto-trim ads", yesno(rec.auto_trim_ads)),
-      ].join(""))}
-      ${card("Plugins", [
-        kv("Archiver", badge(arc.enabled, "enabled", "disabled")),
-        kv("Archiver dir", `<code>${escape(arc.archive_dir || "—")}</code>`),
-        kv("Archiver format", escape(arc.format || "—")),
-        kv("Concurrent fragments", `${arc.concurrent_fragments ?? "—"}`),
-      ].join(""))}
-      ${card("Interface", [
-        kv("Reduce motion", yesno(ui.reduce_motion)),
-        kv("Verbose status", yesno(ui.verbose_status)),
-        kv("Scheduled recordings", `${(s.schedule || []).length}`),
-      ].join(""))}
+    <p class="page-subtitle">Live daemon configuration. Editing lands in Phase 2b — for now changes go through the TUI or <code>~/.config/strivo/config.toml</code>.</p>
+    <div class="stg-shell">
+      <nav class="stg-rail" aria-label="Settings sections">${rail}</nav>
+      <div class="stg-pane" id="stg-pane">${pane}</div>
     </div>
   `);
   setupChromeHandlers();
+}
+
+// Build the right-pane HTML for a section. Each section is a sequence of
+// sub-headed groups, then a flat list of rows: label · value · hint.
+function renderSettingsPane(slug, s) {
+  const rec = s.recording || {};
+  const arc = s.archiver || {};
+  const ui = s.ui || {};
+  const yesno = (b) => (b ? "Yes" : "No");
+  const badge = (ok, okText, noText) =>
+    `<span class="cfg-badge ${ok ? "ok" : "warn"}">${ok ? okText : noText}</span>`;
+  const code = (v) => `<code>${escape(v || "—")}</code>`;
+  // Row helper. `hint` is rendered as a tooltip on a ⓘ glyph so the
+  // layout stays clean; long-form text only appears on hover.
+  const row = (label, value, hint) => `
+    <div class="stg-row">
+      <div class="stg-row-label">
+        ${escape(label)}
+        ${hint ? `<span class="stg-hint" title="${escape(hint)}" aria-label="${escape(hint)}">ⓘ</span>` : ""}
+      </div>
+      <div class="stg-row-value">${value}</div>
+    </div>`;
+  const group = (title, rows) => `
+    <section class="stg-group">
+      <h2 class="stg-group-title">${escape(title)}</h2>
+      <div class="stg-rows">${rows}</div>
+    </section>`;
+
+  switch (slug) {
+    case "general":
+      return [
+        group("Polling", [
+          row(
+            "Channel poll interval",
+            `${s.poll_interval_secs ?? "?"} s`,
+            "How often StriVo checks each tracked channel for a live-state change. Twitch EventSub + YouTube WebSub push live signals in real time; this poll is the fallback.",
+          ),
+          row(
+            "Auto-record channels",
+            `${(s.auto_record_channels || []).length}`,
+            "Channels whose new live broadcasts are recorded automatically. Managed from the Library page.",
+          ),
+        ].join("")),
+        group("Storage", [
+          row(
+            "Recording directory",
+            code(s.recording_dir),
+            "Root directory for all recordings. Each platform/channel gets its own subdirectory.",
+          ),
+        ].join("")),
+      ].join("");
+
+    case "recording":
+      return [
+        group("Output", [
+          row("Filename template", code(rec.filename_template),
+            "Tokens like {channel}, {title}, {date} expand at record-start time."),
+          row("Container", code(rec.container || "matroska (default)"),
+            "Output muxer. Matroska is the browser-friendliest default; switch only if you have a downstream pipeline that needs MP4 or TS."),
+          row("Transcode", yesno(rec.transcode),
+            "Re-encode on the fly via h264_nvenc. Off = stream-copy (zero CPU, original bitrate)."),
+        ].join("")),
+        group("Twitch", [
+          row("Record from start", yesno(rec.twitch_live_from_start),
+            "Pull from the first available HLS segment (~5 min back) instead of the live edge. Sub-only channels reject this and StriVo silently falls back to live edge."),
+        ].join("")),
+        group("YouTube / VOD", [
+          row("Auto VOD backfill", yesno(rec.auto_vod_backfill),
+            "When a stream ends, automatically queue the resulting VOD for download via yt-dlp."),
+          row("Auto-trim ads", yesno(rec.auto_trim_ads),
+            "Run sponsorblock-style ad-segment trimming on completed Twitch VODs."),
+        ].join("")),
+      ].join("");
+
+    case "platforms":
+      return [
+        group("Twitch", [
+          row("Status", badge(s.twitch_configured, "configured", "not configured"),
+            "Client-id + secret + user-token. Configure via the TUI's platform wizard (Phase 2c will add an in-app wizard)."),
+        ].join("")),
+        group("YouTube", [
+          row("Status", badge(s.youtube_configured, "configured", "not configured"),
+            "OAuth2 client + refresh token. Required for live-state detection and VOD downloads on channels you subscribe to."),
+        ].join("")),
+        group("Patreon", [
+          row("Status", badge(s.patreon_configured, "configured", "not configured"),
+            "Optional. Enables Patreon-locked VOD pulls from creators you support."),
+        ].join("")),
+      ].join("");
+
+    case "plugins":
+      return [
+        group("Archiver", [
+          row("Enabled", badge(arc.enabled, "enabled", "disabled"),
+            "Back-catalog VOD archiver. Walks each tracked channel's history and downloads anything missing."),
+          row("Archive directory", code(arc.archive_dir),
+            "Where archived VODs land. Defaults under the main recording dir."),
+          row("Format", code(arc.format),
+            "yt-dlp format selector. Default targets bestvideo+bestaudio with a sensible cap."),
+          row("Concurrent fragments", `${arc.concurrent_fragments ?? "—"}`,
+            "yt-dlp -N flag. Higher = faster downloads, more bandwidth/CPU."),
+        ].join("")),
+        group("Other plugins", [
+          row("Pro plugins", `<a href="#/plugins" class="stg-linkbtn">Open Plugins page →</a>`,
+            "Crunchr, Viewguard, Insights. Activate Strivo Pro from the Plugins hub."),
+        ].join("")),
+      ].join("");
+
+    case "interface":
+      return [
+        group("Accessibility", [
+          row("Reduce motion", yesno(ui.reduce_motion),
+            "Disables non-essential transitions across the UI. Mirrors the OS-level prefers-reduced-motion."),
+          row("Verbose status", yesno(ui.verbose_status),
+            "Adds extra status text to long-running operations. Useful on screen readers."),
+        ].join("")),
+        group("Scheduling", [
+          row("Scheduled recordings", `${(s.schedule || []).length}`,
+            "Cron-style fixed-time recordings. Edit via TUI."),
+        ].join("")),
+      ].join("");
+
+    case "advanced":
+      return [
+        group("Daemon", [
+          row("IPC socket", code("~/.local/share/strivo/strivo.sock"),
+            "Unix socket the web UI uses to talk to the daemon. Path is fixed."),
+          row("Persist DB", code("~/.local/share/strivo/jobs.db"),
+            "Recording history + retry queue. SQLite."),
+          row("Log file", code("~/.local/share/strivo/strivo.<date>.log"),
+            "Rolling daily log. See the Logs page for live tail."),
+        ].join("")),
+        group("Developer", [
+          row("Dev unlock", code(envOrDefault("STRIVO_DEV_UNLOCK_ALL", "off")),
+            "Set STRIVO_DEV_UNLOCK_ALL=1 in the daemon's environment to bypass all Strivo Pro gating. Use during plugin development; never in shipped builds."),
+        ].join("")),
+      ].join("");
+
+    case "about":
+    default:
+      return [
+        group("Build", [
+          row("Application", "StriVo",
+            "Live-stream PVR for Twitch and YouTube."),
+          row("Source", `<a href="https://github.com/Chorosyne/strivo" class="stg-linkbtn">github.com/Chorosyne/strivo →</a>`),
+          row("Plugins", `<a href="#/plugins" class="stg-linkbtn">Plugin hub →</a>`),
+        ].join("")),
+        group("Licence", [
+          row("Strivo Pro", `<a href="#/plugins" class="stg-linkbtn">Manage entitlement →</a>`,
+            "One-time $25 unlock for every shipped plugin. Activate or start a 3-day trial from the Plugins hub."),
+        ].join("")),
+      ].join("");
+  }
+}
+
+// envOrDefault is a UI-side helper: the daemon doesn't expose env vars
+// to the client (it shouldn't — it's behind auth on the local box, but
+// minimising attack surface anyway). Until we add a /api/v1/env route
+// in Phase 3, surface the placeholder.
+function envOrDefault(_name, dflt) {
+  return `<span class="muted">${escape(dflt)}</span>`;
 }
 
 // ── System (item 7) — version, daemon connectivity, severity-tiered

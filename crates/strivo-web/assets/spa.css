@@ -2020,6 +2020,111 @@ body.modal-open { overflow: hidden; }
 }
 .rec-info-verb-link:hover { border-color: var(--accent2); }
 
+/* ── Settings: Jellyfin-style two-pane shell ─────────────────────── */
+.stg-shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+.stg-rail {
+  position: sticky;
+  top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.4rem 0;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.stg-rail-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.85rem;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.92rem;
+  border-left: 2px solid transparent;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.stg-rail-item:hover { color: var(--text); background: rgba(255, 255, 255, 0.03); }
+.stg-rail-item.is-active {
+  color: var(--text);
+  background: rgba(0, 188, 212, 0.08);
+  border-left-color: var(--accent2);
+  font-weight: 600;
+}
+.stg-rail-icon { width: 1.2em; text-align: center; opacity: 0.85; }
+.stg-pane { min-width: 0; }
+.stg-group + .stg-group { margin-top: 1.4rem; }
+.stg-group-title {
+  margin: 0 0 0.6rem;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 700;
+}
+.stg-rows {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.02);
+}
+.stg-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(0, 2fr);
+  gap: 1rem;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--border-light);
+  align-items: center;
+}
+.stg-row:last-child { border-bottom: 0; }
+.stg-row-label { display: flex; align-items: center; gap: 0.35rem; color: var(--text); font-size: 0.9rem; }
+.stg-row-value { color: var(--muted); font-size: 0.9rem; word-break: break-word; }
+.stg-row-value code {
+  background: rgba(0, 0, 0, 0.25);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.stg-hint {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05em;
+  height: 1.05em;
+  font-size: 0.78em;
+  border-radius: 50%;
+  color: var(--accent2);
+  cursor: help;
+  opacity: 0.7;
+  user-select: none;
+}
+.stg-hint:hover { opacity: 1; }
+.stg-linkbtn {
+  color: var(--accent2);
+  text-decoration: none;
+  font-weight: 500;
+}
+.stg-linkbtn:hover { text-decoration: underline; }
+@media (max-width: 720px) {
+  .stg-shell { grid-template-columns: 1fr; }
+  .stg-rail {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+    padding: 0.3rem;
+  }
+  .stg-rail-item { border-left: 0; border-bottom: 2px solid transparent; white-space: nowrap; }
+  .stg-rail-item.is-active { border-left: 0; border-bottom-color: var(--accent2); }
+  .stg-row { grid-template-columns: 1fr; gap: 0.3rem; }
+}
+
 /* ── Strivo Pro upgrade card (Plugins hub) ────────────────────────── */
 .upgrade-card {
   display: flex;
