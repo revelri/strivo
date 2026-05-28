@@ -215,6 +215,15 @@ const API = {
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/revisions/${encodeURIComponent(revId)}/restore`, { method: "POST" }),
   editorRender: (recordingId) =>
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/render`, { method: "POST" }),
+  vadAnalyze: (recordingId, opts = {}) => {
+    const p = new URLSearchParams();
+    if (opts.window_sec != null) p.set("window_sec", opts.window_sec);
+    if (opts.open_db != null) p.set("open_db", opts.open_db);
+    if (opts.close_db != null) p.set("close_db", opts.close_db);
+    if (opts.min_keep_sec != null) p.set("min_keep_sec", opts.min_keep_sec);
+    const qs = p.toString() ? `?${p.toString()}` : "";
+    return API._fetch(`/plugins/vad/${encodeURIComponent(recordingId)}${qs}`, { method: "POST" });
+  },
   deadairDetect: (recordingId, opts = {}) => {
     const p = new URLSearchParams();
     if (opts.noise_db != null) p.set("noise_db", opts.noise_db);
@@ -5150,6 +5159,7 @@ async function openRecordingInfo(jobId) {
             <button class="sm rec-ed-add-split" type="button">Split at time…</button>
             <button class="sm rec-ed-delete" type="button">Ripple-delete range…</button>
             <button class="sm rec-ed-deadair" type="button" title="Detect dead air (silencedetect) and trim spans longer than 6s">▢ Trim dead air…</button>
+            <button class="sm rec-ed-vad" type="button" title="DAW-style voice gate — hysteresis VAD finds speech runs and ripple-deletes the natural breath gaps">▢ Voice gate…</button>
             <button class="sm rec-ed-branding" type="button" title="Watermark + intro/outro banner overlay applied at render">★ Branding…</button>
             <button class="sm rec-ed-loudness" type="button" title="EBU R128 loudness check + per-platform normalisation target">♪ Loudness…</button>
             <button class="sm rec-ed-history" type="button" title="Revision history — revert across saves (DAW-style undo)">↺ History…</button>
@@ -5335,6 +5345,73 @@ async function openRecordingInfo(jobId) {
             paint();
             Toast.success(`Trimmed ${cuts.length} dead-air span(s) · saved ${fmtClock(totalTrim)}.`);
           }).catch((err) => Toast.error(`Dead-air scan failed: ${err.message}`));
+        });
+        host.querySelector(".rec-ed-vad")?.addEventListener("click", async (e2) => {
+          const vbtn = e2.currentTarget;
+          const promptMin = prompt(
+            "Minimum pause to KEEP between speech (sec) — gaps below this become ripple-deletes.\n" +
+              "Default 1.0; lower = tighter; try 0.3 for podcast pacing.",
+            "1.0",
+          );
+          if (promptMin == null) return;
+          const minKeep = parseFloat(promptMin);
+          if (!isFinite(minKeep) || minKeep < 0) { Toast.error("Invalid min_keep value"); return; }
+          await withBusy(vbtn, "Scanning voice…", async () => {
+            // Cap the window at 1h so a 4h archive doesn't melt the
+            // host; the editor only cares about the section the user is
+            // currently working on.
+            const r = await API.vadAnalyze(jobId, { min_keep_sec: minKeep, window_sec: 3600 });
+            const gaps = r.recommended_gaps || [];
+            const savings = r.total_savings_sec || 0;
+            const intervalCount = (r.voice_intervals || []).length;
+            if (!gaps.length) {
+              Toast.success(`Found ${intervalCount} voice run(s); no gaps above the ${minKeep}s keep threshold to tighten.`);
+              return;
+            }
+            if (!confirm(
+              `Voice gate found ${intervalCount} voice run(s) and ${gaps.length} ripple-delete candidate(s) ` +
+                `(${fmtClock(savings)} of natural silence to remove).\n\n` +
+                `Apply all? Edits are non-destructive — only the EDL changes.`,
+            )) return;
+            // Same descending-order ripple-delete loop the dead-air
+            // path uses — keeps coordinate drift honest.
+            const sorted = [...gaps].sort((a, b) => b.start_sec - a.start_sec);
+            for (const gap of sorted) {
+              const lo = gap.start_sec;
+              const hi = gap.end_sec;
+              let elapsed = 0;
+              const next = [];
+              for (const c of edl.cuts) {
+                const cd = c.end_sec - c.start_sec;
+                const out_lo = elapsed;
+                const out_hi = elapsed + cd;
+                elapsed = out_hi;
+                if (out_hi <= lo || out_lo >= hi) { next.push(c); continue; }
+                if (out_lo >= lo && out_hi <= hi) { continue; }
+                if (out_lo < lo && out_hi <= hi) {
+                  const trim = JSON.parse(JSON.stringify(c));
+                  trim.end_sec = c.start_sec + (lo - out_lo);
+                  next.push(trim);
+                  continue;
+                }
+                if (out_lo >= lo && out_hi > hi) {
+                  const trim = JSON.parse(JSON.stringify(c));
+                  trim.start_sec = c.start_sec + (hi - out_lo);
+                  next.push(trim);
+                  continue;
+                }
+                const left = JSON.parse(JSON.stringify(c));
+                left.end_sec = c.start_sec + (lo - out_lo);
+                const right = JSON.parse(JSON.stringify(c));
+                right.start_sec = c.start_sec + (hi - out_lo);
+                next.push(left, right);
+              }
+              edl.cuts = next.filter((c) => c.end_sec - c.start_sec > 0.001);
+            }
+            await persist("voice gate");
+            paint();
+            Toast.success(`Voice gate · trimmed ${gaps.length} gap(s) · saved ${fmtClock(savings)}.`);
+          }).catch((err) => Toast.error(`Voice-gate scan failed: ${err.message}`));
         });
         host.querySelector(".rec-ed-branding")?.addEventListener("click", async (e2) => {
           const bbtn = e2.currentTarget;
