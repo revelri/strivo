@@ -41,6 +41,7 @@ strivo-pipelines-dag = { path = "../pipelines-dag" }
 strivo-marketplace = { path = "../marketplace" }
 strivo-broll = { path = "../broll" }
 strivo-chat-density = { path = "../chat-density" }
+strivo-deadair = { path = "../deadair" }
 rusqlite = { version = "0.33", features = ["bundled"] }
 
 # HTTP

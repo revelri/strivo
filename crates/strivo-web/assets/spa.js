@@ -183,6 +183,14 @@ const API = {
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}`, { method: "POST", body: edl }),
   editorRender: (recordingId) =>
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/render`, { method: "POST" }),
+  deadairDetect: (recordingId, opts = {}) => {
+    const p = new URLSearchParams();
+    if (opts.noise_db != null) p.set("noise_db", opts.noise_db);
+    if (opts.min_span_secs != null) p.set("min_span_secs", opts.min_span_secs);
+    if (opts.trim_threshold_secs != null) p.set("trim_threshold_secs", opts.trim_threshold_secs);
+    const qs = p.toString() ? `?${p.toString()}` : "";
+    return API._fetch(`/plugins/deadair/${encodeURIComponent(recordingId)}${qs}`, { method: "POST" });
+  },
   viewguardTrend: () => API._fetch("/plugins/viewguard/trend"),
   pipelinesDag: () => API._fetch("/pipelines/dag"),
   marketplaceCatalog: () => API._fetch("/marketplace/catalog"),
@@ -4020,6 +4028,7 @@ async function openRecordingInfo(jobId) {
           <div class="rec-ed-actions">
             <button class="sm rec-ed-add-split" type="button">Split at time…</button>
             <button class="sm rec-ed-delete" type="button">Ripple-delete range…</button>
+            <button class="sm rec-ed-deadair" type="button" title="Detect dead air (silencedetect) and trim spans longer than 6s">▢ Trim dead air…</button>
             <button class="btn-primary rec-ed-render" type="button">⚡ Render to MKV</button>
           </div>
           <div class="rec-ed-list">
@@ -4143,6 +4152,62 @@ async function openRecordingInfo(jobId) {
             await persist();
             paint();
           });
+        });
+        host.querySelector(".rec-ed-deadair")?.addEventListener("click", async (e2) => {
+          const dabtn = e2.currentTarget;
+          await withBusy(dabtn, "Scanning silence…", async () => {
+            const r = await API.deadairDetect(jobId);
+            const cuts = (r.result && r.result.recommended_cuts) || [];
+            const totalTrim = (r.result && r.result.total_trim_secs) || 0;
+            if (!cuts.length) {
+              Toast.success(`No dead-air spans above the trim threshold detected.`);
+              return;
+            }
+            if (!confirm(`Found ${cuts.length} dead-air span(s) totalling ${fmtClock(totalTrim)}.\n\nApply all as ripple-deletes? Edits are non-destructive — only the EDL changes.`)) return;
+            // Apply each cut in DESCENDING order so prior deletes
+            // don't shift later coordinates. The cut times are in
+            // source-file coordinates, but our EDL initially mirrors
+            // the source 1:1, so for the first apply they're
+            // equivalent. After the first cut everything shifts; we
+            // re-fetch the EDL before each subsequent cut to stay
+            // honest about output-time coords.
+            const sorted = [...cuts].sort((a, b) => b.start_sec - a.start_sec);
+            for (const cut of sorted) {
+              const lo = cut.start_sec;
+              const hi = cut.end_sec;
+              let elapsed = 0;
+              const next = [];
+              for (const c of edl.cuts) {
+                const cd = c.end_sec - c.start_sec;
+                const out_lo = elapsed;
+                const out_hi = elapsed + cd;
+                elapsed = out_hi;
+                if (out_hi <= lo || out_lo >= hi) { next.push(c); continue; }
+                if (out_lo >= lo && out_hi <= hi) { continue; }
+                if (out_lo < lo && out_hi <= hi) {
+                  const trim = JSON.parse(JSON.stringify(c));
+                  trim.end_sec = c.start_sec + (lo - out_lo);
+                  next.push(trim);
+                  continue;
+                }
+                if (out_lo >= lo && out_hi > hi) {
+                  const trim = JSON.parse(JSON.stringify(c));
+                  trim.start_sec = c.start_sec + (hi - out_lo);
+                  next.push(trim);
+                  continue;
+                }
+                const left = JSON.parse(JSON.stringify(c));
+                left.end_sec = c.start_sec + (lo - out_lo);
+                const right = JSON.parse(JSON.stringify(c));
+                right.start_sec = c.start_sec + (hi - out_lo);
+                next.push(left, right);
+              }
+              edl.cuts = next.filter((c) => c.end_sec - c.start_sec > 0.001);
+            }
+            await persist();
+            paint();
+            Toast.success(`Trimmed ${cuts.length} dead-air span(s) · saved ${fmtClock(totalTrim)}.`);
+          }).catch((err) => Toast.error(`Dead-air scan failed: ${err.message}`));
         });
         host.querySelector(".rec-ed-render")?.addEventListener("click", async (e2) => {
           const btnR = e2.currentTarget;

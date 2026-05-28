@@ -3973,6 +3973,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strivo-deadair"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "strivo-editor"
 version = "0.3.0"
 dependencies = [
@@ -4115,6 +4124,7 @@ dependencies = [
  "strivo-clipper",
  "strivo-core",
  "strivo-cuepoints",
+ "strivo-deadair",
  "strivo-editor",
  "strivo-heatmap",
  "strivo-insights-compare",

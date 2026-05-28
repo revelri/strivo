@@ -1671,6 +1671,51 @@ async fn chat_density_compute(
     .into_response()
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct DeadairQuery {
+    #[serde(default)]
+    noise_db: Option<f32>,
+    #[serde(default)]
+    min_span_secs: Option<f32>,
+    #[serde(default)]
+    trim_threshold_secs: Option<f32>,
+}
+
+/// `POST /api/v1/plugins/deadair/<recording_id>` — run ffmpeg's
+/// silencedetect filter against the recording and return the span
+/// list + recommended cuts the editor can apply.
+async fn deadair_detect(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+    Query(q): Query<DeadairQuery>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("deadair") { return r; }
+    let input = match resolve_recording_path(&recording_id).await {
+        Ok(p) => p,
+        Err(e) => return Problem::not_found(e).into_response(),
+    };
+    if !input.exists() {
+        return Problem::not_found("recording file missing").into_response();
+    }
+    let noise_db = q.noise_db.unwrap_or(strivo_deadair::DEFAULT_NOISE_DB);
+    let min_span = q.min_span_secs.unwrap_or(strivo_deadair::DEFAULT_MIN_SPAN_SECS);
+    let trim_threshold = q
+        .trim_threshold_secs
+        .unwrap_or(strivo_deadair::DEFAULT_TRIM_THRESHOLD_SECS);
+    match strivo_deadair::detect_silences(&input, noise_db, min_span, trim_threshold) {
+        Ok(r) => Json(json!({
+            "recording_id": recording_id,
+            "result": r,
+        }))
+        .into_response(),
+        Err(e) => Problem::internal(format!("deadair: {e}")).into_response(),
+    }
+}
+
 /// Open a plugin DB read-only. Returns None when the file is absent (plugin
 /// idle) so callers can serve an empty payload.
 fn open_ro(path: &std::path::Path) -> Option<Connection> {
@@ -2402,4 +2447,5 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/viewguard/trend", get(viewguard_trend))
         .route("/api/v1/plugins/broll/{id}", axum::routing::post(broll_suggest))
         .route("/api/v1/plugins/chat-density/{id}", axum::routing::post(chat_density_compute))
+        .route("/api/v1/plugins/deadair/{id}", axum::routing::post(deadair_detect))
 }
