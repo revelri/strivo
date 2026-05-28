@@ -122,6 +122,18 @@ const API = {
   scheduleAdd: (body) => API._fetch("/schedule", { method: "POST", body }),
   scheduleDelete: (index) =>
     API._fetch(`/schedule/${encodeURIComponent(index)}`, { method: "DELETE" }),
+  // Monitor (record-when-live + auto-download new uploads).
+  monitor: () => API._fetch("/monitor"),
+  setArchiverTandem: (key, enabled) =>
+    API._fetch(`/channels/${encodeURIComponent(key)}/archiver_tandem`, {
+      method: "PUT",
+      body: { enabled },
+    }),
+  setArchiverPlaylists: (key, playlists) =>
+    API._fetch(`/channels/${encodeURIComponent(key)}/archiver_playlists`, {
+      method: "PUT",
+      body: { playlists },
+    }),
   patreonPull: (body) =>
     API._fetch("/patreon/pull", { method: "POST", body }),
   vodDownload: (body) =>
@@ -466,7 +478,7 @@ async function render() {
 const TOPNAV = [
   ["library", "▣", "Home", "l", "/assets/icons/candy/home.svg"],
   ["recordings", "📁", "Recordings", "r", "/assets/icons/candy/recordings.svg"],
-  ["schedule", "📅", "Schedule", "s", "/assets/icons/candy/schedule.svg"],
+  ["schedule", "📅", "Monitor", "s", "/assets/icons/candy/schedule.svg"],
   // Pipelines stays in ROUTES (deep-linkable) but is dropped from the
   // topnav until plugins actually submit DAGs over IPC — surfacing a
   // permanently-empty tab is worse than no tab (audit U4).
@@ -4219,6 +4231,219 @@ function dayBucket(d) {
 }
 
 async function renderSchedule() {
+  // Page lives at #/schedule for back-compat with bookmarks, but is now
+  // the Monitor page — record-when-live and auto-download new uploads
+  // replace the cron form that 95% of users found foreign. (Power users
+  // can still add cron entries via config.toml's [[schedule]] table;
+  // they show up in the "Cron schedule" group below when present.)
+  let monitor = { auto_record: [], auto_download: [] };
+  let channels = [];
+  let cronEntries = [];
+  try {
+    const [m, c, s] = await Promise.all([
+      API.monitor().catch(() => ({ auto_record: [], auto_download: [] })),
+      API.channels().then((r) => r.channels || []).catch(() => []),
+      API.schedule().then((r) => r.schedule || []).catch(() => []),
+    ]);
+    monitor = m;
+    channels = c;
+    cronEntries = s;
+  } catch (_) {}
+  root.removeAttribute("aria-busy");
+
+  // Build a channel lookup so we can show display_name + platform.
+  const channelByKey = new Map(
+    channels.map((c) => [`${c.platform}:${c.id}`, c]),
+  );
+  const channelByName = new Map(
+    channels.map((c) => [(c.display_name || c.name || "").toLowerCase(), c]),
+  );
+  const channelsAvailableForDownload = channels.filter(
+    (c) => c.platform === "YouTube",
+  );
+
+  // Section 1 — record when live (existing auto-record list).
+  const recordRows = monitor.auto_record
+    .map(
+      (e) => `
+    <div class="task-row">
+      <div class="task-info">
+        <span class="task-name">${escape(e.channel_name || e.channel_id)} <span class="mon-plat plat-${escape(e.platform.toLowerCase())}">${escape(e.platform)}</span></span>
+        <span class="task-cadence">${escape(e.key)}</span>
+      </div>
+      <button class="sm mon-rec-rm" data-key="${escape(e.key)}" title="Stop auto-recording this channel">✕</button>
+    </div>`,
+    )
+    .join("");
+
+  // Section 2 — auto-download new uploads (YouTube only).
+  const downloadRows = monitor.auto_download
+    .map((e) => {
+      const ch = channelByKey.get(e.key);
+      const name = ch ? (ch.display_name || ch.name) : e.channel_id;
+      const playlistsValue = (e.playlists || []).join(", ");
+      return `
+      <div class="task-row mon-dl-row">
+        <div class="task-info">
+          <span class="task-name">${escape(name)} <span class="mon-plat plat-${escape(e.platform.toLowerCase())}">${escape(e.platform)}</span></span>
+          <span class="task-cadence">
+            <label class="mon-scope">
+              <span>Limit to playlists (optional, comma-separated)</span>
+              <input class="mon-playlists" type="text" data-key="${escape(e.key)}"
+                     placeholder="PLxxx, PLyyy — leave empty for whole channel"
+                     value="${escape(playlistsValue)}" />
+            </label>
+          </span>
+        </div>
+        <button class="sm mon-dl-rm" data-key="${escape(e.key)}" title="Stop auto-downloading uploads from this channel">✕</button>
+      </div>`;
+    })
+    .join("");
+
+  // Cron schedule section — kept for power users who already use it,
+  // collapsed by default. Empty unless config.toml has entries.
+  const cronGroup = cronEntries.length
+    ? `<details class="mon-cron"><summary>Advanced cron schedule (${cronEntries.length})</summary>
+        ${cronEntries
+          .map(
+            (e, i) => `
+          <div class="task-row">
+            <div class="task-info">
+              <span class="task-name">${escape(e.channel || "scheduled")}</span>
+              <span class="task-cadence"><code>${escape(e.cron || "")}</code>${e.duration ? ` · ${escape(e.duration)}` : ""}${e.next_fire ? ` · next: ${escape(new Date(e.next_fire).toLocaleString())}` : ""}</span>
+            </div>
+            <button class="sm sch-del" data-i="${i}" title="Delete this cron entry">✕</button>
+          </div>`,
+          )
+          .join("")}
+        <p class="mon-cron-hint">Cron entries are added via <code>~/.config/strivo/config.toml</code> under <code>[[schedule]]</code>. They fire at the cron expression's next match regardless of live state — useful for predictable shows on platforms without a live API. Most users want the simpler primitives above.</p>
+      </details>`
+    : "";
+
+  // Get-channel-name helper for the Add forms — match by case-insensitive
+  // display name, fall back to "Platform:id" parsing.
+  const resolveChannelKey = (raw) => {
+    const t = raw.trim();
+    if (!t) return null;
+    if (t.includes(":")) return t;
+    const c = channelByName.get(t.toLowerCase());
+    return c ? `${c.platform}:${c.id}` : null;
+  };
+
+  root.innerHTML = chrome(`
+    <h1 class="page-title">Monitor</h1>
+    <p class="page-subtitle">Channels StriVo is watching. Record live broadcasts as they happen, or auto-download new YouTube uploads.</p>
+
+    <section class="cfg-card">
+      <h2 class="cfg-title">Record when live</h2>
+      <p class="mon-help">Twitch and YouTube live broadcasts capture automatically. Add channels from the topbar's <em>+ Add channel</em>, then enable Auto-record on the channel card.</p>
+      ${recordRows || '<div class="empty sm">No channels are set to record-when-live yet.</div>'}
+    </section>
+
+    <section class="cfg-card">
+      <h2 class="cfg-title">Auto-download new uploads</h2>
+      <p class="mon-help">Pulls new uploads from a YouTube channel as the monitor sees them. Leave the playlist field empty for the whole channel, or paste one or more playlist IDs to limit scope.</p>
+      ${downloadRows || '<div class="empty sm">No channels are set to auto-download yet.</div>'}
+      <form id="mon-dl-add" class="mon-add">
+        <select id="mon-dl-channel">
+          <option value="">Pick a YouTube channel…</option>
+          ${channelsAvailableForDownload
+            .map((c) => `<option value="${escape(`${c.platform}:${c.id}`)}">${escape(c.display_name || c.name)}</option>`)
+            .join("")}
+        </select>
+        <button class="btn-primary" type="submit">Enable</button>
+      </form>
+    </section>
+
+    ${cronGroup}
+  `);
+  setupChromeHandlers();
+
+  // Record-when-live row delete.
+  document.querySelectorAll(".mon-rec-rm").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Stop auto-recording this channel?")) return;
+      try {
+        await API.toggleAutoRecord(btn.dataset.key, false);
+        Toast.success("Stopped");
+        renderSchedule();
+      } catch (e) {
+        Toast.error(`Couldn't stop: ${e.message}`);
+      }
+    });
+  });
+
+  // Auto-download row delete + playlist edits.
+  document.querySelectorAll(".mon-dl-rm").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Stop auto-downloading new uploads from this channel?")) return;
+      try {
+        await API.setArchiverTandem(btn.dataset.key, false);
+        Toast.success("Stopped");
+        renderSchedule();
+      } catch (e) {
+        Toast.error(`Couldn't stop: ${e.message}`);
+      }
+    });
+  });
+  // Debounced save on playlist field changes — split on comma/space.
+  document.querySelectorAll(".mon-playlists").forEach((inp) => {
+    let timer;
+    inp.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const key = inp.dataset.key;
+        const playlists = inp.value
+          .split(/[\s,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+        try {
+          await API.setArchiverPlaylists(key, playlists);
+          Toast.success("Playlists saved");
+        } catch (e) {
+          Toast.error(`Couldn't save: ${e.message}`);
+        }
+      }, 600);
+    });
+  });
+
+  // Add new auto-download channel.
+  document.getElementById("mon-dl-add")?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const key = document.getElementById("mon-dl-channel").value;
+    if (!key) return;
+    try {
+      await API.setArchiverTandem(key, true);
+      Toast.success("Enabled");
+      renderSchedule();
+    } catch (err) {
+      Toast.error(`Couldn't enable: ${err.message}`);
+    }
+  });
+  // Cron entry delete (still works for power users).
+  document.querySelectorAll(".sch-del").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const i = parseInt(btn.dataset.i, 10);
+      if (!confirm("Delete this cron entry?")) return;
+      try {
+        await API.scheduleDelete(i);
+        Toast.success("Removed");
+        renderSchedule();
+      } catch (err) {
+        Toast.error(`Couldn't delete: ${err.message}`);
+      }
+    });
+  });
+  // Silence the unused channel-lookup helper warning when no channels
+  // happen to be queried — kept for future quick-add by name.
+  void resolveChannelKey;
+}
+
+// Legacy cron-form renderer retained for ref but unused — kept as a
+// no-op to avoid breaking any externally-cached bookmarks of the old
+// shape. Power users still add cron entries via config.toml.
+// eslint-disable-next-line no-unused-vars
+async function _renderSchedule_legacy_cron_unused() {
   let entries = [];
   try {
     const r = await API.schedule();

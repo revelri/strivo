@@ -1654,6 +1654,144 @@ async fn put_auto_record(
         .into_response()
 }
 
+#[derive(Debug, Deserialize)]
+struct TandemPayload {
+    enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct TandemPlaylistsPayload {
+    /// Per-key entries the user wants captured. Empty string at the end
+    /// is dropped; duplicates de-duped server-side.
+    playlists: Vec<String>,
+}
+
+/// `PUT /api/v1/channels/<channel_key>/archiver_tandem` — toggle
+/// archiver tandem mode for the given Platform:channel_id key. When
+/// enabled, the daemon auto-downloads new uploads as the monitor
+/// discovers them.
+async fn put_archiver_tandem(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(channel_key): Path<String>,
+    Json(body): Json<TandemPayload>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let mut cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+    let already_in = cfg.archiver.tandem_channels.iter().any(|c| c == &channel_key);
+    match (body.enabled, already_in) {
+        (true, false) => cfg.archiver.tandem_channels.push(channel_key.clone()),
+        (false, true) => cfg.archiver.tandem_channels.retain(|c| c != &channel_key),
+        _ => {}
+    }
+    let path = cfg.config_path.clone();
+    if let Err(e) = cfg.save(path.as_deref()) {
+        return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+    }
+    (StatusCode::OK, Json(json!({"ok": true, "enabled": body.enabled}))).into_response()
+}
+
+/// `PUT /api/v1/channels/<channel_key>/archiver_playlists` — set the
+/// playlist allow-list for a YouTube channel under archiver tandem.
+/// Empty list = whole channel. Channel-level archiver tandem is
+/// independent; this just narrows the scope.
+async fn put_archiver_playlists(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(channel_key): Path<String>,
+    Json(body): Json<TandemPlaylistsPayload>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let mut cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+    // Strip the existing entries for this channel, then push the new
+    // set with the channel_key prefix. Format: "Platform:channel_id/<playlist>".
+    cfg.archiver
+        .tandem_playlists
+        .retain(|p| !p.starts_with(&format!("{channel_key}/")));
+    let mut seen = std::collections::HashSet::new();
+    for raw in body.playlists.into_iter() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let entry = format!("{channel_key}/{trimmed}");
+        if seen.insert(entry.clone()) {
+            cfg.archiver.tandem_playlists.push(entry);
+        }
+    }
+    let path = cfg.config_path.clone();
+    if let Err(e) = cfg.save(path.as_deref()) {
+        return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+    }
+    Json(json!({ "ok": true })).into_response()
+}
+
+/// `GET /api/v1/monitor` — unified view for the Monitor page. Returns
+/// every channel currently set to record-when-live, every channel
+/// flagged for archiver tandem download, and the per-channel playlist
+/// allow-lists.
+async fn monitor_state(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+    let auto_record: Vec<serde_json::Value> = cfg
+        .auto_record_channels
+        .iter()
+        .map(|c| {
+            json!({
+                "platform": c.platform,
+                "channel_id": c.channel_id,
+                "channel_name": c.channel_name,
+                "key": format!("{}:{}", c.platform, c.channel_id),
+            })
+        })
+        .collect();
+    // Pivot tandem_playlists from "Key/Playlist" back to per-channel
+    // lists so the SPA can render them grouped.
+    let mut tandem: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for raw in &cfg.archiver.tandem_playlists {
+        if let Some((key, pl)) = raw.split_once('/') {
+            tandem.entry(key.to_string()).or_default().push(pl.to_string());
+        }
+    }
+    let auto_download: Vec<serde_json::Value> = cfg
+        .archiver
+        .tandem_channels
+        .iter()
+        .map(|key| {
+            let (platform, channel_id) = key.split_once(':').unwrap_or((key.as_str(), ""));
+            json!({
+                "platform": platform,
+                "channel_id": channel_id,
+                "key": key,
+                "playlists": tandem.get(key).cloned().unwrap_or_default(),
+            })
+        })
+        .collect();
+    Json(json!({
+        "auto_record": auto_record,
+        "auto_download": auto_download,
+    }))
+    .into_response()
+}
+
 // ── W2: plugin RPC ───────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, Default)]
@@ -1937,6 +2075,15 @@ pub fn router() -> Router<AppState> {
             "/api/v1/channels/{channel_key}/auto_record",
             put(put_auto_record),
         )
+        .route(
+            "/api/v1/channels/{channel_key}/archiver_tandem",
+            put(put_archiver_tandem),
+        )
+        .route(
+            "/api/v1/channels/{channel_key}/archiver_playlists",
+            put(put_archiver_playlists),
+        )
+        .route("/api/v1/monitor", get(monitor_state))
         .route("/api/v1/plugins/{plugin}/{verb}", post(plugin_rpc))
         // W5: stream-recorder surfaces
         .route("/api/v1/storage", get(storage))
