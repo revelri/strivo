@@ -2958,6 +2958,11 @@ function wirePlayer(overlay, v) {
   v.addEventListener("loadedmetadata", () => {
     dur.textContent = fmtClock(v.duration || 0);
     seek.max = Math.max(1, Math.floor(v.duration * 10));
+    // Audio-only files have 0×0 video boxes — collapse the 16:9 stage so
+    // the player isn't a giant black rectangle, and hide PiP + fullscreen
+    // (PiP throws on a no-video-track stream; fullscreen is pointless).
+    const audioOnly = !v.videoWidth && !v.videoHeight;
+    overlay.classList.toggle("audio-only", audioOnly);
   });
   v.addEventListener("timeupdate", () => {
     cur.textContent = fmtClock(v.currentTime || 0);

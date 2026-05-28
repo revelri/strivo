@@ -1856,6 +1856,30 @@ body.modal-open { overflow: hidden; }
   position: fixed;
 }
 
+/* Audio-only files — JS toggles `.audio-only` on the modal overlay when
+ * <video>'s loadedmetadata fires with 0×0 dimensions. Collapse the 16:9
+ * stage, render a static "♪ Audio" placeholder, hide PiP + fullscreen
+ * (PiP throws on no-video-track streams; fullscreen is pointless). */
+.modal-overlay.audio-only .rec-player-stage {
+  aspect-ratio: auto;
+  height: 96px;
+}
+.modal-overlay.audio-only .rec-player-stage::before {
+  content: "♪ Audio";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--accent2);
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.15em;
+  pointer-events: none;
+}
+.modal-overlay.audio-only video { width: 100%; height: 100%; }
+.modal-overlay.audio-only #rec-pc-pip,
+.modal-overlay.audio-only #rec-pc-fs { display: none; }
+
 /* Control bar. */
 .rec-player-controls {
   display: flex;
