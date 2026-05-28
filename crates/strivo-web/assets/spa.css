@@ -3777,3 +3777,74 @@ body.modal-open { overflow: hidden; }
   transition: width 0.2s ease;
 }
 .mon-disk-meta { font-size: 0.78em; opacity: 0.7; }
+
+/* Pipelines page — nodes now clickable (a-tag); add hover affordance.
+ * Per-pipeline header carries readiness chip + "Run on…" CTA. */
+.pl-node {
+  text-decoration: none;
+  cursor: pointer;
+  display: block;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.pl-node:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 12px rgba(110,86,207,0.35);
+}
+.pl-pipe-head {
+  display: flex; justify-content: space-between; align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.pl-pipe-actions { display: inline-flex; gap: 0.5rem; align-items: center; }
+.pl-pipe-readiness {
+  padding: 0.15rem 0.55rem;
+  font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase;
+  border-radius: 999px;
+  background: rgba(78,201,176,0.18);
+  color: var(--accent2);
+}
+.pl-pipe-readiness.partial {
+  background: rgba(245,158,11,0.18);
+  color: hsl(35, 80%, 65%);
+}
+.pl-pipe-bar {
+  height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.08);
+  margin: 0.35rem 0 0.75rem;
+  overflow: hidden;
+}
+.pl-pipe-bar > span {
+  display: block; height: 100%;
+  background: linear-gradient(90deg, var(--brand, #6e56cf), var(--accent2));
+  transition: width 0.25s ease;
+}
+.pl-run-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Recording picker overlay for the pipeline Run-on CTA. */
+.pl-picker-card { padding: 1.1rem 1.2rem; max-width: 640px; }
+.pl-picker-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 0.3rem;
+}
+.pl-picker-head h2 { margin: 0; font-size: 1.05em; }
+.pl-picker-list {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  margin-top: 0.6rem;
+  max-height: 60vh; overflow-y: auto;
+}
+.pl-picker-row {
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  gap: 0.6rem;
+  padding: 0.45rem 0.7rem;
+  background: rgba(0,0,0,0.25);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.pl-picker-row:hover { background: rgba(110,86,207,0.15); }
+.pl-picker-channel { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-picker-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-picker-meta { font-size: 0.78em; opacity: 0.7; }

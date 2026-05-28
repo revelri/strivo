@@ -2732,13 +2732,28 @@ function renderGantt(items) {
 }
 
 // ── Pipelines (W5 — read PluginRpc dispatch state from daemon) ────────
+// Plugins that have a dedicated SPA sub-route. Clicking a node routes
+// there; everything else goes to the plugin hub so users land on the
+// catalog entry.
+const PIPELINE_NODE_ROUTES = new Set([
+  "crunchr", "archiver", "viewguard", "insights",
+]);
+
 async function renderPipelines() {
   let payload = { pipelines: [] };
+  let recs = { recordings: [] };
   try {
-    payload = await API.pipelinesDag();
+    [payload, recs] = await Promise.all([
+      API.pipelinesDag(),
+      API.recordings().catch(() => ({ recordings: [] })),
+    ]);
   } catch (_) {}
   root.removeAttribute("aria-busy");
   const pipelines = payload.pipelines || [];
+  // Cache finished recordings so the Run-on-… picker can list them.
+  const finishedRecs = (recs.recordings || [])
+    .filter((r) => stateClassName(r.state) === "finished" && r.file_exists !== false)
+    .sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
 
   const flow = (pipe) => {
     // Layout the nodes left→right by the topological order the server
@@ -2759,13 +2774,22 @@ async function renderPipelines() {
       const consumes = (node.consumes || [])
         .map((c) => `<span class="pl-cap pl-cap-consumes">${escape(c.replace(/_/g, " "))}</span>`)
         .join("");
-      cells.push(`<div class="pl-node ${statusClass}" title="${escape(node.blurb)}">
+      // Every node is a clickable anchor — routes to the plugin's own
+      // sub-page when one exists, else to the plugin-hub catalog. The
+      // hub upsell card (iter 26) handles the Pro-gate UX without us
+      // having to know entitlement here.
+      const href = PIPELINE_NODE_ROUTES.has(node.id)
+        ? `#/plugins/${node.id}`
+        : `#/plugins`;
+      cells.push(`<a class="pl-node ${statusClass}" href="${escape(href)}"
+          title="${escape(node.blurb)} · click to open ${escape(node.label)}"
+          data-plugin="${escape(node.id)}">
           <div class="pl-node-head">
             <span class="pl-node-label">${escape(node.label)}</span>
             <span class="pl-node-status">${escape(node.status)}</span>
           </div>
           <div class="pl-node-caps">${consumes}${produces}</div>
-        </div>`);
+        </a>`);
       const next = order[i + 1];
       if (next) {
         const eRec = edgeBetween(node.id, next);
@@ -2781,23 +2805,88 @@ async function renderPipelines() {
   };
 
   const cards = pipelines
-    .map(
-      (p) => `
+    .map((p, idx) => {
+      const totalNodes = (p.nodes || []).length;
+      const availNodes = (p.nodes || []).filter((n) => n.status === "available").length;
+      const pct = totalNodes === 0 ? 0 : Math.round((availNodes / totalNodes) * 100);
+      return `
     <section class="cfg-card pl-pipe-card">
-      <h2 class="cfg-title">${escape(p.name)} <span class="pg-cap-hint">${escape(p.description)}</span></h2>
+      <header class="pl-pipe-head">
+        <h2 class="cfg-title">${escape(p.name)} <span class="pg-cap-hint">${escape(p.description)}</span></h2>
+        <div class="pl-pipe-actions">
+          <span class="pl-pipe-readiness ${pct === 100 ? "complete" : "partial"}"
+                title="${availNodes} of ${totalNodes} stages available">
+            ${availNodes}/${totalNodes} ready
+          </span>
+          <button class="sm pl-run-btn" data-pipe="${idx}"
+                  ${finishedRecs.length === 0 ? "disabled title=\"No finished recordings available yet\"" : ""}>
+            ▶ Run on…
+          </button>
+        </div>
+      </header>
+      <div class="pl-pipe-bar"><span style="width:${pct}%"></span></div>
       <div class="pl-flow">${flow(p)}</div>
-    </section>`,
-    )
+    </section>`;
+    })
     .join("");
 
   root.innerHTML = chrome(`
     <h1 class="page-title">Pipelines</h1>
     <p class="page-subtitle">
       Cross-plugin pipelines. Every artefact the DAW-vision toolkit ships rides one of these chains.
+      Click any node to open the plugin · "Run on…" picks a recording and opens it in the appropriate view.
     </p>
     ${cards || '<div class="empty">No pipelines defined.</div>'}
   `);
   setupChromeHandlers();
+
+  // Run-on-… picker: small overlay listing the 12 most recent finished
+  // recordings. On pick we open the Info modal — that surface already
+  // mounts every per-capability run button (Generate subtitles,
+  // Detect cuepoints, Generate chapters, Render EDL, …), so each
+  // pipeline-card's CTA reaches the right surface without us having to
+  // model 'run pipeline' as a single server call.
+  document.querySelectorAll(".pl-run-btn[data-pipe]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      openRecordingPickerForPipeline(pipelines[parseInt(btn.dataset.pipe, 10)], finishedRecs);
+    });
+  });
+}
+
+function openRecordingPickerForPipeline(pipe, recs) {
+  if (!recs.length) return;
+  const overlay = ensureModalContainer("pl-run-picker");
+  overlay.innerHTML = `
+    <div class="modal-card pl-picker-card">
+      <header class="pl-picker-head">
+        <h2>Run "${escape(pipe.name)}" on a recording</h2>
+        <button class="modal-close" data-action="modal-close" aria-label="Close">✕</button>
+      </header>
+      <p class="pg-cap-hint">Pick a recording. Its Info panel surfaces a button for every stage's plugin — we open straight to it so you can fire the chain.</p>
+      <div class="pl-picker-list">
+        ${recs.slice(0, 12).map((r) => `
+          <button class="pl-picker-row" data-job-id="${escape(r.id)}" type="button">
+            <span class="pl-picker-channel">${escape(r.channel_name || "(channel)")}</span>
+            <span class="pl-picker-title">${escape(niceTitle(r.stream_title) || "(no title)")}</span>
+            <span class="pl-picker-meta">${escape(new Date(r.started_at).toLocaleDateString())} · ${formatBytes(r.bytes_written || 0)}</span>
+          </button>`).join("")}
+      </div>
+    </div>`;
+  document.body.classList.add("modal-open");
+  const close = () => {
+    overlay.remove();
+    document.body.classList.remove("modal-open");
+  };
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+  overlay.querySelector("[data-action=modal-close]").addEventListener("click", close);
+  overlay.querySelectorAll(".pl-picker-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      const id = row.dataset.jobId;
+      close();
+      openRecordingInfo(id);
+    });
+  });
 }
 
 // ── Plugins (W5 — mirror the TUI's Shift+P browser) ────────────────────
