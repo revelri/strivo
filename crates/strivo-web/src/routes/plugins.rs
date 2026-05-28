@@ -349,6 +349,223 @@ fn sanitize_stem(raw: &str) -> String {
     }
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct ThumbsPayload {
+    /// Source of timestamps to sample at. "cuepoints" reuses the
+    /// existing cuepoint set; "even" walks the recording at
+    /// `interval_secs` boundaries; "list" takes an explicit list.
+    #[serde(default = "default_thumb_source")]
+    source: String,
+    #[serde(default)]
+    times: Vec<f32>,
+    #[serde(default)]
+    interval_secs: Option<f32>,
+    #[serde(default)]
+    facecam: Option<strivo_thumbnails::FacecamCorner>,
+}
+
+fn default_thumb_source() -> String {
+    "cuepoints".to_string()
+}
+
+/// `POST /api/v1/plugins/thumbnails/<recording_id>` — generate thumbnail
+/// candidates. Source = cuepoints / even / explicit-list; optional
+/// facecam corner emits a 9:16 vertical crop per pick.
+async fn thumbnails_generate(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+    Json(body): Json<ThumbsPayload>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("thumbnails") { return r; }
+    let input = match resolve_recording_path(&recording_id).await {
+        Ok(p) => p,
+        Err(e) => return Problem::not_found(e).into_response(),
+    };
+    if !input.exists() {
+        return Problem::not_found("recording file missing").into_response();
+    }
+    // Build the timestamp list.
+    let timestamps: Vec<f32> = match body.source.as_str() {
+        "list" => body.times.clone(),
+        "even" => {
+            let interval = body.interval_secs.unwrap_or(600.0).max(15.0);
+            // ffprobe duration to know how far to walk.
+            let duration = probe_duration(&input).unwrap_or(3600.0);
+            let mut out = Vec::new();
+            let mut t = 0.0_f32;
+            while t < duration {
+                out.push(t);
+                t += interval;
+            }
+            out
+        }
+        _ /* "cuepoints" */ => {
+            let cp_path = strivo_core::config::AppConfig::data_dir()
+                .join("plugins")
+                .join("cuepoints")
+                .join("cuepoints.db");
+            let store = strivo_cuepoints::store::CuepointsStore::open(&cp_path).ok();
+            let cps = store
+                .and_then(|s| s.load(&recording_id, strivo_cuepoints::DEFAULT_THRESHOLD).ok().flatten())
+                .unwrap_or_default();
+            if cps.is_empty() {
+                // Fall back to a handful of even samples so the user gets *something*.
+                let duration = probe_duration(&input).unwrap_or(3600.0);
+                let n = 8;
+                (0..n).map(|i| duration * (i as f32 + 0.5) / n as f32).collect()
+            } else {
+                cps.iter().map(|c| c.time_sec).collect()
+            }
+        }
+    };
+    // Cap to a sensible upper bound — running ffmpeg 200 times stalls
+    // the UI thread. SPA can request a smaller batch if it wants more.
+    let timestamps: Vec<f32> = timestamps.into_iter().take(24).collect();
+    if timestamps.is_empty() {
+        return Problem::bad_request("no timestamps to sample").into_response();
+    }
+    // ffprobe resolution for cropping.
+    let (w, h) = probe_resolution(&input).unwrap_or((1920, 1080));
+
+    let out_dir = strivo_core::config::AppConfig::data_dir()
+        .join("plugins")
+        .join("thumbnails")
+        .join(&recording_id);
+    let stem = "candidate";
+    let opts = strivo_thumbnails::GenerateOptions {
+        timestamps,
+        out_dir,
+        stem: stem.to_string(),
+        facecam: body.facecam,
+    };
+    let result = match strivo_thumbnails::generate_candidates(&input, (w, h), &opts, &recording_id) {
+        Ok(r) => r,
+        Err(e) => return Problem::internal(format!("thumbnails: {e}")).into_response(),
+    };
+
+    let store_path = strivo_core::config::AppConfig::data_dir()
+        .join("plugins")
+        .join("thumbnails")
+        .join("thumbnails.db");
+    if let Ok(store) = strivo_thumbnails::store::ThumbnailsStore::open(&store_path) {
+        let _ = store.save(&recording_id, stem, &result.candidates);
+    }
+    Json(json!({
+        "recording_id": recording_id,
+        "candidates": result.candidates,
+    }))
+    .into_response()
+}
+
+/// Shell out to ffprobe for the duration in seconds.
+fn probe_duration(input: &std::path::Path) -> Option<f32> {
+    let out = std::process::Command::new("ffprobe")
+        .args([
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+        ])
+        .arg(input)
+        .output()
+        .ok()?;
+    let s = String::from_utf8(out.stdout).ok()?;
+    s.trim().parse().ok()
+}
+
+/// Shell out to ffprobe for the video resolution.
+fn probe_resolution(input: &std::path::Path) -> Option<(u32, u32)> {
+    let out = std::process::Command::new("ffprobe")
+        .args([
+            "-v", "error",
+            "-select_streams", "v:0",
+            "-show_entries", "stream=width,height",
+            "-of", "csv=p=0",
+        ])
+        .arg(input)
+        .output()
+        .ok()?;
+    let s = String::from_utf8(out.stdout).ok()?;
+    let parts: Vec<&str> = s.trim().split(',').collect();
+    if parts.len() == 2 {
+        Some((parts[0].parse().ok()?, parts[1].parse().ok()?))
+    } else {
+        None
+    }
+}
+
+/// `GET /api/v1/plugins/thumbnails/<recording_id>/<stem>` — list the
+/// cached candidate set so a page reload doesn't lose state.
+async fn thumbnails_list(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path((recording_id, stem)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("thumbnails") { return r; }
+    let store_path = strivo_core::config::AppConfig::data_dir()
+        .join("plugins")
+        .join("thumbnails")
+        .join("thumbnails.db");
+    let store = match strivo_thumbnails::store::ThumbnailsStore::open(&store_path) {
+        Ok(s) => s,
+        Err(_) => return Json(json!({ "candidates": [] })).into_response(),
+    };
+    let candidates = store.load(&recording_id, &stem).ok().flatten().unwrap_or_default();
+    Json(json!({ "candidates": candidates })).into_response()
+}
+
+/// `GET /api/v1/plugins/thumbnails/file?p=<absolute_path>` — serve a
+/// generated thumbnail file. We refuse anything outside the
+/// thumbnails data dir so the route can't be used as a generic
+/// file-read.
+async fn thumbnails_serve_file(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Query(q): Query<ThumbFilePayload>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("thumbnails") { return r; }
+    let root = strivo_core::config::AppConfig::data_dir()
+        .join("plugins")
+        .join("thumbnails");
+    let path = std::path::PathBuf::from(&q.p);
+    // Canonicalise both so symlinks can't escape.
+    let canon_root = match root.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return Problem::internal("thumb root").into_response(),
+    };
+    let canon_path = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return Problem::not_found("thumb").into_response(),
+    };
+    if !canon_path.starts_with(&canon_root) {
+        return Problem::bad_request("path outside thumbnails dir").into_response();
+    }
+    let body = match std::fs::read(&canon_path) {
+        Ok(b) => b,
+        Err(_) => return Problem::not_found("thumb").into_response(),
+    };
+    let mime = if canon_path.extension().and_then(|e| e.to_str()) == Some("jpg") {
+        "image/jpeg"
+    } else {
+        "application/octet-stream"
+    };
+    ([(axum::http::header::CONTENT_TYPE, mime)], body).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct ThumbFilePayload {
+    p: String,
+}
+
 /// Open a plugin DB read-only. Returns None when the file is absent (plugin
 /// idle) so callers can serve an empty payload.
 fn open_ro(path: &std::path::Path) -> Option<Connection> {
@@ -1062,4 +1279,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/clipper/{id}/analyze", axum::routing::post(clipper_analyze))
         .route("/api/v1/plugins/clipper/{id}/extract", axum::routing::post(clipper_extract))
         .route("/api/v1/plugins/clipper/{id}/clips", get(clipper_list_clips))
+        .route("/api/v1/plugins/thumbnails/{id}", axum::routing::post(thumbnails_generate))
+        .route("/api/v1/plugins/thumbnails/{id}/{stem}", get(thumbnails_list))
+        .route("/api/v1/plugins/thumbnails/file", get(thumbnails_serve_file))
 }

@@ -3950,6 +3950,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "strivo-thumbnails"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "rusqlite",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "strivo-web"
 version = "0.3.0"
 dependencies = [
@@ -3976,6 +3987,7 @@ dependencies = [
  "strivo-core",
  "strivo-cuepoints",
  "strivo-plugins",
+ "strivo-thumbnails",
  "tempfile",
  "tokio",
  "tokio-util",

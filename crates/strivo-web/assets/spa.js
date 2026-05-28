@@ -149,6 +149,12 @@ const API = {
     }),
   clipperListClips: (recordingId) =>
     API._fetch(`/plugins/clipper/${encodeURIComponent(recordingId)}/clips`),
+  thumbnailsGenerate: (recordingId, body) =>
+    API._fetch(`/plugins/thumbnails/${encodeURIComponent(recordingId)}`, { method: "POST", body }),
+  thumbnailsList: (recordingId, stem = "candidate") =>
+    API._fetch(`/plugins/thumbnails/${encodeURIComponent(recordingId)}/${encodeURIComponent(stem)}`),
+  thumbnailFileUrl: (absPath) =>
+    `/api/v1/plugins/thumbnails/file?p=${encodeURIComponent(absPath)}`,
   patreonPull: (body) =>
     API._fetch("/patreon/pull", { method: "POST", body }),
   vodDownload: (body) =>
@@ -3369,8 +3375,10 @@ async function openRecordingInfo(jobId) {
       <div class="rec-info-verbs">${actionsHtml}</div>
       ${isFinished ? `<button class="sm rec-info-cuepoints-btn" data-action="rec-info-cuepoints" title="Scene-change cuepoints (ffmpeg full pass)">⌶ Detect scene changes</button>` : ""}
       ${isFinished ? `<button class="sm rec-info-clipper-btn" data-action="rec-info-clipper" title="Mine highlight candidates (uses cuepoints; runs ffmpeg pass if needed)">★ Find highlights</button>` : ""}
+      ${isFinished ? `<button class="sm rec-info-thumbs-btn" data-action="rec-info-thumbs" title="Sample candidate thumbnail frames at cuepoints / highlights">▥ Pick thumbnail</button>` : ""}
       <div class="rec-cuepoints" id="rec-cuepoints" hidden></div>
       <div class="rec-clipper" id="rec-clipper" hidden></div>
+      <div class="rec-thumbs" id="rec-thumbs" hidden></div>
     </section>
     <footer class="rec-info-foot">
       ${isFinished ? `<button class="primary" data-action="rec-info-play">▶ Open in player</button>` : ""}
@@ -3486,6 +3494,47 @@ async function openRecordingInfo(jobId) {
       });
       Toast.success(`Found ${highlights.length} highlight candidate(s)`);
     }).catch((err) => Toast.error(`Highlights failed: ${err.message}`));
+  });
+
+  overlay.querySelector("[data-action=rec-info-thumbs]")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    await withBusy(btn, "Sampling…", async () => {
+      const resp = await API.thumbnailsGenerate(jobId, {
+        source: "cuepoints",
+        facecam: "top_right",
+      });
+      const host = document.getElementById("rec-thumbs");
+      if (!host) return;
+      host.hidden = false;
+      const candidates = resp.candidates || [];
+      if (!candidates.length) {
+        host.innerHTML = '<div class="empty sm">No thumbnail candidates generated.</div>';
+        return;
+      }
+      host.innerHTML = `
+        <h4 class="rec-cp-title">${candidates.length} thumbnail candidate${candidates.length === 1 ? "" : "s"} <span class="pg-cap-hint">ranked by saliency</span></h4>
+        <div class="rec-thumbs-grid">
+          ${candidates
+            .map(
+              (c, i) =>
+                `<figure class="rec-thumb-card" data-i="${i}">
+                  <a class="rec-thumb-img" href="${escape(API.thumbnailFileUrl(c.path))}" target="_blank" rel="noopener">
+                    <img loading="lazy" alt="" src="${escape(API.thumbnailFileUrl(c.path))}" />
+                    <span class="rec-thumb-time">${fmtClock(c.time_sec)}</span>
+                  </a>
+                  <figcaption>
+                    <span class="rec-thumb-score" title="Score ${c.score.toFixed(2)} · ${formatBytes(c.bytes)}">
+                      <span class="rec-hl-bar" style="--rec-hl-pct:${(c.score * 100).toFixed(0)}%"></span>
+                      <span>${Math.round(c.score * 100)}%</span>
+                    </span>
+                    ${c.crop_path ? `<a class="pg-linkbtn" href="${escape(API.thumbnailFileUrl(c.crop_path))}" target="_blank" rel="noopener" title="9:16 facecam crop">9:16 crop</a>` : ""}
+                  </figcaption>
+                </figure>`,
+            )
+            .join("")}
+        </div>`;
+      Toast.success(`Generated ${candidates.length} thumbnail candidate(s)`);
+    }).catch((err) => Toast.error(`Thumbnails failed: ${err.message}`));
   });
 
   overlay.querySelector("[data-action=rec-info-remux]")?.addEventListener("click", async (e) => {

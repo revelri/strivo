@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/strivo-bin", "crates/strivo-web", "crates/chapters", "crates/cuepoints", "crates/clipper"]
+members = [".", "crates/strivo-bin", "crates/strivo-web", "crates/chapters", "crates/cuepoints", "crates/clipper", "crates/thumbnails"]
 # strivo-plugins is its own workspace root (Git submodule with a
 # standalone build). Excluding it stops cargo from claiming it.
 exclude = ["strivo-plugins"]
