@@ -1,0 +1,78 @@
+# strivo-licence
+
+Cloudflare Workers + D1 activation backend for **Strivo Pro**.
+
+This subtree is meant to be lifted into its own private repo at
+`Chorosyne/strivo-licence` before going live — keeping it here for now
+so the StriVo client and backend evolve in lockstep until the schema
+stabilises.
+
+## What it does
+
+Three jobs:
+
+1. **Activate** — exchange a Lemon Squeezy licence key for a
+   machine-bound JWT (ES256). One key, one machine.
+2. **Refresh** — re-sign the JWT every 72h so a revoked / refunded
+   licence stops working within three days. Clients keep the cached
+   token valid offline (no internet-kill).
+3. **Trial** — 3-day token, bound to a fresh machine_hash, no payment
+   required. Each machine_hash can only ever take one trial.
+
+It also receives Lemon Squeezy webhooks (`order_created`,
+`subscription_payment_refunded`) and writes them to D1 so the next
+`/refresh` either issues a new token or returns 403.
+
+## Stack
+
+- **Cloudflare Workers** — single-region edge compute, free tier
+  covers expected traffic. Native `fetch` handler, no framework.
+- **Cloudflare D1** — SQLite at the edge, one binding `LICENCE_DB`.
+- **Lemon Squeezy** — Merchant of Record for the $25 one-time
+  purchase. Handles tax + EU VAT.
+- **Resend** — transactional email (purchase receipt, refund
+  notice).
+- **Web Crypto** — ES256 JWT signing using a P-256 key stored as a
+  Worker secret.
+
+## Endpoints
+
+| Method | Path                          | Auth                           | Purpose |
+|--------|-------------------------------|--------------------------------|---------|
+| POST   | `/activate`                   | none (rate-limited per IP)     | Lemon Squeezy key + machine_hash → JWT |
+| POST   | `/refresh`                    | existing JWT in Bearer header  | Re-sign / revoke check |
+| POST   | `/trial`                      | none (rate-limited per IP)     | machine_hash → 3-day JWT |
+| POST   | `/webhook/lemonsqueezy`       | `X-Signature` HMAC-SHA256      | Update licence state from LS events |
+| GET    | `/health`                     | none                           | Liveness for status checks |
+
+## Local dev
+
+```bash
+cd licence-backend
+npm install
+cp .dev.vars.example .dev.vars  # fill secrets
+npm run dev                     # wrangler dev on :8787
+```
+
+## Deploy
+
+```bash
+npx wrangler d1 create strivo-licence            # one-time
+# copy the database_id into wrangler.toml
+npx wrangler d1 execute strivo-licence --file schema.sql
+npx wrangler secret put JWT_PRIVATE_KEY          # PEM, ES256
+npx wrangler secret put LEMONSQUEEZY_WEBHOOK_SECRET
+npx wrangler secret put RESEND_API_KEY
+npx wrangler deploy
+```
+
+## Key generation
+
+```bash
+# Generate P-256 keypair for ES256 JWT.
+openssl ecparam -genkey -name prime256v1 -noout -out jwt-private.pem
+openssl ec -in jwt-private.pem -pubout -out jwt-public.pem
+
+# The PRIVATE key goes into the Worker secret JWT_PRIVATE_KEY.
+# The PUBLIC key is embedded in the StriVo client to verify tokens.
+```

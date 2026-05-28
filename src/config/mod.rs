@@ -58,6 +58,25 @@ pub struct AppConfig {
     #[serde(default)]
     pub web: WebConfig,
 
+    /// Desktop notification preferences — what state changes the daemon
+    /// should fire a notify-rust banner for.
+    #[serde(default)]
+    pub notifications: NotificationsConfig,
+
+    /// Capture-time safety knobs surfaced on the Monitor page. Zero in
+    /// either field disables the corresponding cap; defaults are also
+    /// zero so existing users see no behaviour change without explicit
+    /// opt-in.
+    #[serde(default)]
+    pub monitor_limits: MonitorLimits,
+
+    /// Per-plugin enable flags surfaced on Settings → Plugins. Keyed by
+    /// plugin name; missing entries default to enabled=true. The runtime
+    /// consults this when deciding whether to schedule a plugin's RPC
+    /// verb or surface its UI controls — the actual gate is plugin-side.
+    #[serde(default)]
+    pub plugin_toggles: BTreeMap<String, PluginToggle>,
+
     /// Tracks the path this config was loaded from, so save() can use it
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
@@ -602,6 +621,77 @@ impl ThemeRef {
     }
 }
 
+/// Desktop notification preferences. Wired by the daemon's existing
+/// notify-rust integration — each flag gates one class of banner.
+/// Defaults err on the side of useful-but-not-noisy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotificationsConfig {
+    /// Master switch. When false the daemon skips every notify call.
+    #[serde(default = "default_true")]
+    pub desktop_enabled: bool,
+    /// Banner when a tracked channel transitions offline → live.
+    #[serde(default = "default_true")]
+    pub on_go_live: bool,
+    /// Banner when a recording finishes successfully (Twitch / YT live
+    /// + Patreon VOD pull). Useful but can be noisy with bulk catalogs.
+    #[serde(default = "default_true")]
+    pub on_recording_finished: bool,
+    /// Banner when a recording dies in the middle. Always default-on:
+    /// silent failures are the worst class of bug in a PVR.
+    #[serde(default = "default_true")]
+    pub on_recording_failed: bool,
+    /// Banner when the Twitch auto-VOD-backfill pull lands. Off by
+    /// default because most users don't track it manually.
+    #[serde(default)]
+    pub on_vod_ready: bool,
+}
+
+fn default_true() -> bool { true }
+
+impl Default for NotificationsConfig {
+    fn default() -> Self {
+        Self {
+            desktop_enabled: true,
+            on_go_live: true,
+            on_recording_finished: true,
+            on_recording_failed: true,
+            on_vod_ready: false,
+        }
+    }
+}
+
+/// Per-plugin enable flag. Defaults to true so a missing entry preserves
+/// the previous always-on behaviour. Kept as its own struct so future
+/// per-plugin knobs (storage cap, RPC quota, …) land here without
+/// invalidating the existing config schema.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginToggle {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for PluginToggle {
+    fn default() -> Self { Self { enabled: true } }
+}
+
+/// Capture-time safety knobs. Both fields default to 0 (= disabled) so
+/// existing config files keep the previous unlimited behaviour. Set
+/// either to a positive value to opt in.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MonitorLimits {
+    /// Maximum number of recordings (live + VOD pull combined) StriVo
+    /// will run concurrently. New live broadcasts beyond this limit are
+    /// surfaced but not started until a slot opens. 0 = unlimited.
+    #[serde(default)]
+    pub max_concurrent_recordings: u32,
+
+    /// Reserved disk space in GB. When free space on the recording
+    /// filesystem drops below this watermark, new captures are deferred.
+    /// 0 = no circuit breaker.
+    #[serde(default)]
+    pub disk_budget_reserved_gb: u32,
+}
+
 /// Motion / accessibility / verbosity preferences.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UiConfig {
@@ -657,6 +747,9 @@ impl Default for AppConfig {
             crunchr: CrunchrConfig::default(),
             archiver: ArchiverConfig::default(),
             web: WebConfig::default(),
+            notifications: NotificationsConfig::default(),
+            monitor_limits: MonitorLimits::default(),
+            plugin_toggles: BTreeMap::new(),
             config_path: None,
         }
     }

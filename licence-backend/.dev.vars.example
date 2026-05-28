@@ -1,0 +1,15 @@
+# Copy to .dev.vars and fill in real values. .dev.vars is gitignored.
+# Production secrets go via `wrangler secret put`.
+
+# P-256 private key PEM, multi-line — escape newlines as \n
+JWT_PRIVATE_KEY="-----BEGIN EC PRIVATE KEY-----\n...\n-----END EC PRIVATE KEY-----"
+
+# Lemon Squeezy webhook signing secret (Store → Settings → Webhooks)
+LEMONSQUEEZY_WEBHOOK_SECRET="lemonsqueezy_webhook_secret_here"
+
+# Lemon Squeezy API key (Store → API) — for /activate licence-key validation
+LEMONSQUEEZY_API_KEY="ls_api_key_here"
+
+# Resend API key
+RESEND_API_KEY="re_xxx"
+RESEND_FROM="StriVo <licence@chorosyne.com>"

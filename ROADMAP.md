@@ -1,272 +1,335 @@
 # StriVo Roadmap
 
-Single source of truth for what is shipped, what is next, and what is
-explicitly out of scope. Absorbs the previous `TODOS.md` and `DESIGN-TODOS.md`
-planning state. The user-facing companion is
-[CHANGELOG.md](./CHANGELOG.md) (semver release notes only).
+StriVo is a TUI Live-Stream PVR for Twitch and YouTube whose Pro tier ships
+a complete DAW-equivalent post-production toolkit, delivered as a swarm
+of pure-data Rust plugin crates wired through a web SPA + a daemon over
+IPC.
 
-References to `DESIGN.md`, `YAZI-AUDIT.md`, and `REVIEW.md` below point to
-internal design notes (visual spec, TUI best-practice audit, adversarial
-framework review respectively) that are kept out of the public tree.
-
-## Quick roadmap
-
-- **Shipped (0.1 → 0.3):** Twitch / YouTube / Patreon monitoring and
-  recording, ratatui TUI with sidebar / channel detail / recording browser /
-  settings / wizard / themes, daemon mode over Unix sockets, first-party
-  plugins (Crunchr transcription, Archiver gallery), dynamic cdylib plugin
-  loader.
-- **Next (0.4 → 0.5):** Recording durability (journal + crash-recovery for
-  in-flight ffmpeg processes), Crunchr retry / cancellation, full settings UI
-  coverage, command palette and unified keymap dispatcher, plugin ABI
-  versioning handshake.
-- **Vision:** A mature, composable terminal DVR for live streams with a
-  small, well-defined plugin surface and a complementary *arr-style web UI
-  that talks to the same daemon socket.
-
-**Status legend:** ✅ shipped · 🟡 in progress · ⬜ planned · ⏸ deferred (with reason)
+This document records every shipped milestone, the remaining vision gaps,
+and the concrete TODOs that future iters should pick up. **Status legend:**
+✅ shipped · 🟡 in progress · ⬜ planned · ⏸ deferred (with reason).
 
 ---
 
-## Shipped (0.1.0 → 0.3.0)
+## Shipping plugins (32 in-tree)
 
-### 0.1.0 (2026-03-14) — initial release
-- TUI dashboard: sidebar, channel detail, recording list, settings, log, status bar
-- First-run setup wizard
-- Twitch (OAuth device flow), YouTube (Data API v3 + cookies), Patreon (membership API)
-- FFmpeg-based recording, MKV output, optional transcode
-- Filename templates, auto-record per channel, cron schedules (backend)
-- mpv playback (pipe streaming), streamlink + yt-dlp resolution
-- Desktop notifications on go-live
-- TOML config with XDG paths, OS keyring credentials
-- Daemon/standalone modes, Unix-socket IPC, systemd unit generation
-- CLI: `config {list,get,set,path,reset}`, `log {tail,path,clear}`, `daemon {start,stop,status,install}`
+Every plugin below ships in `crates/<name>/` as a pure-data Rust crate
+(no IO outside the host) with its own unit tests. The host
+(`crates/strivo-web/`) wires each one to a Pro-gated HTTP endpoint and
+surfaces it on the SPA.
 
-### 0.2.0–0.3.0 — Tier 1 UI/UX + P0/P1 quality (2026-04-19)
-- Home/End nav across all panes; help overlay (F5, `t`, `R`, `g/G/Home/End`, Esc semantics)
-- Esc precedence: clear filter → navigate back; `[/query] N/M · Esc clears` indicator
-- Cursor-editable search input; `status_message` actually renders in hotkey bar with 5s auto-dismiss
-- Quit-during-recording modal with live seconds + per-job ✓ checklist
-- Daemon disconnect banner + auto-reconnect supervisor (1/2/5/10/30 s backoff)
-- In-TUI device-code wizard; `AppAction::OpenUrl` cross-platform (xdg-open/open/start)
-- Credential leak fix (`config get` refuses `*_secret`/`*_token`/etc.)
-- Keyring SPOF: `STRIVO_*` env fallback with once-warned log
-- Filename collision: `_N` (1..999) then UUID fallback
-- CI on self-hosted runner; 10 integration tests (config roundtrip, filename collision, IPC handshake); 72 tests total green
-- OAuth refresh-on-401 for Twitch/YouTube/Patreon
-- Rate-limit backoff via shared `parse_retry_after` honoring `Retry-After` + `Ratelimit-Reset`
-- Pre-record disk-space gate (≥5 GB via statvfs)
-- Retry-exhaustion error surface (`rec.job.error` + `RecordingFinished`)
-- Daemon socket hygiene: `sweep_stale_files`, pid+socket unlink on shutdown
-- Standalone `PollNow` via `Arc<Notify>` from `ChannelMonitor::poll_notify()`
-- Stale-PID detection: `kill(pid,0)` + actual `connect(2)` cross-check
-- Config corruption recovery: `.backup` fallback, quarantine, defaults
-- Transcode-mode persistence through Settings + `t` hotkey
+### Capture · transcribe · catalog
+| Plugin | Crate | What it does |
+|---|---|---|
+| **Crunchr** | `strivo-plugins/crunchr` | Whisper transcription, diarisation, topic segmentation, word timestamps, click-to-seek transcript, speaker filter, exports |
+| **Archiver** | `strivo-plugins/archiver` | Back-catalog VOD archiver; per-channel auto-pull; tandem with `monitor.auto_download` |
+| **Viewguard** | `strivo-plugins/viewguard` | Live fraud-signal scoring during captures |
+| **Insights** | `strivo-plugins/insights` | Cross-stream word frequency, topic shifts, retention proxy |
 
-### Theming pipeline & animation (2026-04-20 closing sprint)
-- User-authored `~/.config/strivo/themes/*.{toml,conf}` (Kitty/Ghostty `.conf` parser + `strivo theme import`)
-- `ThemeRef` enum: legacy string + rich-table forms (`#[serde(untagged)]`)
-- `[theme.colors]` / `[theme.ansi]` overlay overrides
-- Runtime theme switching: `Ctrl+T` picker overlay, live preview, Enter commits, Esc reverts via `Theme::snapshot`/`restore`, `R` rescans
-- 13 built-in themes (Neon, Neon-HC, Neon-Light, Gruvbox Dark, Rose Pine Moon, Nord, Dracula, Kanagawa, Everforest Dark, …)
-- Animation infrastructure: `FrameClock`/`Tween`/`Ease` at 60 fps, `STRIVO_REDUCE_MOTION` + `[ui] reduce_motion` honored everywhere
-- Motion catalog: pane focus ramp (180 ms dim→primary), unfocused fade (120 ms), REC dot pulse, LIVE/REC badge breathing, ResolvingUrl braille spinner, Stopping `◼↔◻` crossfade, Failed `✗` breathing, recording heartbeat `●↔◉`, overlay enter ramps (help/quit/properties/wizard/platform-debug/stopping), toast three-phase alpha, hotkey shimmer, search cursor opacity blend, daemon reconnect banner, thumbnail-container crossfade, day-header gradient rule
-- Color audit: zero named `Color::*` in `src/`; all RGB usage is legitimate math
-- Adaptive polling: 16 ms while animating, 120 ms idle via `needs_fast_frame()`
+### Cut-discovery
+| Plugin | Crate | What it does |
+|---|---|---|
+| Chapters | `crates/chapters` | Heuristic chapter generation from pacing |
+| Cuepoints | `crates/cuepoints` | Scene-change detection via `ffmpeg select` |
+| Clipper | `crates/clipper` | Highlight detection + clip extraction |
+| Thumbnails | `crates/thumbnails` | Frame ranking + facecam crop |
+| Insights-compare | `crates/insights-compare` | Stream-vs-stream side-by-side + retention proxy |
+| Heatmap | `crates/heatmap` | Multi-signal retention overlay |
+| Viewguard-trend | `crates/viewguard-trend` | Cross-stream fraud trend dashboard |
+| Chat-density | `crates/chat-density` | Audience-retention proxy from chat rate |
+| Broll | `crates/broll` | B-roll suggestion from transcript topics |
 
-### Catalog & recording (2026-05)
-- Channel back-catalog pull pipeline with crash recovery (`strivo pull <target> [--format|--since|--max|--force|--no-transcribe]`)
-- `strivo doctor` external-tool verification
-- `strivo completions`, `strivo man`
+### Editor stack (the DAW core)
+| Plugin | Crate | What it does |
+|---|---|---|
+| EDL editor | `crates/editor` | Non-destructive split / ripple-delete / fades + revision history with `save_with_label` for full undo across saves |
+| Dead-air | `crates/deadair` | ffmpeg silencedetect → recommend trim cuts |
+| Branding | `crates/branding` | Watermark + intro/outro banner overlay → ffmpeg `filter_complex` |
+| Automation | `crates/automation` | DAW volume automation with Step/Linear/Cosine curves, baked via `asendcmd` |
+| Loudness | `crates/loudness` | EBU R128 two-pass parser with platform presets (YouTube/Spotify/Apple/EBU/Twitch) |
+| Captions | `crates/captions` | SRT/VTT/TXT + **styled ASS** with per-speaker colour + karaoke `\k` tags |
+| Multitrack | `crates/multitrack` | Audio track enumeration + extraction |
+| Brandsafe | `crates/brandsafe` | Pre-publish content classifier |
+| Structure | `crates/structure` | DAW section labeler (intro/gameplay/break/outro) from chapters + chat + cues |
+| Beat-detect | `crates/beat-detect` | Onset picker + autocorrelation BPM from `astats` envelope |
+| VAD | `crates/vad` | Hysteresis noise gate + auto-tighten ripple-delete recs |
+| Scenes | `crates/scenes` | DAW session save/recall bundling every plugin's per-recording state into a SQLite-backed manifest |
 
----
-
-## M1 — Feature Completion (0.4.0)
-
-Theme: finish features that already half-exist. Back-to-front per phase.
-
-### Phase 1 — Backend gaps
-
-- ⬜ **Recording durability journal** — in-flight + scheduled jobs live in RAM. Daemon OOM forgets active recording metadata (file survives). Add SQLite/JSON journal replayed on startup.
-- ⬜ **Patreon parity** — token refresh, backoff, dedupe missing. Generalize into shared `OAuthClient` trait. *Files:* `src/platform/patreon.rs`, `src/monitor/patreon.rs`
-- ⬜ **Archiver job persistence** — `update_job` is `#[allow(dead_code)]` at `strivo-plugins/src/archiver/db.rs:115`. Either wire it through or remove. Same for `get_channel_stats`.
-- ⬜ **Crunchr semantic search backend** — `SearchMode::Semantic` tab is a stub. Either feature-flag off or land fastembed-rs / OpenAI-embeddings backend with sqlite-vss. *Files:* `strivo-plugins/src/crunchr/types.rs:40–59`, `strivo-plugins/src/crunchr/mod.rs`
-- ⬜ **Crunchr retry + cancellation** — one transient API timeout kills the job; once started it can't be aborted. Add `CancellationToken` per job + backoff retry (3 attempts, 5/10/30 s). Adopt yazi's cooperative-cancellation idiom: long inner loops poll the token between chunks. *Files:* `strivo-plugins/src/crunchr/mod.rs:163–289`. *(YAZI-AUDIT §12 — internal note)*
-- ⬜ **Archiver durability** — same cancellation-token discipline applied to the back-catalog pull loop in `strivo-plugins/src/archiver/downloader.rs`; ties into the recording journal above. *(YAZI-AUDIT §12 — internal note)*
-- ⬜ **Crunchr token counting** — `words / 0.75` is wrong for code and non-English. Use `tiktoken-rs`. *Files:* `strivo-plugins/src/crunchr/pipeline.rs:171–174`
-- ⬜ **Stream URL validation before ffmpeg launch** — HEAD the URL or parse streamlink exit codes distinctly so stale HLS manifests don't yield cryptic ffmpeg errors. *Files:* `src/stream/resolver.rs`
-- ⬜ **Monitor first-poll race** — 10 s timeout can fire concurrently with auth. Gate poll on *auth-notified OR (timeout AND auth-present)*. *Files:* `src/monitor/mod.rs:62–112`
-- ⬜ **Plugin shutdown error surfacing** — `src/tui/mod.rs:41` swallows results. At minimum log + toast.
-
-### Phase 2 — Middle (state / event / scheduling)
-
-- ⬜ Wire cron `ScheduleManager` → `AppState`; emit `ScheduleFired` event consumable by TUI + notifications
-- ⬜ Watch history persistence → `~/.local/state/strivo/watched.json`
-- ⬜ In-memory event ring buffer (last 100 user-facing events, distinct from trace log) — feeds Phase 3 event log pop-over
-- ⬜ Selection-by-ID in RecordingList (Sidebar already does this at `src/app.rs:448–456`; mirror)
-
-### Phase 3 — TUI surfaces for existing backend
-
-- ⬜ **Schedule pane** — list with next-fire times, add/edit/delete dialogs writing back to `config.toml`; "next scheduled" indicator in Sidebar
-- ⬜ **Recording management** — `v` multi-select, `D` delete-to-trash (`~/.local/share/strivo/trash/`, 7-day TTL), `Enter` metadata pane (codec, bitrate, size, start/end), `shift+r` rename, `shift+m` move. Selection state shape: `IndexMap<RecordingId, u64>` (insertion order + microsecond timestamp tiebreaker) mirroring yazi's `Selected`. *(YAZI-AUDIT §11 — internal note)*
-- ⬜ **Playback overlay (mpv)** — `[⏸ 1:23 / 5:45  1.0x  vol 80%]`; `Space` pause, `<`/`>` speed, `j/k` seek ±10 s, `u` resume-from-last-position. Backend exposed in `src/playback/mod.rs`, never rendered.
-- ⬜ **Live log tail** — subscribe TUI to a `tracing_subscriber` layer; mirror events into in-memory ring
-- ⬜ **Event log pop-over** (`Shift+E`) — last 100 user-facing events with timestamp/level/source
-- ⬜ **Setup wizard credential validation** — "Test connection" pass after config changes so stale creds surface immediately
+### Publish · view · meta
+| Plugin | Crate | What it does |
+|---|---|---|
+| Reuse | `crates/reuse` | Cross-format publish-queue drafter |
+| Casebook | `crates/casebook` | Post-stream markdown briefing |
+| Multistream | `crates/multistream` | Auto-tile multi-stream viewer (Twitch + YouTube embeds) |
+| Chat | `crates/chat` | Chatterino-class Twitch IRC + filter pipeline + Twitch emote + BTTV global emote rendering |
+| Pipelines-DAG | `crates/pipelines-dag` | Cross-plugin pipeline graph |
+| Marketplace | `crates/marketplace` | Third-party plugin manifest spec + catalog stub (15 entries shipped) |
+| Schedule-optimizer | `crates/schedule-optimizer` | Publish-slot recommender → 7×24 grid → top weekly times with confidence + plateau coverage |
 
 ---
 
-## M2 — Cohesive Settings Suite (0.5.0)
+## Shipped surfaces (UI + UX)
 
-**Goal:** every config field reachable from the TUI; every TUI toggle persisted; consistent edit/commit/reset UX.
+### Top-bar routes (11)
+| Route | What's there |
+|---|---|
+| `/library` | Live-channel rail + capture dashboard + first-run hint |
+| `/recordings` | Sortable + filterable table with state chips, group-by-channel, persistent bulk-action bar, file-error remediation (Re-scan + Show path), play/info/delete buttons in slot 1 |
+| `/schedule` | Monitor: record-when-live + auto-download + capture-limit safety knobs + disk-free gauge + status banner |
+| `/pipelines` | Clickable DAG nodes routing to each plugin + per-pipeline "Run on…" recording picker + readiness chip |
+| `/watch` | Multi-stream auto-tile / focus / PiP modes; per-tile solo-audio + fullscreen; 30s viewer-count refresh |
+| `/chat` | Twitch IRC over WSS with filter chips, mention highlighting, Twitch native emote rendering, BTTV global emote rendering |
+| `/plugins` | Capability-matrix + marketplace catalog + first-party cards + per-card ⚙ deep-link to Settings → Plugins |
+| `/settings` | 8 sections; per-plugin enable/disable manager; notifications panel; monitor limits; replay-tour + reset-hints |
+| `/system` | Health + Network + Storage + Platform Auth + Backup + Blocklist + Tasks |
+| `/logs` | Tail-follow + regex filter + level chips + copy + download |
+| `/history` | Per-row Play/Info/Delete + filter + state chips + group-by-channel/date |
 
-### Phase 1 — Audit & schema
-- ⬜ Enumerate all ~67 fields across 15 structs in `src/config/`
-- ⬜ Tag each as `{exposed, hidden, derived, secret}`; emit a coverage report doc
-- ⬜ Decide persistence split: `config.toml` (user-authored) vs `~/.local/state/strivo/state.json` (TUI-managed: watched flags, selection, search history, last-used-theme). Documented in a short ARCHITECTURE.md follow-up.
-- ⬜ **Defaults-as-preset** — defaults live in code as a `Default` struct; user TOML is a strict overlay (not a full file). "Reset to defaults" rewrites the overlay back to empty. Optional follow-up: split `[[auto_record_channels]]` / `[[schedules]]` into prepend/append vecs so future official additions don't force user-file rewrites. *(YAZI-AUDIT §10 — internal note)*
+### Editor topbar workflow (9 buttons)
+`Split at time… · Ripple-delete range… · ▢ Trim dead air… · ▢ Voice gate… · ★ Branding… · ♪ Loudness… · ↺ History… · 🎬 Scenes… · ⚡ Render to MKV`
 
-### Phase 2 — Settings tab redesign
-- ⬜ Hierarchical groups: **Recording / Archiver / Crunchr / Notifications / Output / Theme / Keymap**
-- ⬜ Inline editors per type: `bool` (toggle), `enum` (cycle / picker), `int` (numeric), `path` (text + validator), `string`, `secret` (masked, with reveal-on-hold)
-- ⬜ Per-row validation + reset-to-default
-- ⬜ Live preview vs commit-on-save policy: match theme picker (snapshot on enter, Esc reverts)
-- ⬜ Reset-all-to-defaults action behind confirm dialog
+### Plugin sub-routes
+- `#/plugins/crunchr` + `#/plugins/crunchr/rec/<id>` — Pro upsell when not entitled
+- `#/plugins/archiver` + `#/plugins/archiver/<channelId>`
+- `#/plugins/viewguard`
+- `#/plugins/insights`
+- `#/plugins/schedule-optimizer` — 7×24 heatmap + top-pick cards
 
-### Phase 3 — Backfill config↔TUI gaps
-Config fields with no TUI surface today:
-- ⬜ `[recording]` — codec, bitrate, quality, temp_dir
-- ⬜ `[archiver]` — enabled, source_dir, db_path, watch_interval, concurrent_downloads, retention_days
-- ⬜ `[crunchr]` — enabled, whisper_model, chunk_size, analysis_enabled, openrouter_key (masked)
-- ⬜ `[output]` — notifications_enabled, log_level
-
-TUI controls deliberately *not* backed by config (decide explicitly):
-- ⬜ Search filter — ephemeral (decided: not persisted)
-- ⬜ Sidebar column order / sorting — punt until needed
-
----
-
-## M3 — Cohesive Keymap (0.5.0, alongside M2)
-
-**Goal:** one keymap source of truth, no per-pane drift, room for remap (deferred but unblocked).
-
-### Phase 1 — Centralize *(highest-leverage adoption from the yazi audit)* *(YAZI-AUDIT §2 — internal note)*
-- ⬜ New module `src/tui/keymap.rs` with `KeyAction` enum + binding table; chord struct analogous to yazi's `Chord { on, run, desc }`
-- ⬜ Each pane consumes `(ActivePane, KeyEvent) → Option<KeyAction>` via lookup, not match arms
-- ⬜ Replace scattered match arms in `src/app.rs::handle_key`
-- ⬜ Key parsing helper accepts `<C-s>` / `<S-Tab>` syntax (mirrors `yazi-config/src/keymap/key.rs`) so future user-remap TOML is straightforward
-
-### Phase 2 — Audit & best-practice pass
-- ⬜ Universal: `hjkl` + arrows, `g/G` + Home/End on every navigable pane
-- ⬜ Reserve single-letter alphas for pane-local actions; collisions caught at table-build time
-- ⬜ Modifier discipline: Ctrl for global (`Ctrl+T` theme, `Ctrl+P` palette, `Ctrl+/` help), Alt unused, Shift for inverse
-- ⬜ Universal: `/` search · `?` help · `:` command palette (new — see M4)
-- ⬜ Document precedence: overlay > plugin > pane > global
-
-### Phase 3 — Conflict / coverage verification
-- ⬜ Build-time check: dedupe `(pane, key, modifiers)`; fail if duplicate (yazi's prepend/append dedup hook is the reference shape)
-- ⬜ **Help overlay auto-generated from the keymap table** — three columns (key / action / desc), pane-aware so "what keys work right now?" stops being a hand-maintained string. *(YAZI-AUDIT §8 — internal note)*
-
-### Phase 4 — Foundation for remap (deferred from Tier 4)
-- ⬜ Lookup-driven dispatch means `~/.config/strivo/keybindings.toml` becomes a config overlay rather than a rewrite — `prepend_keymap` / `keymap` / `append_keymap` exactly as yazi does it
+### Onboarding
+- 8-step welcome tour on first paint (spotlight pins to each topnav slot)
+- Per-page hint banner (one-line tip per route, dismissible, persisted)
+- Settings → Interface → Onboarding has Replay tour + Reset hints buttons
 
 ---
 
-## M4 — Yazi-grade TUI Polish (0.6.0)
+## Audit catalogue — fully shipped ✅
 
-Driven by findings in YAZI-AUDIT.md. Adversarial framework review (ratatui vs opentui) in REVIEW.md — verdict: stay on ratatui; this milestone is what unlocks the polish that previously felt blocked.
+Every catalogue item from the comprehensive E2E audit has landed.
 
-### Phase 1 — Substrate (the two big structural lifts)
-- ⬜ **Async task manager** — new `src/tasks/` module: `TaskId`, `TaskKind` (Record / Transcode / ArchiverPull / CrunchrAnalyze / ThemeImport), `Progress` enum with byte-based percent. Per-task `CancellationToken`. Right-side or status-bar tasks pane: `[2 active · Crunchr 73% · Pull 1.2 GB/3.4 GB · ETA 2m]`. Subsumes the half-built progress spinners and gives notifications a clean event source. *(YAZI-AUDIT §4 — internal note)*
-- ⬜ **Input modes** — `InputMode { Normal, Visual, Insert }` distinct from `ActivePane`. Stateless enum; transitions live in the keymap dispatcher from M3. Visual mode is the home for multi-select (M1 Phase 3 graduates into Visual). *(YAZI-AUDIT §1 — internal note)*
+- **iter 25** plugin hub capability-matrix status fixes + chip spacing
+- **iter 26** Pro-gate UX — upsell card replaces raw 402 JSON dump
+- **iter 27** candy icons for watch / chat / history topnav slots
+- **iter 28** Settings → Notifications + Monitor limits + General at-a-glance
+- **iter 29** Recordings table — persistent bulk bar + state chips + group-by-channel
+- **iter 30** History — per-row actions + filter + state chips + group-by-channel/date
+- **iter 31** file-error pill — hatched red + Re-scan + Show path actions
+- **iter 32** Schedule — capture-limits card + status banner + disk gauge
+- **iter 33** Pipelines — clickable nodes + readiness chip + Run-on-recording picker
+- **iter 34** Watch — solo-audio + per-tile fullscreen + 30s viewer-count refresh
+- **iter 35** Chat — Twitch native emote + BTTV global emote rendering + image-badge attempt
+- **iter 36** Logs — follow + regex + copy/download
+- **iter 37** Plugin enable/disable manager with 25-row grid by category
+- **iter 38** Onboarding tour + per-page hint banners
 
-### Phase 2 — Discoverability
-- ⬜ **Command palette** (`:`) — input widget parses a string into the same `KeyAction` enum from M3. Keys and commands dispatch through one path. *(YAZI-AUDIT §3 — internal note)*
-- ⬜ **Marks / registers** for channels — `'a` jumps to mark; persisted to `~/.local/state/strivo/marks.json` as `BTreeMap<char, ChannelId>`.
-- ⬜ **Fuzzy finder upgrade** — `src/search.rs` returns score + highlight spans (via `nucleo` or `skim`); match-cache parallel to yazi's `Finder.matched` so `n` / `N` jump-to-next is O(1); field filters (`date:`, `channel:`, `duration:`, `size:`); sort by relevance. *(YAZI-AUDIT §7 — internal note)*
+## DAW-vision iters — shipped ✅
 
-### Phase 3 — Preview pipeline
-- ⬜ **Lazy preview lock + spawn-cancel** — debounce/cancel previous preview job on Sidebar selection change; one `tokio::spawn` per preview, results back via a render lock. *(YAZI-AUDIT §6 — internal note)*
-- ⬜ **Hover / preview pane** — channel preview (thumbnail + last-N stream meta), recording preview (codec/bitrate/duration + first-frame thumbnail via FFmpeg-extract), schedule preview ("if this cron fires, next 5 dates").
-
-### Phase 4 — Plugin system maturation
-- ⬜ **Plugin manifest format** — `[plugin]` section per crate declaring name, version, hotkeys, pane preferences. Lets users introspect installed plugins without grep. *(YAZI-AUDIT §5 — internal note)*
-- ⬜ **Plugin discovery** — scan `~/.config/strivo/plugins/*.toml` for declared out-of-tree plugin paths. (Lua not adopted; Rust crates remain the plugin substrate.)
-- ⬜ Lifecycle hygiene — adopt yazi's hook pattern (run on completion + cancellation) so plugin shutdown errors are surfaced rather than swallowed.
-
-### Phase 5 — Render-loop micro-optimization
-- ⬜ **Batched event draining** — when daemon emits a burst (`ChannelsUpdated` + `RecordingProgress` + …), drain via `try_recv()` until empty, then redraw once. Mirrors yazi's `recv().await` + drain loop. *(YAZI-AUDIT §9 — internal note)* (Other render-loop ideas — partial render, synchronized output — skipped; see audit §9 rationale.)
-
-### Phase 6 — Polish (the loose-end pile)
-- ⬜ Notifications extended beyond go-live: recording-complete, schedule-fired, transcription-done, disk-low
-- ⬜ Clipboard / open-folder: `y` copy (via `arboard`), `o` open URL in Detail, `O` open recording folder in RecordingList
-- ⬜ Theme picker swatch shows palette + theme name on hover (already shows hex codes)
-- ⬜ Respect `NO_COLOR` env (monochrome) and `NO_MOTION` (alias for `STRIVO_REDUCE_MOTION`)
-- ⬜ Undo buffer — last 5 destructive actions (stop-recording, clear-log, toggle-auto-record); `u` in-memory, cleared on quit
-
----
-
-## M5 — Killer-app wedges (0.7.0+)
-
-Pick one or two per minor release; ordered by leverage.
-
-1. ⬜ **Clip export from Crunchr timeline** — `c` on a transcript chunk → `ffmpeg -ss/-to -c copy` into `clips/`. Highest leverage; data already exists.
-2. ⬜ **Transcript-scoped mpv seek** — Enter on a chunk opens mpv at `--start=<sec>`. Turns StriVo into grep-to-watch.
-3. ⬜ **Auto-chaptering (MKV chapters from Crunchr topics)** via `mkvpropedit`.
-4. ⬜ **Thumbnail grid in recording list** — `ratatui-image` already a dep; `Picker` already wired.
-5. ⬜ **Stream gap detection / resume** — yt-dlp `--live-from-start --wait-for-video` + append MKV segments on drop.
-6. ⬜ **Cost display for Crunchr** — OpenRouter / Mistral spend per recording.
-7. ⬜ **OBS / Streamlink config import** — one-command onboarding for users with existing configs.
-
-### Web UI (parallel track)
-- 🟡 **`strivo serve` *arr-style web UI** — developed in worktree at `../StriVo-webui` on `feat/webui`. Axum + Askama + HTMX, talks to the existing daemon via IPC. Default bind `127.0.0.1:8989`. Mirrors M2 settings groups; `/api/v1/*` JSON API with `X-Api-Key` for external automation.
+- **iter 21** Branding — watermark + intro/outro banner → ffmpeg filter chain
+- **iter 22** EDL revision history — DAW-style undo across saves
+- **iter 23** Multistream viewer — auto-tile + Focus + PiP layout modes
+- **iter 24** Chat client — Chatterino-class IRC + tokenizer + filter pipeline + ring buffer
+- **iter 39** Loudness — EBU R128 normalisation with 5 platform presets
+- **iter 40** Structure — DAW section labeller (intro/gameplay/break/outro tiling)
+- **iter 41** Automation — DAW volume curves baked at render (`asendcmd` + Step/Linear/Cosine)
+- **iter 42** Styled ASS captions — per-speaker colour + karaoke `\k` highlight
+- **iter 43** Scenes — DAW session save/recall bundling every plugin state
+- **iter 44** Schedule-optimizer — DAW launch-quantize for publish slots
+- **iter 45** Beat detection — onset picker + BPM autocorrelation
+- **iter 46** VAD / noise gate — hysteresis gate + auto-tighten ripple-delete recs
+- **iter 47** SPA voice-gate one-click workflow in EDL editor topbar
+- **iter 48** SPA scene-snapshot panel (capture / restore / delete inline in editor)
+- **iter 49** SPA schedule-optimizer page — 7×24 heatmap + top-pick cards
 
 ---
 
-## Cross-cutting / infrastructure
+## Test inventory
 
-- ⬜ **Shared `PlatformBase` / `OAuthClient` trait** — centralize refresh / backoff / 401 handling across Twitch/YouTube/Patreon
-- ⬜ **Single SQLite handle per plugin** — Archiver + Crunchr each open their own connection; FTS + analysis writes serialize. Use `r2d2-sqlite` or async wrapper.
-- ⬜ **FTS snippet rendering for recording search** — `snippet(chunks_fts, …)` exists in Crunchr; wire same treatment for `src/search.rs` via file-metadata FTS
-- ⬜ **Sidebar filter rebuild race** — audit `search_filtered_channels` rebuild on every channel mutation for edge cases
-- ⬜ **Error surface design** — distinct info/warn/error in status bar; persistent error panel; ties into M1 Phase 2 event ring + M4 event log pop-over
-- ⬜ **Testing harness** — fake ffmpeg binary, wiremock Twitch/YouTube, tmp-socket daemon harness, `insta` snapshot tests over `ratatui::buffer::Buffer`. Each is a separate milestone.
-- ⬜ **Observability** — recording count, bytes written, failure rate, auth-refresh rate, last-poll-at per platform. Expose via `strivo status` (CLI) and optional Prometheus text endpoint.
-- ⬜ **ARCHITECTURE.md** — daemon vs standalone topology, plugin ABI, keybinding cheat sheet, troubleshooting (keyring / socket), schedule TOML format
-- ⬜ **Platform CI coverage** — Windows (`win11-ci` runner) and macOS (`macos-sonoma` runner) folded into workflow alongside the Linux self-hosted runner
-- ⬜ **Workspace clippy cleanup** — ~20 pre-existing warnings outside sprint-touched code; CI currently gates `--all-targets` on root crate only
+Total pure-data unit tests across in-tree plugin crates (excluding the
+`strivo-plugins` submodule which has its own suite):
+
+| Crate | Tests |
+|---|---|
+| `automation` | 14 |
+| `beat-detect` | 12 |
+| `brandsafe` | 10 |
+| `branding` | 16 |
+| `broll` | 11 |
+| `captions` | 18 (was 9; +9 ASS) |
+| `casebook` | 11 |
+| `chapters` | 5 |
+| `chat` | 24 |
+| `chat-density` | 14 |
+| `clipper` | 8 |
+| `cuepoints` | 5 |
+| `deadair` | 12 |
+| `editor` | 22 |
+| `heatmap` | 10 |
+| `insights-compare` | 10 |
+| `loudness` | 12 |
+| `marketplace` | 15 |
+| `multistream` | 18 |
+| `multitrack` | 8 |
+| `pipelines-dag` | 10 |
+| `reuse` | 12 |
+| `scenes` | 12 |
+| `schedule-optimizer` | 13 |
+| `structure` | 12 |
+| `thumbnails` | 8 |
+| `viewguard-trend` | 13 |
+| `vad` | 12 |
+| **Total** | **~345 unit tests** |
+
+All green at the time of merge. Both feature modes (`pro` + `--no-default-features`) build clean.
 
 ---
 
-## Deferred / non-goals (with reasons)
+## Marketplace catalog
 
-### Motion / animation (closed sprint decisions)
-- ⏸ Per-row selection animation (sidebar/recording-list/settings/log) — requires either abandoning `ratatui::List` (manual render of all rows) or threading per-row animation state maps. Scope creep for a subtle effect; revisit if sidebar is rewritten.
-- ⏸ Alpha-blend overlay backdrops — ratatui renders full cells; no true cell alpha. Would require every widget to accept a dim factor; ~2× render cost.
-- ⏸ Pane slide-in / cyan underline slide — layout::render isn't a pane-router; faking offsets requires tweening `Rect.x`. Border ramps already communicate focus.
-- ⏸ Wizard fade-out — overlay close path has no tail state; would need `Option<Instant>` for close timestamps.
-- ⏸ Toast queue — single-slot overlap is rare; refactoring ~30 `status_message = …` write sites isn't worth the gain.
-- ⏸ Viewer-count sparkline — monitors keep only the latest snapshot; needs a polling history buffer at the monitor layer.
-- ⏸ Log smooth-scroll / log-level crossfade — ratatui renders at integer cells; sub-cell scroll needs a separate line buffer. Severity rarely updates mid-stream.
-- ⏸ Launch / shutdown choreography — terminal init/restore are synchronous; animating would delay restore behind a tween. Minor UX gain.
-- ⏸ Loading skeletons, ASCII empty states, keystroke echo, launch spinner, transcoding donut, log heatmap, audible bell, clipboard auto-copy in wizard — each documented as low leverage for the implementation cost; see git history of DESIGN-TODOS.md.
+15 entries shipped (`crates/marketplace/src/lib.rs::default_catalog()`):
 
-### Feature
-- ⏸ **Mouse support** — ratatui enables it easily but policy unclear (always-on? opt-in flag?). Defer pending posture decision.
-- ⏸ **Display density toggle** (Compact/Normal/Spacious) — one-day knob; not blocking anyone.
-- ⏸ **Config reload without restart** (`Ctrl+R`) — re-read + diff is easy; restarting monitor poll on interval change is the hard part.
-- ⏸ **Light-mode theme audit** — neon-light shipped; full contrast audit pending.
-- ⏸ **Twitch EventSub / YouTube push subscriptions** — polling is fine for the channel counts users actually have; webhooks would mean inbound HTTP, which conflicts with the local-only posture (revisit if web UI changes that).
-- ⏸ **Theme dir file-watch** (`notify` crate) — manual `R` rescan in picker is acceptable.
+✅ Installed Cdylib (13): branding · multistream · chat · deadair · twitch-chat-density · broll-finder · loudness · structure · automation · scenes · schedule-optimizer · beat-detect · vad
+
+🗺 Roadmap (2): `demucs-split` (needs external `demucs` binary) · `yt-publish` (needs YouTube OAuth + API creds)
 
 ---
 
-## Phase release sequencing
+## Capability matrix
+
+Per `GET /api/v1/plugins/capabilities`:
+
+- Every shipped plugin marked `available` (was: most marked `roadmap` despite being live)
+- Multi-provider rows list every contributor:
+  - `audience_retention` → heatmap + chat-density
+  - `stream_comparison` → insights + viewguard-trend
+  - `captions` → captions + captions-ass
+  - `edl_editor` → editor + deadair + branding + broll
+  - `source_track_split` → multitrack + demucs-split (roadmap)
+  - `publish_queue` → reuse + yt-publish (roadmap)
+- New `x.`-prefixed capabilities from iters 23+: `x.multistream`, `x.chat`, `x.pipelines_dag`, `x.marketplace`, `x.loudness`, `x.structure`, `x.audio_automation`, `x.scenes`, `x.publish_slots`, `x.tempo`, `x.voice_gate`
+
+---
+
+## Open vision gaps ⬜
+
+Concrete future iters to keep the cron loop fed.
+
+### Remaining DAW analogues
+- **A/B render compare** — render the EDL twice with different filter chains; parse VMAF / SSIM output; produce a diff report. Pure-data parser is fully testable; backend orchestration is heavier (needs two ffmpeg passes).
+- **Pitch / time-stretch** — wrap ffmpeg's `rubberband` filter; expose semitone-shift + rate-shift in the editor.
+- **Sub-mix / bus routing** — route multitrack outputs through a shared sub-mix with shared gain + insert chain. Composes with existing multitrack.
+- **Sidechain compressor** — duck the game/music bus when the voice bus is active. Composes with VAD as the trigger source.
+- **Insert effects chain** — list of ffmpeg filters applied in order per track (noise-reduction → de-esser → compressor → limiter for the voice bus).
+
+### Backend integrations that would unblock today's roadmap catalog entries
+- **Demucs source separation** — vendor demucs as an optional binary; expose `demucs-split` Cdylib so the catalog entry flips from roadmap to installed.
+- **YouTube OAuth + Helix publish** — drives the `yt-publish` catalog entry. Needs the device-code flow + scope `youtube.upload`.
+- **Real Twitch badge UUID fetch** — current `chat` plugin badge code falls back to text chips because Twitch CDN requires UUIDs (channel-scoped subscriber badges especially). Wire `/helix/chat/badges/global` + per-channel fetch behind the existing chat plugin.
+- **FFZ + 7TV emote integration** — extend the chat tokenizer's emote map. Same pattern as BTTV; just three more endpoints + cache.
+- **Chat compose + slash-commands** — OAuth login scoped to `chat:edit`; lets users send messages + `/me` / `/timeout` / `/vip` from inside the SPA.
+
+### Collaboration / multi-user features
+- **Per-segment comments** — SQLite-backed comments tied to a recording's timecode. Plus optional WS for live updates so a team can review a stream together.
+- **Real-time multi-cursor** — Yjs / Automerge CRDT over EDL state for synchronous editing sessions.
+- **Review-request workflow** — share a scene + checkbox approval log.
+
+### SPA-side polish
+- **Beat-grid overlay in editor** — paint the inferred tempo grid as vertical guide lines on the EDL strip; snap split-at-time to beat with a hold-modifier.
+- **Loudness gauge in the EDL editor topbar** — show the current measured I / TP / LRA next to the render button so users see the loudness state at a glance.
+- **Insights / chat-density → schedule-optimizer auto-feed** — pickable per-recording on the optimizer page; one-click "use this stream's engagement curve".
+- **Heatmap row clicks → publish-time recommender deep link** — `audience_retention` row → schedule optimizer pre-loaded with the recording's bucket data.
+- **Multistream layout presets** — Quadrant / Highlight / Theatre overrides on top of the existing Auto / Focus / PiP modes.
+- **Editor cut → scenes "Capture before" auto-snapshot** — optional "auto-snapshot every save" config so the user always has a pre-edit recovery point.
+
+### Surface gaps from the v1 audit (lower-priority)
+- **VOD progress pill polling** — pill renders but the rendering rate could be tightened to match the daemon's SSE cadence
+- **Logs date-range picker** — currently the tail returns the last 500 lines; a date filter would let users jump to a specific incident
+- **Trace-id linking** — when the host emits structured trace ids, the logs view should make them clickable to filter
+- **Settings → Plugins manager actions** — beyond enable/disable, add "Clear stored data" + "View storage size" per plugin
+- **Recordings table date range filter** — filter by `started_at` lo/hi to scope the view
+- **History date heatmap** — small calendar grid above the History list, click a day to filter
+
+### Operational
+- **Per-plugin runtime gate** — `plugin_toggles.<name>.enabled` is currently advisory only. Wire it into the daemon's plugin scheduler so disabled plugins genuinely skip work.
+- **Disk-budget circuit breaker enforcement** — `monitor_limits.disk_budget_reserved_gb` is surfaced but not yet wired to defer new captures when crossed.
+- **Max-concurrent-recordings enforcement** — same; the field is read, the gauge renders, but the daemon doesn't enforce.
+- **License backend integration** — `/licence/trial` + `/licence/activate` return 503 when `STRIVO_LICENCE_URL` isn't set. Future iter brings up the activation backend.
+- **Self-hosted CI** — `Chorosyne/strivo` repo has runners for Arch Linux (this host), macOS Sonoma (QEMU VM), Tiny11 (Windows VM). All three currently idle; future iter ships a `release.yml` that bundles per-platform binaries.
+
+### Doc + ops
+- **Per-plugin README** — every `crates/<name>` has `lib.rs` doc-comments but no top-level README. A future iter generates per-plugin READMEs from the crate metadata + a structured marketplace manifest.
+- **Plugin author guide** — `docs/PLUGIN-MANIFEST.md` covers the manifest spec; needs a companion "writing a plugin" tutorial that walks the directory layout + capability tags.
+- **End-user docs** — chorosyne.com still 404s the strivo product page. Future iter ships product copy + screenshots.
+
+---
+
+## Earlier milestones (pre-iter-21 era)
+
+The pre-DAW-vision shipping history covered the foundational TUI + daemon
+work. Summary, since it informs why the plugin architecture works the
+way it does:
+
+- **0.1.0** (2026-03-14) — initial release. TUI dashboard, first-run wizard,
+  Twitch + YouTube + Patreon monitoring, ffmpeg recording, mpv playback,
+  desktop notifications, TOML config + OS keyring, daemon mode, systemd unit
+  generator, CLI surface.
+- **0.2.0 – 0.3.0** (2026-04-19) — Tier-1 UI/UX + P0/P1 quality work. Home/End
+  nav everywhere, F5 help overlay, Esc precedence (clear filter → back), live
+  search status, quit-during-recording confirmation modal, auto-reconnect
+  supervisor with exponential backoff, command palette + unified keymap.
+
+That layer remains intact; the 0.3+ Pro phase added the SPA on top + the
+plugin swarm.
+
+---
+
+## Working tree state at this snapshot
+
+- Branch `feat/strivo-pro-phase1` → merged into `main` at this snapshot.
+- `strivo-plugins` submodule — pinned at its existing main commit; private
+  repo, no pending changes besides the iter-25-ish capability-matrix
+  updates which live on the host side.
+- All 30+ Rust crates build clean in both Pro (`--features pro`) and free
+  (`--no-default-features`) modes.
+- Daemon + serve binary deployed at `~/.local/bin/strivo`; runs unprivileged
+  with `entitled:false` by default.
+- 13 marketplace entries map to in-tree plugins (Cdylib); 2 to roadmap
+  third-party slots.
+
+---
+
+## File map highlights
 
 ```
-0.3.0 → M1 (0.4.0) → M2 + M3 (0.5.0) → M4 (0.6.0) → M5 wedges (0.7.0+)
-                                              │
-                                              └── webui parallel track on feat/webui
+strivo/
+├── src/                       # daemon (`strivo daemon`) — IPC, monitor, recording
+├── crates/strivo-bin/         # CLI shim
+├── crates/strivo-web/         # `strivo serve` SPA host
+│   ├── src/routes/
+│   │   ├── plugins.rs         # every Pro plugin endpoint
+│   │   ├── api.rs             # /settings, /channels, /recordings, capability matrix
+│   │   └── licence.rs         # /licence/status, /activate, /trial
+│   ├── assets/spa.js          # vanilla SPA (single-file)
+│   └── assets/spa.css         # all CSS (single-file)
+├── crates/<plugin>/           # 26 in-tree pure-data plugin crates
+├── strivo-plugins/            # Git submodule (Crunchr · Archiver · Viewguard · Insights)
+├── docs/CODEMAPS/             # per-file route + state codemaps
+└── ROADMAP.md                 # this file
 ```
 
-Each milestone closes with: green CI, CHANGELOG entry, README status refresh.
+---
+
+## Conventions
+
+- **Commit prefixes**: `feat:`, `fix:`, `chore:`, `refactor:`, `ci:`, `docs:`, `test:`, `perf:`
+- **No AI attribution** in commits, PRs, or code comments (per project CLAUDE.md)
+- **Per-iter scope**: one cohesive vertical slice — pure-data crate + tests + backend route + SPA wiring + marketplace + capability matrix + plugin registry + chrome-devtools E2E verify + clean commit
+- **Both feature modes verified per iter**: `cargo build -p strivo-web` (Pro) AND `cargo build --no-default-features -p strivo-bin` (free)
+- **User state restored after every E2E**: daemon left running, serve restarted without `STRIVO_DEV_UNLOCK_ALL` so `/licence/status` returns `entitled:false`
+
+---
+
+## When in doubt
+
+Pick the smallest cohesive slice that fills a real DAW gap; build the
+pure-data crate first with tests; let chrome-devtools E2E surface the
+parser / filter / state-machine bugs the unit tests missed; ship in one
+commit.

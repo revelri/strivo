@@ -42,6 +42,10 @@ pub struct PluginRegistry {
     /// drops, so order matters: plugins drop first (we own them in
     /// `plugins`), then the libraries.
     loaded_libraries: Vec<libloading::Library>,
+    /// DAW-vision capability → plugin index. Populated at register
+    /// time so `providers_of(cap)` is an O(1) lookup. See
+    /// `crate::plugin::capability` for the well-known strings.
+    capability_index: HashMap<&'static str, Vec<usize>>,
 }
 
 
@@ -62,8 +66,33 @@ impl PluginRegistry {
                 self.command_map.insert((cmd.key, cmd.modifiers), pane);
             }
         }
+        // Index DAW-vision capabilities so the host can ask
+        // `providers_of(cap)` without re-iterating every plugin's
+        // capabilities() each time. Same idea as pane_map: O(plugins)
+        // at register time, O(1) at query time.
+        for cap in plugin.capabilities() {
+            self.capability_index.entry(cap).or_default().push(idx);
+        }
         self.plugins.push(plugin);
         self.statuses.push(PluginStatus::Initializing);
+    }
+
+    /// Plugin names that declare a given capability tag.
+    pub fn providers_of(&self, capability: &str) -> Vec<&str> {
+        self.capability_index
+            .get(capability)
+            .map(|idxs| idxs.iter().map(|i| self.plugins[*i].name()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Every (capability, providers) tuple — used by the SPA's plugin
+    /// hub to render the cross-plugin graph.
+    pub fn capability_map(&self) -> std::collections::BTreeMap<&str, Vec<&str>> {
+        let mut out = std::collections::BTreeMap::new();
+        for (cap, idxs) in &self.capability_index {
+            out.insert(*cap, idxs.iter().map(|i| self.plugins[*i].name()).collect());
+        }
+        out
     }
 
     /// Register a dynamically-loaded plugin. The library MUST outlive

@@ -54,6 +54,13 @@ impl Problem {
     pub fn unavailable(detail: impl Into<String>) -> Self {
         Self::new(StatusCode::SERVICE_UNAVAILABLE, detail)
     }
+
+    /// HTTP 402 — the resource exists but the caller's licence does
+    /// not cover it. Used by Pro-plugin data routes when the licence
+    /// gate refuses entitlement.
+    pub fn payment_required(detail: impl Into<String>) -> Self {
+        Self::new(StatusCode::PAYMENT_REQUIRED, detail)
+    }
 }
 
 impl IntoResponse for Problem {

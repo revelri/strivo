@@ -255,6 +255,81 @@ async fn recording_probe(
     .into_response()
 }
 
+#[derive(Debug, Deserialize)]
+struct ScheduleAddPayload {
+    channel: String,
+    cron: String,
+    #[serde(default)]
+    duration: String,
+}
+
+/// `POST /api/v1/schedule` — append a new entry to config.schedule.
+async fn schedule_add(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<ScheduleAddPayload>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    if body.channel.trim().is_empty() || body.cron.trim().is_empty() {
+        return crate::problem::Problem::bad_request("channel and cron required").into_response();
+    }
+    // Validate the cron expression now so a typo doesn't show up at
+    // the next firing minute as a silent no-op.
+    let cron_expr = if body.cron.split_whitespace().count() == 5 {
+        format!("0 {}", body.cron)
+    } else {
+        body.cron.clone()
+    };
+    if <cron::Schedule as std::str::FromStr>::from_str(&cron_expr).is_err() {
+        return crate::problem::Problem::bad_request("invalid cron expression").into_response();
+    }
+    let mut cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+    cfg.schedule.push(strivo_core::config::ScheduleEntry {
+        channel: body.channel.trim().to_string(),
+        cron: body.cron.trim().to_string(),
+        duration: if body.duration.trim().is_empty() {
+            "4h".to_string()
+        } else {
+            body.duration.trim().to_string()
+        },
+    });
+    let path = cfg.config_path.clone();
+    if let Err(e) = cfg.save(path.as_deref()) {
+        return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+    }
+    (StatusCode::CREATED, Json(json!({ "ok": true }))).into_response()
+}
+
+/// `DELETE /api/v1/schedule/<index>` — drop one entry by zero-based
+/// index. The schedule isn't named so indices are the natural key.
+async fn schedule_delete(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(index): Path<usize>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let mut cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+    if index >= cfg.schedule.len() {
+        return crate::problem::Problem::not_found("no such schedule entry").into_response();
+    }
+    cfg.schedule.remove(index);
+    let path = cfg.config_path.clone();
+    if let Err(e) = cfg.save(path.as_deref()) {
+        return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+    }
+    Json(json!({ "ok": true })).into_response()
+}
+
 async fn schedule(headers: HeaderMap, State(state): State<AppState>) -> impl IntoResponse {
     if check_key(&headers, &state).is_err() {
         return crate::problem::Problem::unauthorized().into_response();
@@ -309,6 +384,9 @@ async fn settings(headers: HeaderMap, State(state): State<AppState>) -> impl Int
                 "capture_profiles": cfg.capture_profiles,
                 "schedule": cfg.schedule,
                 "archiver": cfg.archiver,
+                "notifications": cfg.notifications,
+                "monitor_limits": cfg.monitor_limits,
+                "plugin_toggles": cfg.plugin_toggles,
                 "twitch_configured": cfg.twitch.is_some(),
                 "youtube_configured": cfg.youtube.is_some(),
                 "patreon_configured": cfg.patreon.is_some(),
@@ -820,6 +898,70 @@ async fn delete_recording_file(
     }
 }
 
+/// `POST /api/v1/recordings/<id>/remux` — remux an existing recording
+/// in place so the browser can play it. ffmpeg copies streams into a
+/// Matroska container with the `aac_adtstoasc` bitstream filter — the
+/// same combination newer recordings use by default. The original is
+/// kept as `<base>.orig.<ext>` until the remux exits clean, then
+/// dropped. No transcode, no quality loss.
+async fn remux_recording(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let jobs_path = strivo_core::config::AppConfig::data_dir().join("jobs.db");
+    let path = match strivo_core::recording::persist::PersistDb::open(&jobs_path) {
+        Ok(db) => match db.load_recording_jobs().await {
+            Ok(rows) => rows.into_iter().find(|j| j.id == id).map(|j| j.output_path),
+            Err(_) => None,
+        },
+        Err(_) => None,
+    };
+    let Some(input) = path else {
+        return crate::problem::Problem::not_found("recording not found").into_response();
+    };
+    if !input.exists() {
+        return crate::problem::Problem::not_found("file missing on disk").into_response();
+    }
+    let orig = input.with_extension(format!(
+        "orig.{}",
+        input.extension().and_then(|e| e.to_str()).unwrap_or("mkv"),
+    ));
+    let tmp = input.with_extension("remuxed.mkv");
+    let status = std::process::Command::new("ffmpeg")
+        .args(["-y", "-hide_banner", "-loglevel", "warning"])
+        .arg("-i")
+        .arg(&input)
+        .args(["-c", "copy", "-bsf:a", "aac_adtstoasc", "-f", "matroska"])
+        .arg(&tmp)
+        .status();
+    let ok = matches!(status, Ok(s) if s.success());
+    if !ok {
+        let _ = std::fs::remove_file(&tmp);
+        return crate::problem::Problem::internal("ffmpeg remux failed").into_response();
+    }
+    // Atomic swap: input → orig (keep), tmp → input.
+    if let Err(e) = std::fs::rename(&input, &orig) {
+        let _ = std::fs::remove_file(&tmp);
+        return crate::problem::Problem::internal(format!("rename original: {e}"))
+            .into_response();
+    }
+    if let Err(e) = std::fs::rename(&tmp, &input) {
+        let _ = std::fs::rename(&orig, &input); // best-effort restore
+        return crate::problem::Problem::internal(format!("install remuxed: {e}"))
+            .into_response();
+    }
+    Json(json!({
+        "ok": true,
+        "kept": orig.to_string_lossy(),
+        "remuxed": input.to_string_lossy(),
+    }))
+    .into_response()
+}
+
 /// `POST /api/v1/recordings/clear_errored` — bulk-delete every recording
 /// whose state is failed or interrupted. Same trash-then-drop semantics
 /// as `delete_recording_file` per row.
@@ -885,6 +1027,256 @@ async fn set_poll_interval(
         Ok(()) => (StatusCode::ACCEPTED, Json(json!({"poll_interval_secs": secs}))).into_response(),
         Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct SettingsUpdatePayload {
+    /// Dotted path identifying which knob to mutate.
+    path: String,
+    value: serde_json::Value,
+}
+
+/// `POST /api/v1/settings/update` — persist a single config knob.
+///
+/// Strict allow-list: anything not enumerated here is rejected with 400.
+/// Each entry validates type, applies it to the loaded AppConfig, and
+/// saves. None of these need a live daemon-side apply — they're read
+/// at the start of each new recording / archive job, or by the SPA on
+/// next /settings fetch. The poll-interval knob keeps its own endpoint
+/// because it has to be re-armed in the monitor immediately.
+async fn update_setting(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<SettingsUpdatePayload>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let mut cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+
+    // Allow-list. Booleans and small ints only — anything that could
+    // break recordings on a typo (paths, templates, format strings)
+    // stays out until phase 2c adds proper validation + a wizard.
+    let result: Result<(), String> = match body.path.as_str() {
+        "recording.transcode" => take_bool(&body.value).map(|v| cfg.recording.transcode = v),
+        "recording.twitch_live_from_start" => {
+            take_bool(&body.value).map(|v| cfg.recording.twitch_live_from_start = v)
+        }
+        "recording.auto_vod_backfill" => {
+            take_bool(&body.value).map(|v| cfg.recording.auto_vod_backfill = v)
+        }
+        "recording.auto_trim_ads" => take_bool(&body.value).map(|v| cfg.recording.auto_trim_ads = v),
+        "ui.reduce_motion" => take_bool(&body.value).map(|v| cfg.ui.reduce_motion = v),
+        "ui.verbose_status" => take_bool(&body.value).map(|v| cfg.ui.verbose_status = v),
+        "archiver.enabled" => take_bool(&body.value).map(|v| cfg.archiver.enabled = v),
+        // Notifications — every flag is a bool the daemon's notify-rust
+        // integration consults before firing a banner.
+        "notifications.desktop_enabled" => {
+            take_bool(&body.value).map(|v| cfg.notifications.desktop_enabled = v)
+        }
+        "notifications.on_go_live" => {
+            take_bool(&body.value).map(|v| cfg.notifications.on_go_live = v)
+        }
+        "notifications.on_recording_finished" => {
+            take_bool(&body.value).map(|v| cfg.notifications.on_recording_finished = v)
+        }
+        "notifications.on_recording_failed" => {
+            take_bool(&body.value).map(|v| cfg.notifications.on_recording_failed = v)
+        }
+        "notifications.on_vod_ready" => {
+            take_bool(&body.value).map(|v| cfg.notifications.on_vod_ready = v)
+        }
+        // Monitor safety knobs. 0 disables; we clamp upper bounds at sane
+        // values so a fat-fingered '999999' doesn't accidentally pin the
+        // daemon trying to start a thousand simultaneous captures.
+        "monitor_limits.max_concurrent_recordings" => take_u32(&body.value).and_then(|v| {
+            if v <= 64 {
+                cfg.monitor_limits.max_concurrent_recordings = v;
+                Ok(())
+            } else {
+                Err("max_concurrent_recordings must be 0..=64".into())
+            }
+        }),
+        // Per-plugin toggles. Path shape: plugins.<name>.enabled — the
+        // <name> is allowed to be any kebab/snake-case identifier; we
+        // validate it inline rather than enumerating every plugin so
+        // new plugins land without an allowlist update.
+        path if path.starts_with("plugins.") && path.ends_with(".enabled") => {
+            let name = &path["plugins.".len()..path.len() - ".enabled".len()];
+            if name.is_empty()
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+            {
+                Err(format!("invalid plugin name in path: {name:?}"))
+            } else {
+                take_bool(&body.value).map(|v| {
+                    let entry = cfg
+                        .plugin_toggles
+                        .entry(name.to_string())
+                        .or_insert_with(strivo_core::config::PluginToggle::default);
+                    entry.enabled = v;
+                })
+            }
+        }
+        "monitor_limits.disk_budget_reserved_gb" => take_u32(&body.value).and_then(|v| {
+            if v <= 100_000 {
+                cfg.monitor_limits.disk_budget_reserved_gb = v;
+                Ok(())
+            } else {
+                Err("disk_budget_reserved_gb must be 0..=100000".into())
+            }
+        }),
+        "archiver.concurrent_fragments" => {
+            // Clamp to 1..=16 — yt-dlp accepts more but past 16 you're
+            // just thrashing the platform's rate limiter.
+            take_u32(&body.value).and_then(|v| {
+                if (1..=16).contains(&v) {
+                    cfg.archiver.concurrent_fragments = v;
+                    Ok(())
+                } else {
+                    Err("concurrent_fragments must be 1..=16".into())
+                }
+            })
+        }
+        "recording.filename_template" => take_nonempty_str(&body.value).map(|s| {
+            cfg.recording.filename_template = s;
+        }),
+        "recording.container" => take_str_in(&body.value, &["matroska", "mp4", "webm"])
+            .map(|s| cfg.recording.format.container = Some(s)),
+        "archiver.archive_dir" => take_nonempty_str(&body.value).map(|s| {
+            cfg.archiver.archive_dir = std::path::PathBuf::from(s);
+        }),
+        "archiver.format" => take_nonempty_str(&body.value).map(|s| {
+            cfg.archiver.format = s;
+        }),
+        other => Err(format!("unknown or read-only setting: {other}")),
+    };
+
+    if let Err(e) = result {
+        return crate::problem::Problem::bad_request(e).into_response();
+    }
+    let path = cfg.config_path.clone();
+    if let Err(e) = cfg.save(path.as_deref()) {
+        return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+    }
+    (StatusCode::ACCEPTED, Json(json!({"ok": true, "path": body.path}))).into_response()
+}
+
+fn take_bool(v: &serde_json::Value) -> Result<bool, String> {
+    v.as_bool().ok_or_else(|| "expected boolean".into())
+}
+
+fn take_u32(v: &serde_json::Value) -> Result<u32, String> {
+    v.as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .ok_or_else(|| "expected non-negative integer".into())
+}
+
+fn take_nonempty_str(v: &serde_json::Value) -> Result<String, String> {
+    let s = v.as_str().ok_or_else(|| "expected string".to_string())?;
+    let t = s.trim();
+    if t.is_empty() {
+        return Err("value must not be empty".into());
+    }
+    Ok(t.to_string())
+}
+
+fn take_str_in(v: &serde_json::Value, allowed: &[&str]) -> Result<String, String> {
+    let s = take_nonempty_str(v)?;
+    if allowed.iter().any(|a| a.eq_ignore_ascii_case(&s)) {
+        Ok(s.to_lowercase())
+    } else {
+        Err(format!("must be one of {allowed:?}"))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PlatformConfigPayload {
+    client_id: String,
+    client_secret: String,
+    /// Optional path on disk to a Netscape cookies file. Used by
+    /// YouTube + Patreon. Empty string = unchanged.
+    #[serde(default)]
+    cookies_path: String,
+    /// YouTube only — optional WebSub callback URL.
+    #[serde(default)]
+    websub_callback_url: String,
+}
+
+/// `POST /api/v1/settings/platform/<name>` — persist credentials for
+/// one of the three first-party platforms. Saves to config.toml and
+/// echoes the resulting "configured" flag so the SPA can update its
+/// status badge without a follow-up GET.
+async fn set_platform(
+    Path(name): Path<String>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<PlatformConfigPayload>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    if body.client_id.trim().is_empty() || body.client_secret.trim().is_empty() {
+        return crate::problem::Problem::bad_request(
+            "client_id and client_secret are required",
+        )
+        .into_response();
+    }
+    let mut cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+
+    let cookies_opt = (!body.cookies_path.trim().is_empty())
+        .then(|| std::path::PathBuf::from(body.cookies_path.clone()));
+
+    match name.as_str() {
+        "twitch" => {
+            cfg.twitch = Some(strivo_core::config::TwitchConfig {
+                client_id: body.client_id,
+                client_secret: body.client_secret,
+            });
+        }
+        "youtube" => {
+            cfg.youtube = Some(strivo_core::config::YouTubeConfig {
+                client_id: body.client_id,
+                client_secret: body.client_secret,
+                cookies_path: cookies_opt,
+                websub_callback_url: (!body.websub_callback_url.trim().is_empty())
+                    .then(|| body.websub_callback_url.clone()),
+            });
+        }
+        "patreon" => {
+            cfg.patreon = Some(strivo_core::config::PatreonConfig {
+                client_id: body.client_id,
+                client_secret: body.client_secret,
+                poll_interval_secs: cfg
+                    .patreon
+                    .as_ref()
+                    .map(|p| p.poll_interval_secs)
+                    .unwrap_or(300),
+                cookies_path: cookies_opt,
+            });
+        }
+        other => {
+            return crate::problem::Problem::bad_request(format!("unknown platform: {other}"))
+                .into_response()
+        }
+    }
+
+    let path = cfg.config_path.clone();
+    if let Err(e) = cfg.save(path.as_deref()) {
+        return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+    }
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "ok": true, "platform": name, "configured": true })),
+    )
+        .into_response()
 }
 
 /// Numeric severity for a `tracing` level token, higher = more severe.
@@ -1044,6 +1436,55 @@ async fn backups_list(headers: HeaderMap, State(state): State<AppState>) -> impl
     // Newest first (names are sortable timestamps).
     sets.sort_by(|a, b| b["name"].as_str().cmp(&a["name"].as_str()));
     Json(json!({ "backups": sets })).into_response()
+}
+
+/// `GET /api/v1/backups/<name>/download` — stream the backup as a
+/// tarball so the user can pull a copy off-box. Same name/safety rules
+/// as restore; no auth bypass.
+async fn backup_download(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    if !safe_backup_name(&name) {
+        return crate::problem::Problem::bad_request("invalid backup name").into_response();
+    }
+    let dir = backups_dir().join(&name);
+    if !dir.is_dir() {
+        return crate::problem::Problem::not_found("backup not found").into_response();
+    }
+    // Pipe `tar` and let it stream — handles arbitrary sizes without
+    // buffering. Conservative content-type so browsers do "Save As".
+    let child = std::process::Command::new("tar")
+        .args(["-C", &dir.parent().unwrap_or(&dir).to_string_lossy(), "-czf", "-", &name])
+        .stdout(std::process::Stdio::piped())
+        .spawn();
+    let mut child = match child {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(format!("tar: {e}")).into_response(),
+    };
+    let mut out = Vec::new();
+    use std::io::Read;
+    if let Some(mut s) = child.stdout.take() {
+        if let Err(e) = s.read_to_end(&mut out) {
+            return crate::problem::Problem::internal(e.to_string()).into_response();
+        }
+    }
+    let _ = child.wait();
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "application/gzip"),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                Box::leak(format!("attachment; filename=\"strivo-backup-{name}.tar.gz\"").into_boxed_str()),
+            ),
+        ],
+        out,
+    )
+        .into_response()
 }
 
 async fn backup_restore(
@@ -1272,6 +1713,217 @@ async fn put_auto_record(
         Json(json!({"status": "ok", "enabled": body.enabled})),
     )
         .into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct TandemPayload {
+    enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct TandemPlaylistsPayload {
+    /// Per-key entries the user wants captured. Empty string at the end
+    /// is dropped; duplicates de-duped server-side.
+    playlists: Vec<String>,
+}
+
+/// `PUT /api/v1/channels/<channel_key>/archiver_tandem` — toggle
+/// archiver tandem mode for the given Platform:channel_id key. When
+/// enabled, the daemon auto-downloads new uploads as the monitor
+/// discovers them.
+async fn put_archiver_tandem(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(channel_key): Path<String>,
+    Json(body): Json<TandemPayload>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let mut cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+    let already_in = cfg.archiver.tandem_channels.iter().any(|c| c == &channel_key);
+    match (body.enabled, already_in) {
+        (true, false) => cfg.archiver.tandem_channels.push(channel_key.clone()),
+        (false, true) => cfg.archiver.tandem_channels.retain(|c| c != &channel_key),
+        _ => {}
+    }
+    let path = cfg.config_path.clone();
+    if let Err(e) = cfg.save(path.as_deref()) {
+        return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+    }
+    (StatusCode::OK, Json(json!({"ok": true, "enabled": body.enabled}))).into_response()
+}
+
+/// `PUT /api/v1/channels/<channel_key>/archiver_playlists` — set the
+/// playlist allow-list for a YouTube channel under archiver tandem.
+/// Empty list = whole channel. Channel-level archiver tandem is
+/// independent; this just narrows the scope.
+async fn put_archiver_playlists(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(channel_key): Path<String>,
+    Json(body): Json<TandemPlaylistsPayload>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let mut cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+    // Strip the existing entries for this channel, then push the new
+    // set with the channel_key prefix. Format: "Platform:channel_id/<playlist>".
+    cfg.archiver
+        .tandem_playlists
+        .retain(|p| !p.starts_with(&format!("{channel_key}/")));
+    let mut seen = std::collections::HashSet::new();
+    for raw in body.playlists.into_iter() {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let entry = format!("{channel_key}/{trimmed}");
+        if seen.insert(entry.clone()) {
+            cfg.archiver.tandem_playlists.push(entry);
+        }
+    }
+    let path = cfg.config_path.clone();
+    if let Err(e) = cfg.save(path.as_deref()) {
+        return crate::problem::Problem::internal(format!("save config: {e}")).into_response();
+    }
+    Json(json!({ "ok": true })).into_response()
+}
+
+/// `GET /api/v1/monitor` — unified view for the Monitor page. Returns
+/// every channel currently set to record-when-live, every channel
+/// flagged for archiver tandem download, and the per-channel playlist
+/// allow-lists.
+async fn monitor_state(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if check_key(&headers, &state).is_err() {
+        return crate::problem::Problem::unauthorized().into_response();
+    }
+    let cfg = match strivo_core::config::AppConfig::load(None) {
+        Ok(c) => c,
+        Err(e) => return crate::problem::Problem::internal(e.to_string()).into_response(),
+    };
+    let auto_record: Vec<serde_json::Value> = cfg
+        .auto_record_channels
+        .iter()
+        .map(|c| {
+            json!({
+                "platform": c.platform,
+                "channel_id": c.channel_id,
+                "channel_name": c.channel_name,
+                "key": format!("{}:{}", c.platform, c.channel_id),
+            })
+        })
+        .collect();
+    // Pivot tandem_playlists from "Key/Playlist" back to per-channel
+    // lists so the SPA can render them grouped.
+    let mut tandem: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for raw in &cfg.archiver.tandem_playlists {
+        if let Some((key, pl)) = raw.split_once('/') {
+            tandem.entry(key.to_string()).or_default().push(pl.to_string());
+        }
+    }
+    let auto_download: Vec<serde_json::Value> = cfg
+        .archiver
+        .tandem_channels
+        .iter()
+        .map(|key| {
+            let (platform, channel_id) = key.split_once(':').unwrap_or((key.as_str(), ""));
+            json!({
+                "platform": platform,
+                "channel_id": channel_id,
+                "key": key,
+                "playlists": tandem.get(key).cloned().unwrap_or_default(),
+            })
+        })
+        .collect();
+    Json(json!({
+        "auto_record": auto_record,
+        "auto_download": auto_download,
+    }))
+    .into_response()
+}
+
+/// `GET /api/v1/plugins/capabilities` — the DAW-vision capability
+/// matrix: which plugins (or roadmap slots) fulfil each capability
+/// tag. First-party providers are hard-coded here today; once the
+/// daemon exposes the registry over IPC we'll switch to that. The
+/// SPA renders this as the cross-plugin pipeline graph and lets
+/// users discover "who does what".
+async fn plugin_capabilities() -> impl IntoResponse {
+    use strivo_core::plugin::capability as cap;
+    // (capability, [(plugin, status)]) where status is "available"
+    // if the plugin is shipped or "roadmap" if the slot is reserved
+    // for an upcoming plugin (matches the DAW-vision plan).
+    // Every entry here corresponds to an in-tree, shipped + tested
+    // plugin crate. The `roadmap` status now only applies to the two
+    // marketplace entries that still depend on external work (demucs,
+    // YouTube OAuth) — surfaced from the marketplace catalog below.
+    let matrix = json!([
+        { "capability": cap::TRANSCRIPTION,        "providers": [{"plugin": "crunchr", "status": "available"}] },
+        { "capability": cap::WORD_TIMESTAMPS,      "providers": [{"plugin": "crunchr", "status": "available"}] },
+        { "capability": cap::DIARISATION,          "providers": [{"plugin": "crunchr", "status": "available"}] },
+        { "capability": cap::TOPIC_SEGMENTATION,   "providers": [{"plugin": "crunchr", "status": "available"}] },
+        { "capability": cap::CHAPTERS,             "providers": [{"plugin": "chapters", "status": "available"}] },
+        { "capability": cap::SCENE_DETECTION,      "providers": [{"plugin": "cuepoints", "status": "available"}] },
+        { "capability": cap::THUMBNAIL_RANKING,    "providers": [{"plugin": "thumbnails", "status": "available"}] },
+        { "capability": cap::HIGHLIGHT_DETECTION,  "providers": [{"plugin": "clipper", "status": "available"}] },
+        { "capability": cap::CLIP_EXTRACTION,      "providers": [{"plugin": "clipper", "status": "available"}] },
+        { "capability": cap::TRANSLATION,          "providers": [{"plugin": "captions", "status": "available"}] },
+        { "capability": cap::CAPTIONS,             "providers": [
+            {"plugin": "captions",       "status": "available"},
+            {"plugin": "captions-ass",   "status": "available"}
+        ] },
+        { "capability": cap::AUDIENCE_RETENTION,   "providers": [
+            {"plugin": "heatmap",      "status": "available"},
+            {"plugin": "chat-density", "status": "available"}
+        ] },
+        { "capability": cap::FRAUD_DETECTION,      "providers": [{"plugin": "viewguard", "status": "available"}] },
+        { "capability": cap::STREAM_COMPARISON,    "providers": [
+            {"plugin": "insights",         "status": "available"},
+            {"plugin": "viewguard-trend",  "status": "available"}
+        ] },
+        { "capability": cap::REPORTING,            "providers": [{"plugin": "casebook", "status": "available"}] },
+        { "capability": cap::BRAND_SAFETY,         "providers": [{"plugin": "brandsafe", "status": "available"}] },
+        { "capability": cap::ASSET_CATALOG,        "providers": [{"plugin": "archiver", "status": "available"}] },
+        { "capability": cap::SOURCE_TRACK_SPLIT,   "providers": [
+            {"plugin": "multitrack",    "status": "available"},
+            {"plugin": "demucs-split",  "status": "roadmap"}
+        ] },
+        { "capability": cap::PUBLISH_QUEUE,        "providers": [
+            {"plugin": "reuse",      "status": "available"},
+            {"plugin": "yt-publish", "status": "roadmap"}
+        ] },
+        { "capability": cap::EDL_EDITOR,           "providers": [
+            {"plugin": "editor",   "status": "available"},
+            {"plugin": "deadair",  "status": "available"},
+            {"plugin": "branding", "status": "available"},
+            {"plugin": "broll",    "status": "available"}
+        ] },
+        // Net-new capabilities from iters 23–24. Use `x.`-prefixed tags so
+        // they don't drift from the WELL_KNOWN_CAPABILITIES constant set.
+        { "capability": "x.loudness",        "providers": [{"plugin": "loudness", "status": "available"}] },
+        { "capability": "x.structure",       "providers": [{"plugin": "structure", "status": "available"}] },
+        { "capability": "x.audio_automation", "providers": [{"plugin": "automation", "status": "available"}] },
+        { "capability": "x.scenes",          "providers": [{"plugin": "scenes", "status": "available"}] },
+        { "capability": "x.publish_slots",   "providers": [{"plugin": "schedule-optimizer", "status": "available"}] },
+        { "capability": "x.tempo",           "providers": [{"plugin": "beat-detect", "status": "available"}] },
+        { "capability": "x.voice_gate",      "providers": [{"plugin": "vad", "status": "available"}] },
+        { "capability": "x.multistream",     "providers": [{"plugin": "multistream", "status": "available"}] },
+        { "capability": "x.chat",            "providers": [{"plugin": "chat",        "status": "available"}] },
+        { "capability": "x.pipelines_dag",   "providers": [{"plugin": "pipelines-dag", "status": "available"}] },
+        { "capability": "x.marketplace",     "providers": [{"plugin": "marketplace",   "status": "available"}] },
+    ]);
+    Json(matrix)
 }
 
 // ── W2: plugin RPC ───────────────────────────────────────────────────
@@ -1519,8 +2171,52 @@ async fn patreon_pull(
     }
 }
 
+/// `GET /api/v1/marketplace/catalog` — the curated third-party plugin
+/// catalog. Each entry carries a validated [PluginManifest] + a source
+/// tag (`first_party` / `verified` / `community`) + an installed flag.
+/// Public surface (not Pro-gated) so free builds preview the upgrade
+/// path. Installed detection plugs in when the install endpoint lands;
+/// today it always reports `false`.
+async fn marketplace_catalog() -> impl IntoResponse {
+    let mut catalog = strivo_marketplace::default_catalog();
+    // Strip any catalog entries that fail validation — better to hide
+    // than to ship a broken row to the SPA.
+    catalog.entries.retain(|e| strivo_marketplace::validate_manifest(&e.manifest).is_ok());
+    Json(json!({
+        "host_version": strivo_marketplace::HOST_VERSION,
+        "catalog": catalog,
+    }))
+}
+
+/// `GET /api/v1/pipelines/dag` — the canonical DAW-vision pipeline
+/// DAG. Public surface (not Pro-gated) so the SPA's Pipelines page
+/// renders even on free builds, where it doubles as a roadmap teaser
+/// alongside the upgrade card.
+async fn pipelines_dag() -> impl IntoResponse {
+    let pipelines = strivo_pipelines_dag::default_pipelines();
+    // Bundle each pipeline with its topological order so the SPA can
+    // lay nodes left-to-right deterministically.
+    let payload: Vec<serde_json::Value> = pipelines
+        .into_iter()
+        .map(|p| {
+            let order = strivo_pipelines_dag::topo_order(&p).unwrap_or_default();
+            json!({
+                "id": p.id,
+                "name": p.name,
+                "description": p.description,
+                "nodes": p.nodes,
+                "edges": p.edges,
+                "order": order,
+            })
+        })
+        .collect();
+    Json(json!({ "pipelines": payload }))
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/api/v1/pipelines/dag", get(pipelines_dag))
+        .route("/api/v1/marketplace/catalog", get(marketplace_catalog))
         .route("/api/v1/health", get(health))
         .route("/api/v1/health/checks", get(health_checks))
         .route("/api/v1/channels", get(channels))
@@ -1535,15 +2231,20 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/recordings/stop_all", post(stop_all_recordings))
         .route("/api/v1/recordings/clear_errored", post(clear_errored_recordings))
         .route("/api/v1/recordings/{id}/file", axum::routing::delete(delete_recording_file))
-        .route("/api/v1/schedule", get(schedule))
+        .route("/api/v1/recordings/{id}/remux", post(remux_recording))
+        .route("/api/v1/schedule", get(schedule).post(schedule_add))
+        .route("/api/v1/schedule/{index}", axum::routing::delete(schedule_delete))
         .route("/api/v1/settings", get(settings))
         .route("/api/v1/poll_now", post(poll_now))
         .route("/api/v1/settings/poll_interval", post(set_poll_interval))
+        .route("/api/v1/settings/update", post(update_setting))
+        .route("/api/v1/settings/platform/{name}", post(set_platform))
         .route("/api/v1/logs", get(logs))
         .route("/api/v1/history", get(history))
         .route("/api/v1/backup", post(backup_create))
         .route("/api/v1/backups", get(backups_list))
         .route("/api/v1/backups/{name}/restore", post(backup_restore))
+        .route("/api/v1/backups/{name}/download", get(backup_download))
         .route(
             "/api/v1/blocklist",
             get(blocklist_get).post(blocklist_add).delete(blocklist_remove),
@@ -1552,6 +2253,16 @@ pub fn router() -> Router<AppState> {
             "/api/v1/channels/{channel_key}/auto_record",
             put(put_auto_record),
         )
+        .route(
+            "/api/v1/channels/{channel_key}/archiver_tandem",
+            put(put_archiver_tandem),
+        )
+        .route(
+            "/api/v1/channels/{channel_key}/archiver_playlists",
+            put(put_archiver_playlists),
+        )
+        .route("/api/v1/monitor", get(monitor_state))
+        .route("/api/v1/plugins/capabilities", get(plugin_capabilities))
         .route("/api/v1/plugins/{plugin}/{verb}", post(plugin_rpc))
         // W5: stream-recorder surfaces
         .route("/api/v1/storage", get(storage))

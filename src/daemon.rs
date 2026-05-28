@@ -216,6 +216,15 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
 
     tracing::info!("StriVo daemon starting");
 
+    // Strivo Pro: kick off the 72h licence-refresh loop. No-op when
+    // STRIVO_LICENCE_URL is unset; survives offline (failures are
+    // info-logged, the cache stays valid until the server explicitly
+    // revokes). Handle is intentionally leaked — the task lives for
+    // the daemon's lifetime.
+    let _licence_refresh = crate::licence::spawn_refresh_loop(
+        crate::licence::DEFAULT_REFRESH_INTERVAL,
+    );
+
     // Write PID file
     let pid_path = ipc::pid_path();
     std::fs::write(&pid_path, std::process::id().to_string())?;

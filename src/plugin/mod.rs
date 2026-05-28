@@ -547,4 +547,69 @@ pub trait Plugin: Send {
     /// Downcast support.
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
+
+    /// DAW-vision capability tags this plugin fulfils. Used by the
+    /// host to wire cross-plugin pipelines and surface "who provides
+    /// what" in the SPA. String-typed so third-party plugins can
+    /// declare custom capabilities without trait-API breakage. Well-
+    /// known values live as constants on [`capability`]. Default
+    /// returns empty so existing plugins keep compiling.
+    fn capabilities(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
+}
+
+/// Well-known capability strings. Plugins return these from
+/// [`Plugin::capabilities`] so the registry can answer "who
+/// provides chapter generation?" — the spine the DAW-for-streaming
+/// vision wires every cross-plugin pipeline onto. String constants
+/// (not an enum) so third-party plugins can name their own
+/// capabilities without trait churn; collisions are merit-of-the
+/// matching-string and explicit.
+///
+/// **Production**: things a plugin emits / writes / catalogs.
+/// **Consumption**: things a plugin reads / depends on.
+/// Both directions live in the same namespace — the registry
+/// computes the bipartite "needs X" / "provides X" graph.
+pub mod capability {
+    /// Speech-to-text transcript for a recording.
+    pub const TRANSCRIPTION: &str = "transcription";
+    /// Per-word time offsets (for click-to-seek).
+    pub const WORD_TIMESTAMPS: &str = "word_timestamps";
+    /// Speaker diarisation labels on the transcript.
+    pub const DIARISATION: &str = "diarisation";
+    /// Topic segmentation across a transcript.
+    pub const TOPIC_SEGMENTATION: &str = "topic_segmentation";
+    /// Chapter markers suitable for YouTube/Twitch publishing.
+    pub const CHAPTERS: &str = "chapters";
+    /// Scene-change cuepoints (visual or audio).
+    pub const SCENE_DETECTION: &str = "scene_detection";
+    /// Per-frame thumbnail-candidate ranking.
+    pub const THUMBNAIL_RANKING: &str = "thumbnail_ranking";
+    /// Highlight-segment detection (chat + audio + facecam fusion).
+    pub const HIGHLIGHT_DETECTION: &str = "highlight_detection";
+    /// Cuts a highlight into a publishable clip file.
+    pub const CLIP_EXTRACTION: &str = "clip_extraction";
+    /// Machine translation of transcripts / captions.
+    pub const TRANSLATION: &str = "translation";
+    /// Caption file (.srt / .vtt) generation + export.
+    pub const CAPTIONS: &str = "captions";
+    /// Audience-retention curve / heatmap source.
+    pub const AUDIENCE_RETENTION: &str = "audience_retention";
+    /// Viewbot / fraud detection signals.
+    pub const FRAUD_DETECTION: &str = "fraud_detection";
+    /// Cross-stream comparison + delta surfaces.
+    pub const STREAM_COMPARISON: &str = "stream_comparison";
+    /// Post-stream Casebook / report writer.
+    pub const REPORTING: &str = "reporting";
+    /// Content-safety / brand-safety pre-publish gate.
+    pub const BRAND_SAFETY: &str = "brand_safety";
+    /// Long-term asset catalog of past VODs / clips.
+    pub const ASSET_CATALOG: &str = "asset_catalog";
+    /// Source-separation (game audio / voice / Discord / music).
+    pub const SOURCE_TRACK_SPLIT: &str = "source_track_split";
+    /// Cross-format publish queue (YT / Shorts / TikTok / podcast).
+    pub const PUBLISH_QUEUE: &str = "publish_queue";
+    /// EDL / arrange-view non-destructive editor.
+    pub const EDL_EDITOR: &str = "edl_editor";
 }

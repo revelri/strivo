@@ -76,3 +76,6 @@ desktop.ini
 *.rej
 /tmp/
 /scratch/
+
+# Local cargo config (per-contributor [patch] overrides etc).
+.cargo/

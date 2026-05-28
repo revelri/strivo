@@ -1,0 +1,26 @@
+name = "strivo-licence"
+main = "src/index.ts"
+compatibility_date = "2026-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 — fill `database_id` after running:
+#   npx wrangler d1 create strivo-licence
+[[d1_databases]]
+binding = "LICENCE_DB"
+database_name = "strivo-licence"
+database_id = "REPLACE_WITH_D1_ID"
+
+# Non-secret vars — secrets go via `wrangler secret put`.
+[vars]
+PUBLIC_BASE_URL = "https://licence.chorosyne.com"
+TRIAL_DURATION_HOURS = "72"
+REFRESH_INTERVAL_HOURS = "72"
+LEMONSQUEEZY_STORE_ID = ""        # numeric, set per-environment
+LEMONSQUEEZY_PRODUCT_ID = ""      # numeric
+
+# Rate limit binding (CF Workers Rate Limiting API). Free tier OK.
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1000"
+simple = { limit = 30, period = 60 }

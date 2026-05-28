@@ -1,0 +1,20 @@
+[package]
+name = "strivo-scenes"
+version = "0.1.0"
+edition = "2021"
+description = "DAW-style scene snapshots — bundle every per-recording plugin state as a named session"
+authors = ["revelri <slrevoy@mailbox.org>"]
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+rusqlite = { version = "0.33", features = ["bundled"] }
+anyhow = "1"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,14 @@
+[package]
+name = "strivo-vad"
+version = "0.1.0"
+edition = "2021"
+description = "Voice activity detection / noise gate — hysteresis-based VAD intervals from ffmpeg astats envelopes"
+authors = ["revelri <slrevoy@mailbox.org>"]
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

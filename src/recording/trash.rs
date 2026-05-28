@@ -31,8 +31,25 @@ pub fn move_to_trash(src: &Path) -> Result<PathBuf> {
     let initial = bucket.join(file_name);
     let dest = disambiguate(&initial);
 
-    std::fs::rename(src, &dest)
-        .with_context(|| format!("move {} -> {}", src.display(), dest.display()))?;
+    // std::fs::rename fails with EXDEV across filesystems — the common
+    // case when recordings live on a media drive and trash sits in the
+    // user's state dir. Fall back to copy + unlink so the trash still
+    // works. (audit B8)
+    if let Err(rename_err) = std::fs::rename(src, &dest) {
+        let kind = rename_err.raw_os_error();
+        let is_cross_fs = matches!(kind, Some(libc_exdev) if libc_exdev == 18);
+        if !is_cross_fs {
+            return Err(anyhow::Error::new(rename_err)
+                .context(format!("move {} -> {}", src.display(), dest.display())));
+        }
+        std::fs::copy(src, &dest)
+            .with_context(|| format!("copy {} -> {}", src.display(), dest.display()))?;
+        if let Err(e) = std::fs::remove_file(src) {
+            // Best-effort: even if the unlink fails (read-only mount,
+            // etc.), the copy succeeded, so the trash holds the data.
+            tracing::warn!("trash: unlink source after copy failed: {e}");
+        }
+    }
     Ok(dest)
 }
 
