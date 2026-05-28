@@ -53,6 +53,75 @@ fn contain_in_root(
     }
 }
 
+/// Sniff the actual container by reading the file's leading bytes and
+/// matching magic signatures. Beats extension-based guessing when a file
+/// has been mis-renamed (e.g. `foo.mkv` that's actually an MP3 inside —
+/// Firefox refuses the mismatch). Returns None if no signature matches;
+/// caller falls back to `guess_mime`.
+async fn sniff_mime(path: &std::path::Path) -> Option<&'static str> {
+    use tokio::io::AsyncReadExt;
+    const HEAD: usize = 4096;
+    let mut buf = vec![0u8; HEAD];
+    let mut f = tokio::fs::File::open(path).await.ok()?;
+    let n = f.read(&mut buf).await.ok()?;
+    if n == 0 {
+        return None;
+    }
+    buf.truncate(n);
+    Some(detect_mime(&buf)?)
+}
+
+/// Pure-byte signature dispatch — split out so it can be unit-tested
+/// against fabricated headers without writing files.
+fn detect_mime(buf: &[u8]) -> Option<&'static str> {
+    // EBML — matroska or webm. Look for the DocType ascii anywhere in the
+    // EBML header (first ~256 bytes); the literal "webm" / "matroska" lives
+    // a few bytes past the DocType element id (0x4282) and a length VINT.
+    if buf.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) {
+        if buf.windows(4).take(256).any(|w| w == b"webm") {
+            return Some("video/webm");
+        }
+        return Some("video/x-matroska");
+    }
+    // MP4 family — `ftyp` box at offset 4..8; brand at 8..12 distinguishes
+    // audio (M4A/M4B/M4P) from video (everything else) from QuickTime.
+    if buf.len() >= 12 && &buf[4..8] == b"ftyp" {
+        return Some(match &buf[8..12] {
+            b"M4A " | b"M4B " | b"M4P " => "audio/mp4",
+            b"qt  " => "video/quicktime",
+            _ => "video/mp4",
+        });
+    }
+    // ID3-tagged MP3 (most encoders prepend an ID3v2 header).
+    if buf.starts_with(b"ID3") {
+        return Some("audio/mpeg");
+    }
+    // MPEG audio frame sync — 11 high bits set (0xFFE0). Covers MP3 + AAC
+    // ADTS, both of which Firefox/Chrome play as audio/mpeg / audio/aac;
+    // we collapse to audio/mpeg since browsers accept it for both.
+    if buf.len() >= 2 && buf[0] == 0xFF && (buf[1] & 0xE0) == 0xE0 {
+        return Some("audio/mpeg");
+    }
+    // FLAC stream marker.
+    if buf.starts_with(b"fLaC") {
+        return Some("audio/flac");
+    }
+    // OGG container — covers Vorbis + Opus; browsers decode either.
+    if buf.starts_with(b"OggS") {
+        return Some("audio/ogg");
+    }
+    // RIFF/WAVE — RIFF<size>WAVE.
+    if buf.starts_with(b"RIFF") && buf.len() >= 12 && &buf[8..12] == b"WAVE" {
+        return Some("audio/wav");
+    }
+    // MPEG-TS — 0x47 sync byte at offsets 0 and 188 (one packet apart).
+    // The double-check beats false-positive single-byte matches.
+    if buf.len() >= 189 && buf[0] == 0x47 && buf[188] == 0x47 {
+        return Some("video/mp2t");
+    }
+    None
+}
+
 /// Map a file extension to a Content-Type the browser will play happily.
 /// Old behaviour hard-coded `video/x-matroska` on every download, which (a)
 /// is wrong for audio-only pulls (yt-dlp may write .m4a / .mp3 / .opus when
@@ -105,11 +174,17 @@ async fn download(State(state): State<AppState>, Path(id): Path<Uuid>) -> Respon
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("recording.mkv");
+    // Prefer magic-byte sniffing over extension-based guessing — a file
+    // mis-named foo.mkv that actually contains MP3 audio inside would
+    // otherwise get video/x-matroska and Firefox refuses the mismatch.
+    let mime = match sniff_mime(&path).await {
+        Some(m) => m,
+        None => guess_mime(&path),
+    };
     let mut resp = Response::new(body);
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
-        guess_mime(&path)
-            .parse()
+        mime.parse()
             .unwrap_or_else(|_| header::HeaderValue::from_static("application/octet-stream")),
     );
     resp.headers_mut().insert(
@@ -182,6 +257,52 @@ mod tests {
         }
         fs::remove_dir_all(&root).ok();
         fs::remove_dir_all(&secret).ok();
+    }
+
+    #[test]
+    fn detect_mime_recognises_real_signatures() {
+        // EBML — matroska vs webm
+        assert_eq!(
+            detect_mime(&[0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x86, 0x81, 0x01]),
+            Some("video/x-matroska"),
+        );
+        // EBML with DocType "webm" anywhere in the header window
+        let mut webm = vec![0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x82, 0x84];
+        webm.extend_from_slice(b"webm");
+        assert_eq!(detect_mime(&webm), Some("video/webm"));
+
+        // MP4 family ftyp brands
+        let mut hdr = [0u8; 16];
+        hdr[4..8].copy_from_slice(b"ftyp");
+        hdr[8..12].copy_from_slice(b"M4A ");
+        assert_eq!(detect_mime(&hdr), Some("audio/mp4"));
+        hdr[8..12].copy_from_slice(b"qt  ");
+        assert_eq!(detect_mime(&hdr), Some("video/quicktime"));
+        hdr[8..12].copy_from_slice(b"isom");
+        assert_eq!(detect_mime(&hdr), Some("video/mp4"));
+
+        // MP3 — ID3 prefix
+        assert_eq!(detect_mime(b"ID3\x03\x00\x00\x00\x00\x00\x00"), Some("audio/mpeg"));
+        // MP3 — bare MPEG sync
+        assert_eq!(detect_mime(&[0xFF, 0xFB, 0x90, 0x00]), Some("audio/mpeg"));
+
+        // FLAC / OGG / WAV
+        assert_eq!(detect_mime(b"fLaC\0\0\0\0"), Some("audio/flac"));
+        assert_eq!(detect_mime(b"OggS\0\0\0\0\0\0\0\0"), Some("audio/ogg"));
+        let mut wav = vec![0u8; 12];
+        wav[..4].copy_from_slice(b"RIFF");
+        wav[8..12].copy_from_slice(b"WAVE");
+        assert_eq!(detect_mime(&wav), Some("audio/wav"));
+
+        // MPEG-TS — sync at 0 and 188
+        let mut ts = vec![0u8; 200];
+        ts[0] = 0x47;
+        ts[188] = 0x47;
+        assert_eq!(detect_mime(&ts), Some("video/mp2t"));
+
+        // Unrecognised
+        assert_eq!(detect_mime(b"random garbage"), None);
+        assert_eq!(detect_mime(&[]), None);
     }
 
     #[test]
