@@ -2544,6 +2544,69 @@ body.modal-open { overflow: hidden; }
   background: rgba(0, 0, 0, 0.25);
 }
 .pg-cap-chip.pg-cap-available .pg-cap-state { background: rgba(0, 188, 212, 0.25); color: var(--accent2); }
+/* ── Crunchr transcript (iter 2) ─────────────────────────────── */
+.cr-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.8rem;
+}
+.cr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-light);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.18rem 0.6rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.cr-chip:hover { border-color: var(--accent2); }
+.cr-chip.is-active { color: var(--text); background: rgba(0, 188, 212, 0.08); border-color: var(--accent2); }
+.cr-chip-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--cr-spk, var(--accent2)); }
+.cr-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.cr-block { display: grid; grid-template-columns: 90px 1fr; gap: 0.8rem; padding: 0.2rem 0; }
+.cr-block.cr-block-hidden { display: none; }
+.cr-block-meta { display: flex; flex-direction: column; gap: 0.2rem; }
+.cr-block-jump {
+  background: transparent;
+  border: 0;
+  color: var(--accent2);
+  font: inherit;
+  font-size: 0.78rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+.cr-block-jump:hover { text-decoration: underline; }
+.cr-block-spk {
+  font-size: 0.74rem;
+  color: var(--cr-spk, var(--text));
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.cr-spk-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--cr-spk, var(--accent2)); }
+.cr-block-body { line-height: 1.55; color: var(--text); font-size: 0.92rem; }
+.cr-line {
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 0.05rem;
+  transition: background 0.1s;
+}
+.cr-line:hover { background: rgba(0, 188, 212, 0.12); color: var(--accent2); }
+.cr-line.is-active { background: rgba(0, 188, 212, 0.18); }
+@media (max-width: 720px) {
+  .cr-block { grid-template-columns: 1fr; }
+}
 .mon-cron-hint {
   margin: 0.6rem 0 0;
   font-size: 0.78rem;

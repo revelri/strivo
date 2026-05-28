@@ -2734,35 +2734,173 @@ async function renderCrunchrRecording(id) {
          ${topics ? `<div class="pg-chips">${topics}</div>` : ""}
        </section>`
     : "";
-  const segs = (d.segments || [])
-    .map(
-      (s) => `
-      <div class="pg-seg">
-        <span class="pg-seg-time">${fmtClock(s.start_sec)}</span>
-        ${s.speaker ? `<span class="pg-seg-speaker">${escape(s.speaker)}</span>` : ""}
-        <span class="pg-seg-text">${escape(s.text)}</span>
-      </div>`,
-    )
+
+  const segments = d.segments || [];
+  // Build the set of distinct speakers for the filter chip row.
+  const speakers = [...new Set(segments.map((s) => s.speaker).filter(Boolean))].sort();
+  // Group consecutive same-speaker lines into a single block (Descript-
+  // style readability). Each block keeps the seek timestamp of its
+  // first line; its `lines` keep their own timestamps for line-level
+  // click-to-seek inside the block.
+  const blocks = [];
+  for (const seg of segments) {
+    const top = blocks[blocks.length - 1];
+    if (top && top.speaker === seg.speaker) {
+      top.lines.push(seg);
+    } else {
+      blocks.push({ speaker: seg.speaker, lines: [seg] });
+    }
+  }
+  // Speaker chip colours — deterministic per speaker name so the same
+  // person stays the same colour across reloads / recordings.
+  const speakerColour = (name) => {
+    if (!name) return "#888";
+    let h = 0;
+    for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) | 0;
+    return `hsl(${Math.abs(h) % 360}, 55%, 65%)`;
+  };
+
+  const chipsRow = speakers.length
+    ? `<div class="cr-chips" id="cr-chips">
+        <button class="cr-chip is-active" data-spk="" type="button">all</button>
+        ${speakers
+          .map(
+            (s) =>
+              `<button class="cr-chip is-active" data-spk="${escape(s)}" style="--cr-spk:${speakerColour(s)}" type="button"><span class="cr-chip-dot"></span>${escape(s)}</button>`,
+          )
+          .join("")}
+      </div>`
+    : "";
+
+  const blockHtml = blocks
+    .map((b) => {
+      const colour = speakerColour(b.speaker);
+      const firstStart = b.lines[0]?.start_sec ?? 0;
+      const linesHtml = b.lines
+        .map(
+          (line) =>
+            `<span class="cr-line" data-seek="${line.start_sec ?? 0}" title="Open player at ${fmtClock(line.start_sec)}">${escape(line.text)}</span>`,
+        )
+        .join(" ");
+      return `<div class="cr-block" data-spk="${escape(b.speaker || "")}">
+        <div class="cr-block-meta">
+          <button class="cr-block-jump" data-seek="${firstStart}" title="Jump to ${fmtClock(firstStart)}">${fmtClock(firstStart)}</button>
+          ${b.speaker ? `<span class="cr-block-spk" style="--cr-spk:${colour}"><span class="cr-spk-dot"></span>${escape(b.speaker)}</span>` : ""}
+        </div>
+        <div class="cr-block-body">${linesHtml}</div>
+      </div>`;
+    })
     .join("");
+
   root.innerHTML = chrome(`
     ${pluginHeader(d.title || "Transcript", `${escape(d.channel_name)} · ${escape(d.status)}`, "#/plugins/crunchr")}
     <div class="pg-verbs">
       <button id="retranscribe" data-rec="${escape(d.recording_id)}">↻ Re-transcribe</button>
       <a class="pg-linkbtn" href="#/plugins/insights/rec/${encodeURIComponent(d.recording_id)}">View insights →</a>
+      <button id="cr-export-vtt" class="pg-linkbtn" type="button">Export .vtt</button>
+      <button id="cr-export-md" class="pg-linkbtn" type="button">Copy as markdown</button>
     </div>
     ${analysis}
     <section class="cfg-card">
-      <h2 class="cfg-title">Transcript</h2>
-      <div class="pg-transcript">${segs || '<div class="empty sm">No segments — transcription may still be running.</div>'}</div>
+      <h2 class="cfg-title">Transcript <span class="pg-cap-hint">${speakers.length} speaker${speakers.length === 1 ? "" : "s"} · ${blocks.length} block${blocks.length === 1 ? "" : "s"}</span></h2>
+      ${chipsRow}
+      <div class="pg-transcript cr-transcript">${blockHtml || '<div class="empty sm">No segments — transcription may still be running.</div>'}</div>
     </section>
   `);
   setupChromeHandlers();
+
   const btn = document.getElementById("retranscribe");
   if (btn) {
     btn.addEventListener("click", () =>
       dispatchVerb("crunchr", "Re-transcribe", [btn.dataset.rec], btn),
     );
   }
+
+  // Click any line/jump → open the recording player at that timestamp.
+  // openRecordingPlayer reads a `seekTo` argument and the player binds
+  // it in the next iteration when we extend the player.
+  const seek = (sec) => {
+    if (!d.recording_id) return;
+    openRecordingPlayer(d.recording_id, { seekTo: sec });
+  };
+  document.querySelectorAll(".cr-line, .cr-block-jump").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
+      seek(parseFloat(el.dataset.seek || "0"));
+    });
+  });
+
+  // Speaker filter — toggling a chip hides blocks not matching the
+  // active speaker set. "all" is the reset.
+  document.getElementById("cr-chips")?.addEventListener("click", (e) => {
+    const btn = e.target.closest(".cr-chip");
+    if (!btn) return;
+    const chips = [...document.querySelectorAll(".cr-chip")];
+    if (btn.dataset.spk === "") {
+      chips.forEach((c) => c.classList.add("is-active"));
+    } else {
+      btn.classList.toggle("is-active");
+      const allChip = chips.find((c) => c.dataset.spk === "");
+      if (allChip) allChip.classList.toggle("is-active", false);
+    }
+    const active = new Set(
+      chips
+        .filter((c) => c.classList.contains("is-active") && c.dataset.spk)
+        .map((c) => c.dataset.spk),
+    );
+    const showAll = chips.find((c) => c.dataset.spk === "" && c.classList.contains("is-active"));
+    document.querySelectorAll(".cr-block").forEach((blk) => {
+      const visible = showAll || active.size === 0 || active.has(blk.dataset.spk);
+      blk.classList.toggle("cr-block-hidden", !visible);
+    });
+  });
+
+  // .vtt export — bake segments into a WebVTT file and trigger download.
+  document.getElementById("cr-export-vtt")?.addEventListener("click", () => {
+    const lines = ["WEBVTT", ""];
+    const fmtVtt = (sec) => {
+      const ms = Math.max(0, Math.round((sec ?? 0) * 1000));
+      const h = String(Math.floor(ms / 3_600_000)).padStart(2, "0");
+      const m = String(Math.floor((ms / 60_000) % 60)).padStart(2, "0");
+      const s = String(Math.floor((ms / 1000) % 60)).padStart(2, "0");
+      const f = String(ms % 1000).padStart(3, "0");
+      return `${h}:${m}:${s}.${f}`;
+    };
+    segments.forEach((s, i) => {
+      const start = fmtVtt(s.start_sec);
+      const end = fmtVtt(s.end_sec ?? (s.start_sec ?? 0) + 5);
+      lines.push(String(i + 1), `${start} --> ${end}`);
+      lines.push(s.speaker ? `<v ${s.speaker}>${s.text}` : s.text, "");
+    });
+    const blob = new Blob([lines.join("\n")], { type: "text/vtt" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(d.title || "transcript").replace(/[\\/:*?"<>|]/g, "_")}.vtt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    Toast.success("WebVTT exported");
+  });
+
+  // Markdown export — copy to clipboard, ready to paste into a notes
+  // app / show notes draft / Casebook plugin (iter 12).
+  document.getElementById("cr-export-md")?.addEventListener("click", async () => {
+    const md = blocks
+      .map((b) => {
+        const head = `**[${fmtClock(b.lines[0].start_sec)}] ${b.speaker || "—"}**`;
+        const body = b.lines.map((l) => l.text).join(" ");
+        return `${head}\n\n${body}`;
+      })
+      .join("\n\n");
+    try {
+      await navigator.clipboard.writeText(md);
+      Toast.success("Markdown copied to clipboard");
+    } catch (e) {
+      Toast.error("Couldn't copy to clipboard");
+    }
+  });
 }
 
 // ── Archiver ─────────────────────────────────────────────────────────
@@ -3233,7 +3371,7 @@ async function openRecordingInfo(jobId) {
 // video API allows. State is owned by the modal; no globals (except the
 // modal-open class) leak out.
 
-async function openRecordingPlayer(jobId) {
+async function openRecordingPlayer(jobId, opts = {}) {
   closeRecordingModals();
   const overlay = ensureModalContainer("rec-player-modal");
   overlay.innerHTML = `<div class="modal-card rec-player-card"><div class="empty sm">Loading…</div></div>`;
@@ -3375,6 +3513,14 @@ function wirePlayer(overlay, v) {
     // (PiP throws on a no-video-track stream; fullscreen is pointless).
     const audioOnly = !v.videoWidth && !v.videoHeight;
     overlay.classList.toggle("audio-only", audioOnly);
+    // Honour opts.seekTo from openRecordingPlayer callers — e.g. the
+    // Crunchr transcript line-click. Once metadata loads we know the
+    // duration is valid, so clamping is safe. Auto-play makes the
+    // jump feel snappy without the user pressing space.
+    if (typeof opts.seekTo === "number" && opts.seekTo >= 0) {
+      v.currentTime = Math.min(opts.seekTo, v.duration || opts.seekTo);
+      v.play().catch(() => {});
+    }
   });
   v.addEventListener("timeupdate", () => {
     cur.textContent = fmtClock(v.currentTime || 0);
