@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "crates/strivo-bin", "crates/strivo-web", "crates/chapters", "crates/cuepoints", "crates/clipper", "crates/thumbnails", "crates/insights-compare", "crates/captions", "crates/multitrack", "crates/brandsafe", "crates/reuse", "crates/casebook", "crates/heatmap", "crates/editor", "crates/viewguard-trend", "crates/pipelines-dag", "crates/marketplace", "crates/broll", "crates/chat-density", "crates/deadair", "crates/branding", "crates/multistream"]
+members = [".", "crates/strivo-bin", "crates/strivo-web", "crates/chapters", "crates/cuepoints", "crates/clipper", "crates/thumbnails", "crates/insights-compare", "crates/captions", "crates/multitrack", "crates/brandsafe", "crates/reuse", "crates/casebook", "crates/heatmap", "crates/editor", "crates/viewguard-trend", "crates/pipelines-dag", "crates/marketplace", "crates/broll", "crates/chat-density", "crates/deadair", "crates/branding", "crates/multistream", "crates/chat"]
 # strivo-plugins is its own workspace root (Git submodule with a
 # standalone build). Excluding it stops cargo from claiming it.
 exclude = ["strivo-plugins"]

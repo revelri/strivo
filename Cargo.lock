@@ -3914,6 +3914,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "strivo-chat"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "strivo-chat-density"
 version = "0.3.0"
 dependencies = [
@@ -4138,6 +4146,7 @@ dependencies = [
  "strivo-captions",
  "strivo-casebook",
  "strivo-chapters",
+ "strivo-chat",
  "strivo-chat-density",
  "strivo-clipper",
  "strivo-core",

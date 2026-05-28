@@ -312,6 +312,28 @@ pub fn default_catalog() -> Catalog {
             },
             CatalogEntry {
                 manifest: PluginManifest {
+                    name: "chat".into(),
+                    version: "0.1.0".into(),
+                    author: "Chorosyne".into(),
+                    license: Some("MIT".into()),
+                    description:
+                        "Chatterino-class chat client — Twitch IRC parser, emote tokenizer, mention/keyword filter pipeline, per-room ring buffer with unread counters."
+                            .into(),
+                    capabilities: vec!["x.chat".into()],
+                    consumes: vec!["x.channel_state".into()],
+                    entry_point: EntryPoint::Cdylib { path: "chat.so".into() },
+                    min_host_version: "0.3.0".into(),
+                    price_cents: None,
+                    repository: Some("https://github.com/Chorosyne/chat".into()),
+                    icon: None,
+                    screenshots: vec![],
+                    category: Some("Viewer".into()),
+                },
+                source: "first_party".into(),
+                installed: true,
+            },
+            CatalogEntry {
+                manifest: PluginManifest {
                     name: "yt-publish".into(),
                     version: "0.2.0".into(),
                     author: "Chorosyne".into(),

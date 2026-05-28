@@ -1795,6 +1795,87 @@ async fn deadair_detect(
     }
 }
 
+/// `GET /api/v1/plugins/chat/rooms` — list followed Twitch channels (live
+/// first) the SPA can join over IRC. YouTube live chat needs an OAuth
+/// flow we haven't built yet, so we surface those rooms tagged
+/// `connectable=false`. Pro-gated.
+async fn chat_rooms(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("chat") { return r; }
+    let channels = match state.ipc.snapshot().await {
+        Ok(strivo_core::ipc::ServerMessage::StateSnapshot { channels, .. }) => channels,
+        Ok(_) => vec![],
+        Err(e) => return Problem::internal(format!("snapshot: {e}")).into_response(),
+    };
+    let rooms: Vec<serde_json::Value> = channels
+        .into_iter()
+        .filter_map(|c| {
+            let (platform, connectable) = match c.platform {
+                strivo_core::platform::PlatformKind::Twitch => ("twitch", true),
+                strivo_core::platform::PlatformKind::YouTube => ("youtube", false),
+                strivo_core::platform::PlatformKind::Patreon => return None,
+            };
+            Some(serde_json::json!({
+                "room": c.name,
+                "display_name": if c.display_name.is_empty() { c.name.clone() } else { c.display_name },
+                "platform": platform,
+                "is_live": c.is_live,
+                "viewer_count": c.viewer_count,
+                "connectable": connectable,
+            }))
+        })
+        .collect();
+    Json(json!({ "rooms": rooms })).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct ChatParseQuery {
+    /// Single IRC line; the SPA also batches via `lines` (newline-delimited).
+    #[serde(default)]
+    line: Option<String>,
+    #[serde(default)]
+    lines: Option<String>,
+}
+
+/// `POST /api/v1/plugins/chat/parse` — parse a batch of Twitch IRC PRIVMSG
+/// lines into `ChatMessage`s + token streams. Lets the SPA offload regex /
+/// tag work to the host so the browser tab stays light during big chats.
+async fn chat_parse(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(body): Json<ChatParseQuery>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("chat") { return r; }
+    let mut parsed: Vec<serde_json::Value> = Vec::new();
+    let empty_emotes = strivo_chat::EmoteMap::new();
+    let mut handle = |line: &str| {
+        if let Some(m) = strivo_chat::parse_twitch_irc(line) {
+            let tokens = strivo_chat::tokenize_text(&m.text, &empty_emotes);
+            parsed.push(serde_json::json!({
+                "message": m,
+                "tokens": tokens,
+            }));
+        }
+    };
+    if let Some(line) = &body.line {
+        handle(line);
+    }
+    if let Some(batch) = &body.lines {
+        for line in batch.lines() {
+            handle(line);
+        }
+    }
+    Json(json!({ "parsed": parsed })).into_response()
+}
+
 #[derive(Debug, Deserialize)]
 pub(super) struct MultistreamQuery {
     /// Container width in CSS pixels. SPA reports its own viewport so the
@@ -2677,4 +2758,6 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/deadair/{id}", axum::routing::post(deadair_detect))
         .route("/api/v1/plugins/branding/{id}", get(branding_load).post(branding_save))
         .route("/api/v1/plugins/multistream/tiles", get(multistream_tiles))
+        .route("/api/v1/plugins/chat/rooms", get(chat_rooms))
+        .route("/api/v1/plugins/chat/parse", axum::routing::post(chat_parse))
 }

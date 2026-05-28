@@ -197,6 +197,9 @@ const API = {
     const qs = p.toString() ? `?${p.toString()}` : "";
     return API._fetch(`/plugins/deadair/${encodeURIComponent(recordingId)}${qs}`, { method: "POST" });
   },
+  chatRooms: () => API._fetch("/plugins/chat/rooms"),
+  chatParseBatch: (lines) =>
+    API._fetch("/plugins/chat/parse", { method: "POST", body: { lines: lines.join("\n") } }),
   multistreamTiles: (containerW, containerH, mode, host) => {
     const p = new URLSearchParams({ container_w: containerW, container_h: containerH, host });
     if (mode) p.set("mode", JSON.stringify(mode));
@@ -461,6 +464,7 @@ const ROUTES = [
   "pipelines",
   "plugins",
   "watch",
+  "chat",
   "settings",
   "system",
   "logs",
@@ -533,6 +537,9 @@ async function render() {
     case "watch":
       await renderWatch();
       break;
+    case "chat":
+      await renderChat();
+      break;
     case "settings":
       await renderSettings();
       break;
@@ -562,6 +569,7 @@ const TOPNAV = [
   // the topnav (was hidden in the audit when the page was empty).
   ["pipelines", "🔁", "Pipelines", "d", "/assets/icons/candy/pipelines.svg"],
   ["watch", "▦", "Watch", "w"],
+  ["chat", "💬", "Chat", "t"],
   ["plugins", "🧩", "Plugins", "g", "/assets/icons/candy/plugins.svg"],
   ["settings", "⚙", "Settings", "c", "/assets/icons/candy/settings.svg"],
   ["system", "🛠", "System", "y", "/assets/icons/candy/system.svg"],
@@ -2568,6 +2576,316 @@ async function renderPipelines() {
 //   #/plugins/archiver/<channelId>  → channel catalog
 //   #/plugins/viewguard             → fraud verdicts
 //   #/plugins/insights              → word freq / topics / speakers
+// Chat client route — Twitch IRC over anonymous WSS, multi-tab Chatterino-
+// style layout. The room list comes from the backend (followed Twitch
+// channels live first); each active tab opens its own WS that auto-
+// reconnects on close. Filter chips run client-side via the same logic
+// shape the host's strivo-chat crate uses.
+const chatState = {
+  rooms: [],
+  active: null,           // active room name (Twitch login)
+  buffers: {},            // room → { messages: [], unread, mentions, watched_user }
+  sockets: {},            // room → WebSocket
+  filters: [],            // [{ kind, needle?, user? }]
+  watched_user: null,     // your own twitch login if known (mention highlight)
+  paint_timer: null,
+};
+const CHAT_TWITCH_WS = "wss://irc-ws.chat.twitch.tv:443";
+const CHAT_ANON_NICK = () => `justinfan${Math.floor(10000 + Math.random() * 89999)}`;
+const CHAT_BUFFER_CAP = 500;
+
+function chatPushMsg(room, msg) {
+  const buf = chatState.buffers[room] ||= { messages: [], unread: 0, mentions: 0 };
+  if (buf.messages.length >= CHAT_BUFFER_CAP) buf.messages.shift();
+  buf.messages.push(msg);
+  buf.unread += 1;
+  if (chatState.watched_user && msgMentionsUser(msg.text, chatState.watched_user)) {
+    buf.mentions += 1;
+  }
+  schedulePaintChat();
+}
+function msgMentionsUser(text, user) {
+  const target = user.replace(/^@/, "").toLowerCase();
+  return text.split(/\s+/).some((w) => {
+    const cleaned = w.replace(/[.,!?]+$/, "");
+    return cleaned.startsWith("@") && cleaned.slice(1).toLowerCase() === target;
+  });
+}
+function schedulePaintChat() {
+  if (chatState.paint_timer) return;
+  chatState.paint_timer = setTimeout(() => {
+    chatState.paint_timer = null;
+    paintChatBody();
+  }, 50);
+}
+// Minimal client-side mirror of strivo-chat's parse_twitch_irc. We could
+// round-trip through /plugins/chat/parse to use the host parser, but the
+// WS firehose is high-rate and adding network latency per line would lag
+// the live feed. Keep parity by reusing the host parser in batched
+// previews (e.g. filter test on the recent buffer).
+function parseTwitchIrc(line) {
+  let rest = line.replace(/[\r\n]+$/, "");
+  let tags = {};
+  if (rest.startsWith("@")) {
+    const sp = rest.indexOf(" ");
+    if (sp < 0) return null;
+    const raw = rest.slice(1, sp);
+    for (const pair of raw.split(";")) {
+      const eq = pair.indexOf("=");
+      if (eq < 0) continue;
+      tags[pair.slice(0, eq)] = pair.slice(eq + 1);
+    }
+    rest = rest.slice(sp + 1);
+  }
+  if (!rest.startsWith(":")) return null;
+  const sp1 = rest.indexOf(" ");
+  if (sp1 < 0) return null;
+  const prefix = rest.slice(1, sp1);
+  const sender = prefix.split("!")[0];
+  rest = rest.slice(sp1 + 1);
+  const sp2 = rest.indexOf(" ");
+  if (sp2 < 0) return null;
+  const verb = rest.slice(0, sp2);
+  if (verb !== "PRIVMSG") return null;
+  rest = rest.slice(sp2 + 1);
+  const colon = rest.indexOf(" :");
+  if (colon < 0) return null;
+  const channel = rest.slice(0, colon).replace(/^#/, "");
+  let text = rest.slice(colon + 2);
+  let is_action = false;
+  // Twitch wraps /me as CTCP \x01ACTION text\x01.
+  const CTCP = String.fromCharCode(1);
+  if (text.startsWith(CTCP) && text.endsWith(CTCP)) text = text.slice(1, -1);
+  if (text.startsWith("ACTION ")) {
+    text = text.slice("ACTION ".length);
+    is_action = true;
+  }
+  const badges = (tags["badges"] || "")
+    .split(",").map((b) => b.split("/")[0]).filter(Boolean);
+  return {
+    id: tags["id"] || `${channel}-${tags["tmi-sent-ts"] || Date.now()}`,
+    room: channel,
+    sender: tags["display-name"]?.replace(/\\s/g, " ") || sender,
+    sender_color: tags["color"] || null,
+    text,
+    timestamp_ms: parseInt(tags["tmi-sent-ts"] || "0", 10),
+    badges,
+    is_action,
+    is_system: false,
+    deleted: false,
+  };
+}
+
+function connectChatRoom(room) {
+  if (chatState.sockets[room]) return;
+  const ws = new WebSocket(CHAT_TWITCH_WS);
+  chatState.sockets[room] = ws;
+  ws.onopen = () => {
+    ws.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
+    ws.send(`NICK ${CHAT_ANON_NICK()}`);
+    ws.send(`JOIN #${room.toLowerCase()}`);
+  };
+  ws.onmessage = (ev) => {
+    for (const line of ev.data.split(/\r?\n/)) {
+      if (!line) continue;
+      if (line.startsWith("PING ")) {
+        try { ws.send(line.replace("PING", "PONG")); } catch (_) {}
+        continue;
+      }
+      const m = parseTwitchIrc(line);
+      if (m) chatPushMsg(room, m);
+    }
+  };
+  ws.onclose = () => {
+    delete chatState.sockets[room];
+    // Auto-reconnect with backoff if room is still active.
+    if (chatState.active === room) {
+      setTimeout(() => connectChatRoom(room), 2500);
+    }
+  };
+  ws.onerror = () => {
+    try { ws.close(); } catch (_) {}
+  };
+}
+function disconnectChatRoom(room) {
+  const ws = chatState.sockets[room];
+  if (ws) try { ws.close(); } catch (_) {}
+  delete chatState.sockets[room];
+}
+
+function chatRoomMatchesFilters(msg) {
+  for (const f of chatState.filters) {
+    switch (f.kind) {
+      case "keyword_in":
+        if (!msg.text.toLowerCase().includes((f.needle || "").toLowerCase())) return false;
+        break;
+      case "keyword_out":
+        if (msg.text.toLowerCase().includes((f.needle || "").toLowerCase())) return false;
+        break;
+      case "from_user":
+        if (msg.sender.toLowerCase() !== (f.user || "").toLowerCase()) return false;
+        break;
+      case "no_links":
+        if (msg.text.includes("http://") || msg.text.includes("https://")) return false;
+        break;
+      case "no_actions":
+        if (msg.is_action) return false;
+        break;
+      case "mentions_user":
+        if (!msgMentionsUser(msg.text, f.user || "")) return false;
+        break;
+    }
+  }
+  return true;
+}
+
+function paintChatBody() {
+  const body = document.getElementById("chat-body");
+  if (!body) return;
+  const room = chatState.active;
+  if (!room) return;
+  const buf = chatState.buffers[room] || { messages: [] };
+  const wasAtBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 50;
+  const visible = buf.messages.filter(chatRoomMatchesFilters);
+  body.innerHTML = visible
+    .slice(-200)
+    .map((m) => {
+      const cls = `chat-msg${m.deleted ? " deleted" : ""}${m.is_action ? " action" : ""}`;
+      const senderCol = m.sender_color ? `style="color:${escape(m.sender_color)}"` : "";
+      const badges = (m.badges || [])
+        .map((b) => `<span class="chat-badge">${escape(b)}</span>`)
+        .join("");
+      const tokens = renderChatTokens(m.text);
+      const mentioned = chatState.watched_user && msgMentionsUser(m.text, chatState.watched_user)
+        ? " mentioned" : "";
+      return `<div class="${cls}${mentioned}">
+        ${badges}<span class="chat-sender" ${senderCol}>${escape(m.sender)}</span><span class="chat-sep">:</span> <span class="chat-text">${tokens}</span>
+      </div>`;
+    })
+    .join("");
+  if (wasAtBottom) body.scrollTop = body.scrollHeight;
+  // Repaint tabs (unread + mention counters drifted).
+  paintChatTabs();
+}
+
+function renderChatTokens(text) {
+  // Simple inline tokenizer for the SPA hot path. Emote substitution
+  // requires an emote map per room (BTTV/FFZ/Twitch), which is a future
+  // iter; for now mentions + links are good enough.
+  const parts = text.split(/(\s+)/);
+  return parts.map((p) => {
+    if (!p) return "";
+    if (p.startsWith("@")) {
+      const user = p.replace(/[.,!?]+$/, "").slice(1);
+      if (/^[A-Za-z0-9_]+$/.test(user)) {
+        return `<span class="chat-mention">@${escape(user)}</span>`;
+      }
+    }
+    if (/^https?:\/\//.test(p)) {
+      return `<a class="chat-link" href="${escape(p)}" target="_blank" rel="noopener noreferrer">${escape(p)}</a>`;
+    }
+    return escape(p);
+  }).join("");
+}
+
+function paintChatTabs() {
+  const tabs = document.getElementById("chat-tabs");
+  if (!tabs) return;
+  tabs.innerHTML = chatState.rooms.map((r) => {
+    const buf = chatState.buffers[r.room] || { unread: 0, mentions: 0 };
+    const active = r.room === chatState.active ? "active" : "";
+    const mentionPill = buf.mentions > 0 ? `<span class="chat-tab-mentions">${buf.mentions}</span>` : "";
+    const unreadPill = (buf.unread > 0 && r.room !== chatState.active)
+      ? `<span class="chat-tab-unread">${buf.unread}</span>` : "";
+    const liveDot = r.is_live ? `<span class="chat-tab-live" title="live">◉</span>` : "";
+    const offline = r.connectable === false ? " offline" : "";
+    return `<button class="chat-tab ${active}${offline}" data-room="${escape(r.room)}" ${!r.connectable ? "disabled" : ""}>
+      ${liveDot}<span class="chat-tab-name">${escape(r.display_name)}</span>${mentionPill}${unreadPill}
+    </button>`;
+  }).join("");
+  tabs.querySelectorAll(".chat-tab").forEach((t) => {
+    t.addEventListener("click", () => {
+      const room = t.dataset.room;
+      switchChatRoom(room);
+    });
+  });
+}
+
+function switchChatRoom(room) {
+  if (room === chatState.active) return;
+  chatState.active = room;
+  // Mark prior room as read (snapshot unread counter is preserved in buf,
+  // but the badge clears on switch).
+  if (chatState.buffers[room]) {
+    chatState.buffers[room].unread = 0;
+    chatState.buffers[room].mentions = 0;
+  }
+  connectChatRoom(room);
+  paintChatTabs();
+  paintChatBody();
+}
+
+async function renderChat() {
+  root.innerHTML = chrome(`
+    <div id="chat-root" class="chat-root">
+      <aside id="chat-tabs" class="chat-tabs" role="tablist"></aside>
+      <main class="chat-main">
+        <div class="chat-filters">
+          <input id="chat-filter-kw" type="text" placeholder="filter: contains…" />
+          <input id="chat-filter-out" type="text" placeholder="filter: hide…" />
+          <label class="chat-filter-tog"><input type="checkbox" id="chat-no-links"> no links</label>
+          <label class="chat-filter-tog"><input type="checkbox" id="chat-no-actions"> no /me</label>
+        </div>
+        <div id="chat-body" class="chat-body" role="log" aria-live="polite"></div>
+      </main>
+    </div>
+  `);
+  let rooms;
+  try {
+    rooms = (await API.chatRooms()).rooms || [];
+  } catch (e) {
+    document.getElementById("chat-root").innerHTML =
+      `<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`;
+    return;
+  }
+  // Live first, then alpha.
+  rooms.sort((a, b) => {
+    if (a.is_live !== b.is_live) return a.is_live ? -1 : 1;
+    return a.display_name.localeCompare(b.display_name);
+  });
+  chatState.rooms = rooms;
+  // Default to the first connectable room.
+  const first = rooms.find((r) => r.connectable);
+  if (first) chatState.active = first.room;
+  paintChatTabs();
+  if (chatState.active) {
+    connectChatRoom(chatState.active);
+    paintChatBody();
+  } else {
+    document.getElementById("chat-body").innerHTML =
+      `<div class="empty"><div class="glyph">💬</div>
+        <p>No Twitch channels followed yet. Add some in Settings → Channels.</p>
+        <p class="pg-cap-hint">YouTube live chat needs an OAuth flow — coming soon.</p></div>`;
+  }
+  // Filter inputs.
+  const applyFilters = () => {
+    const kw = document.getElementById("chat-filter-kw").value.trim();
+    const out = document.getElementById("chat-filter-out").value.trim();
+    const noLinks = document.getElementById("chat-no-links").checked;
+    const noActions = document.getElementById("chat-no-actions").checked;
+    chatState.filters = [];
+    if (kw) chatState.filters.push({ kind: "keyword_in", needle: kw });
+    if (out) chatState.filters.push({ kind: "keyword_out", needle: out });
+    if (noLinks) chatState.filters.push({ kind: "no_links" });
+    if (noActions) chatState.filters.push({ kind: "no_actions" });
+    paintChatBody();
+  };
+  document.getElementById("chat-filter-kw").addEventListener("input", applyFilters);
+  document.getElementById("chat-filter-out").addEventListener("input", applyFilters);
+  document.getElementById("chat-no-links").addEventListener("change", applyFilters);
+  document.getElementById("chat-no-actions").addEventListener("change", applyFilters);
+}
+
 // Multi-stream viewer route. Server returns tiles already laid out for
 // the requested container size + mode, plus each stream's ready-to-mount
 // embed URL. Mode is kept in URL params so refresh / share preserves the
