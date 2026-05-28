@@ -99,7 +99,46 @@ impl ChannelMonitor {
         self.poll_notify.clone()
     }
 
+    /// Seed `last_live` from the recording-jobs DB. A recording's `started_at`
+    /// is a hard "the channel was live then" timestamp, so this fills in
+    /// channels we've recorded but never observed transition through
+    /// `is_live` during a daemon lifetime (YouTube's RSS-based live detection
+    /// frequently misses the window between live and offline, leaving an
+    /// otherwise-recorded channel with no rail "last live" label).
+    async fn backfill_last_live_from_persist(&mut self) {
+        let Some(db) = self.persist.clone() else { return };
+        let jobs = match db.load_recording_jobs().await {
+            Ok(j) => j,
+            Err(e) => {
+                tracing::warn!("monitor: last_live backfill failed: {e}");
+                return;
+            }
+        };
+        let mut wrote = false;
+        for job in jobs {
+            let cur = self.last_live.get(&job.channel_id).copied();
+            if cur.map_or(true, |t| job.started_at > t) {
+                self.last_live.insert(job.channel_id, job.started_at);
+                wrote = true;
+            }
+        }
+        if wrote {
+            if let Ok(json) = serde_json::to_string(&self.last_live) {
+                let _ = std::fs::write(&self.last_live_path, json);
+            }
+            tracing::info!(
+                count = self.last_live.len(),
+                "monitor: seeded last_live from recording history"
+            );
+        }
+    }
+
     pub async fn run(mut self) {
+        // Seed last_live from the recordings DB before the first poll so the
+        // rail "last live" labels are populated even for channels whose live
+        // edge this daemon never observed directly.
+        self.backfill_last_live_from_persist().await;
+
         // Wait for first platform auth or timeout before initial poll.
         // If the timeout fires before any platform has authenticated we
         // wait again — emitting an unauthenticated poll just produces a
