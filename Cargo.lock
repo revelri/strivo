@@ -3866,6 +3866,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strivo-broll"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "strivo-captions"
 version = "0.3.0"
 dependencies = [
@@ -4089,6 +4098,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "strivo-brandsafe",
+ "strivo-broll",
  "strivo-captions",
  "strivo-casebook",
  "strivo-chapters",

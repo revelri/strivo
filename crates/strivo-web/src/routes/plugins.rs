@@ -1563,6 +1563,59 @@ async fn viewguard_trend(
     .into_response()
 }
 
+#[derive(Debug, Deserialize)]
+struct BrollPayload {
+    /// JSON-serialised BrollLibrary the streamer maintains locally.
+    /// SPA pulls it from the user's settings; we accept it inline here
+    /// so the backend stays stateless.
+    library: strivo_broll::BrollLibrary,
+    #[serde(default = "default_broll_top_k")]
+    top_k: usize,
+}
+
+fn default_broll_top_k() -> usize { 12 }
+
+/// `POST /api/v1/plugins/broll/<recording_id>` — turn a recording's
+/// Crunchr segments into TopicSlices, score them against the supplied
+/// library, return ranked B-roll suggestions.
+async fn broll_suggest(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+    Json(body): Json<BrollPayload>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("broll") { return r; }
+    let Some(conn) = open_ro(&crunchr_db()) else {
+        return Problem::not_found("crunchr has no data yet").into_response();
+    };
+    let detail = match strivo_plugins::crunchr::db::recording_detail(&conn, &recording_id) {
+        Ok(Some(d)) => d,
+        Ok(None) => return Problem::not_found("recording not transcribed").into_response(),
+        Err(e) => return Problem::internal(e.to_string()).into_response(),
+    };
+    let slices: Vec<strivo_broll::TopicSlice> = detail
+        .segments
+        .iter()
+        .map(|s| strivo_broll::TopicSlice {
+            start_sec: s.start_sec as f32,
+            end_sec: s.end_sec as f32,
+            topics: detail.topics.clone(),
+            text: s.text.clone(),
+        })
+        .collect();
+    let top_k = body.top_k.clamp(1, 50);
+    let suggestions = strivo_broll::suggest_brolls(&slices, &body.library, top_k);
+    Json(json!({
+        "recording_id": recording_id,
+        "suggestions": suggestions,
+        "library_size": body.library.assets.len(),
+    }))
+    .into_response()
+}
+
 /// Open a plugin DB read-only. Returns None when the file is absent (plugin
 /// idle) so callers can serve an empty payload.
 fn open_ro(path: &std::path::Path) -> Option<Connection> {
@@ -2292,4 +2345,5 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/editor/{id}", get(editor_load).post(editor_save))
         .route("/api/v1/plugins/editor/{id}/render", axum::routing::post(editor_render))
         .route("/api/v1/plugins/viewguard/trend", get(viewguard_trend))
+        .route("/api/v1/plugins/broll/{id}", axum::routing::post(broll_suggest))
 }

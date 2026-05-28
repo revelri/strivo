@@ -189,7 +189,9 @@ pub fn default_catalog() -> Catalog {
                         "Suggest B-roll cuts from a tagged local library based on transcript topics.".into(),
                     capabilities: vec!["x.broll_suggestion".into()],
                     consumes: vec!["transcription".into(), "topic_segmentation".into()],
-                    entry_point: EntryPoint::Roadmap,
+                    // Promoted from Roadmap → available in iter 18: the
+                    // strivo-broll crate ships with the host.
+                    entry_point: EntryPoint::Cdylib { path: "broll.so".into() },
                     min_host_version: "0.3.0".into(),
                     price_cents: Some(900),
                     repository: Some("https://github.com/Chorosyne/broll-finder".into()),
@@ -198,7 +200,7 @@ pub fn default_catalog() -> Catalog {
                     category: Some("Editor".into()),
                 },
                 source: "first_party".into(),
-                installed: false,
+                installed: true,
             },
             CatalogEntry {
                 manifest: PluginManifest {
