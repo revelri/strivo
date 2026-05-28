@@ -206,7 +206,19 @@ async fn index(headers: HeaderMap, State(state): State<AppState>) -> impl IntoRe
         }),
     };
 
-    Json(json!({ "plugins": [crunchr, insights, archiver, viewguard] })).into_response()
+    // Hide locked Pro plugins entirely — the upgrade card on the same
+    // page carries the unlock story, so surfacing a dimmed row would
+    // just be noise. Free plugins (none today) would still appear.
+    let plugins: Vec<Value> = [
+        (crunchr_ok, crunchr),
+        (insights_ok, insights),
+        (archiver_ok, archiver),
+        (viewguard_ok, viewguard),
+    ]
+    .into_iter()
+    .filter_map(|(ok, v)| if ok { Some(v) } else { None })
+    .collect();
+    Json(json!({ "plugins": plugins })).into_response()
 }
 
 // ── Crunchr ──────────────────────────────────────────────────────────

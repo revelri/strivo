@@ -2240,16 +2240,13 @@ async function renderPluginHub() {
             `<span class="pg-stat"><strong>${formatCount(v)}</strong> ${escape(k.replace(/_/g, " "))}</span>`,
         )
         .join("");
-      // Three card states: locked (Pro + not entitled), ready (available),
-      // idle (free + has produced no data yet). Locked cards become
-      // non-interactive and link to the upgrade card on the same page.
-      const locked = p.pro === true && p.entitled === false;
-      const status = locked
-        ? `<span class="cfg-badge locked" title="Strivo Pro plugin — activate to unlock">🔒 Pro</span>`
-        : p.available
-          ? `<span class="cfg-badge ok">ready</span>`
-          : `<span class="cfg-badge">idle</span>`;
-      const href = locked ? null : (p.available ? `#/plugins/${p.name}` : null);
+      // Locked Pro plugins never reach the SPA — the server filters
+      // them out of /api/v1/plugins when the gate denies. So this
+      // only sees entitled or free plugins.
+      const status = p.available
+        ? `<span class="cfg-badge ok">ready</span>`
+        : `<span class="cfg-badge">idle</span>`;
+      const href = p.available ? `#/plugins/${p.name}` : null;
       const body = `
         <div class="pg-card-head">
           <span class="pg-icon pg-icon-${p.name}" aria-hidden="true">${escape((p.display || p.name)[0])}</span>
@@ -2258,11 +2255,6 @@ async function renderPluginHub() {
         </div>
         <p class="pg-card-desc">${escape(p.description || "")}</p>
         <div class="pg-stats">${statBits || '<span class="pg-stat muted">no data yet</span>'}</div>`;
-      if (locked) {
-        // Anchor jumps to the upgrade card (page-top) so the user
-        // sees what unlocking costs without leaving the hub.
-        return `<a class="pg-card pg-card-locked" href="#/plugins" data-plugin="${p.name}" aria-label="${escape(p.display || p.name)} — Strivo Pro, locked">${body}</a>`;
-      }
       return href
         ? `<a class="pg-card" href="${href}" data-plugin="${p.name}">${body}</a>`
         : `<div class="pg-card pg-card-idle" data-plugin="${p.name}">${body}</div>`;

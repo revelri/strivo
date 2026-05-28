@@ -1552,24 +1552,6 @@ a.media-pill:hover,
 }
 .pg-card:hover { transform: translateY(-2px); border-color: var(--border-light); }
 .pg-card-idle { opacity: 0.6; }
-.pg-card-locked { cursor: pointer; }
-.pg-card-locked::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    160deg,
-    rgba(94, 53, 177, 0.10) 0%,
-    rgba(0, 188, 212, 0.05) 100%);
-  border-radius: inherit;
-  pointer-events: none;
-}
-.pg-card-locked .pg-stats { opacity: 0.7; }
-.cfg-badge.locked {
-  background: linear-gradient(90deg, var(--accent), var(--accent2));
-  color: #fff;
-  border-color: transparent;
-}
 .pg-card-head { display: flex; align-items: center; gap: 0.6rem; }
 .pg-icon {
   display: grid;
