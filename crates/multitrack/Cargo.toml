@@ -1,0 +1,17 @@
+[package]
+name = "strivo-multitrack"
+version = "0.3.0"
+edition = "2021"
+description = "Multi-track audio enumeration + extraction — DAW-vision iter 9"
+authors = ["revelri <slrevoy@mailbox.org>"]
+license = "MIT"
+publish = false
+rust-version = "1.75"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"

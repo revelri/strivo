@@ -2805,6 +2805,35 @@ body.modal-open { overflow: hidden; }
   gap: 0.4rem;
   flex: 1;
 }
+/* Multitrack panel on recording info modal (iter 9). */
+.rec-tracks { margin-top: 0.7rem; }
+.rec-tk-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.rec-tk-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 1fr auto;
+  gap: 0.7rem;
+  align-items: center;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.rec-tk-row:hover { border-color: var(--accent2); }
+.rec-tk-kind {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--rec-tk-c, var(--accent2)) 18%, transparent);
+  color: var(--rec-tk-c, var(--accent2));
+  text-align: center;
+}
+.rec-tk-label { font-size: 0.88rem; color: var(--text); }
+.rec-tk-meta { font-size: 0.76rem; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+@media (max-width: 720px) {
+  .rec-tk-row { grid-template-columns: 1fr; }
+}
 /* Retention strip on transcript page (Insights iter 7). */
 .cr-retention { margin-bottom: 0.8rem; }
 .cr-ret-head {

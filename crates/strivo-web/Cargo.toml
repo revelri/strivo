@@ -30,6 +30,7 @@ strivo-clipper = { path = "../clipper" }
 strivo-thumbnails = { path = "../thumbnails" }
 strivo-insights-compare = { path = "../insights-compare" }
 strivo-captions = { path = "../captions" }
+strivo-multitrack = { path = "../multitrack" }
 rusqlite = { version = "0.33", features = ["bundled"] }
 
 # HTTP

@@ -161,6 +161,10 @@ const API = {
     API._fetch(`/plugins/insights/retention/${encodeURIComponent(recordingId)}?bucket_secs=${bucketSecs}`),
   captionsExportUrl: (recordingId, fmt = "srt", lang = "en") =>
     `/api/v1/plugins/captions/${encodeURIComponent(recordingId)}?fmt=${encodeURIComponent(fmt)}&lang=${encodeURIComponent(lang)}`,
+  multitrackList: (recordingId) =>
+    API._fetch(`/plugins/multitrack/${encodeURIComponent(recordingId)}`),
+  multitrackExtract: (recordingId, body) =>
+    API._fetch(`/plugins/multitrack/${encodeURIComponent(recordingId)}/extract`, { method: "POST", body }),
   patreonPull: (body) =>
     API._fetch("/patreon/pull", { method: "POST", body }),
   vodDownload: (body) =>
@@ -3515,9 +3519,11 @@ async function openRecordingInfo(jobId) {
       ${isFinished ? `<button class="sm rec-info-cuepoints-btn" data-action="rec-info-cuepoints" title="Scene-change cuepoints (ffmpeg full pass)">⌶ Detect scene changes</button>` : ""}
       ${isFinished ? `<button class="sm rec-info-clipper-btn" data-action="rec-info-clipper" title="Mine highlight candidates (uses cuepoints; runs ffmpeg pass if needed)">★ Find highlights</button>` : ""}
       ${isFinished ? `<button class="sm rec-info-thumbs-btn" data-action="rec-info-thumbs" title="Sample candidate thumbnail frames at cuepoints / highlights">▥ Pick thumbnail</button>` : ""}
+      ${isFinished ? `<button class="sm rec-info-tracks-btn" data-action="rec-info-tracks" title="List audio tracks (OBS multi-track captures) + extract individual stems">♪ Audio tracks</button>` : ""}
       <div class="rec-cuepoints" id="rec-cuepoints" hidden></div>
       <div class="rec-clipper" id="rec-clipper" hidden></div>
       <div class="rec-thumbs" id="rec-thumbs" hidden></div>
+      <div class="rec-tracks" id="rec-tracks" hidden></div>
     </section>
     <footer class="rec-info-foot">
       ${isFinished ? `<button class="primary" data-action="rec-info-play">▶ Open in player</button>` : ""}
@@ -3674,6 +3680,58 @@ async function openRecordingInfo(jobId) {
         </div>`;
       Toast.success(`Generated ${candidates.length} thumbnail candidate(s)`);
     }).catch((err) => Toast.error(`Thumbnails failed: ${err.message}`));
+  });
+
+  overlay.querySelector("[data-action=rec-info-tracks]")?.addEventListener("click", async (e) => {
+    const btn = e.currentTarget;
+    await withBusy(btn, "Probing…", async () => {
+      const resp = await API.multitrackList(jobId);
+      const host = document.getElementById("rec-tracks");
+      if (!host) return;
+      const tracks = resp.tracks || [];
+      host.hidden = false;
+      if (!tracks.length) {
+        host.innerHTML = '<div class="empty sm">No audio tracks detected.</div>';
+        return;
+      }
+      const KIND_COLOUR = {
+        mic: "hsl(140, 60%, 60%)",
+        game: "hsl(210, 70%, 60%)",
+        discord: "hsl(265, 60%, 65%)",
+        music: "hsl(35, 80%, 60%)",
+        browser: "hsl(195, 60%, 60%)",
+        other: "hsl(0, 0%, 65%)",
+      };
+      host.innerHTML = `
+        <h4 class="rec-cp-title">${tracks.length} audio track${tracks.length === 1 ? "" : "s"} <span class="pg-cap-hint">${tracks.length > 1 ? "OBS-style multi-track capture" : "single mixed track"}</span></h4>
+        <div class="rec-tk-list">
+          ${tracks
+            .map(
+              (t) => `
+            <div class="rec-tk-row" data-idx="${t.index}">
+              <span class="rec-tk-kind" style="--rec-tk-c:${KIND_COLOUR[t.inferred_kind] || KIND_COLOUR.other}">${escape(t.inferred_kind)}</span>
+              <span class="rec-tk-label">${escape(t.title || `track ${t.index}`)}</span>
+              <span class="rec-tk-meta">${t.codec} · ${t.channels}ch · ${t.sample_rate ? t.sample_rate + " Hz" : "?"}</span>
+              <button class="sm rec-tk-extract" data-idx="${t.index}" data-stem="${escape((t.title || `track_${t.index}`).replace(/[^A-Za-z0-9_-]+/g, "_"))}">Extract</button>
+            </div>`,
+            )
+            .join("")}
+        </div>`;
+      host.querySelectorAll(".rec-tk-extract").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          const b = e.currentTarget;
+          await withBusy(b, "Cutting…", async () => {
+            const res = await API.multitrackExtract(jobId, {
+              track_index: parseInt(b.dataset.idx, 10),
+              stem: b.dataset.stem,
+            });
+            Toast.success(`Cut ${formatBytes(res.bytes)} → ${res.output_path}`);
+            b.outerHTML = `<span class="cfg-badge ok" title="${escape(res.output_path)}">✓ ${formatBytes(res.bytes)}</span>`;
+          }).catch((err) => Toast.error(`Extract failed: ${err.message}`));
+        });
+      });
+      Toast.success(`Probed ${tracks.length} track(s)`);
+    }).catch((err) => Toast.error(`Probe failed: ${err.message}`));
   });
 
   overlay.querySelector("[data-action=rec-info-remux]")?.addEventListener("click", async (e) => {

@@ -794,6 +794,100 @@ async fn captions_export(
         .into_response()
 }
 
+/// `GET /api/v1/plugins/multitrack/<recording_id>` — list the audio
+/// tracks present in the recording. Pure ffprobe call — fast.
+async fn multitrack_list(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("multitrack") { return r; }
+    let input = match resolve_recording_path(&recording_id).await {
+        Ok(p) => p,
+        Err(e) => return Problem::not_found(e).into_response(),
+    };
+    if !input.exists() {
+        return Problem::not_found("recording file missing").into_response();
+    }
+    match strivo_multitrack::probe_audio_tracks(&input) {
+        Ok(tracks) => Json(json!({
+            "recording_id": recording_id,
+            "tracks": tracks,
+        }))
+        .into_response(),
+        Err(e) => Problem::internal(format!("ffprobe: {e}")).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct MultitrackExtractPayload {
+    /// Stream index of the track to extract (matches AudioTrack.index).
+    track_index: u32,
+    /// Optional filename stem; defaults to "track_<idx>".
+    #[serde(default)]
+    stem: String,
+    /// Optional output extension — overrides the source codec's
+    /// natural extension when set. Caller is responsible for picking
+    /// something the codec actually fits into.
+    #[serde(default)]
+    ext: String,
+}
+
+/// `POST /api/v1/plugins/multitrack/<recording_id>/extract` — cut a
+/// single audio track to a standalone file in `<recording>/tracks/`.
+async fn multitrack_extract(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+    Json(body): Json<MultitrackExtractPayload>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("multitrack") { return r; }
+    let input = match resolve_recording_path(&recording_id).await {
+        Ok(p) => p,
+        Err(e) => return Problem::not_found(e).into_response(),
+    };
+    if !input.exists() {
+        return Problem::not_found("recording file missing").into_response();
+    }
+    // Pick a sensible extension. Default to the source file's extension
+    // since `-c copy` keeps the codec; user can override via the payload.
+    let src_ext = input
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("mka");
+    let ext = if body.ext.is_empty() { src_ext } else { body.ext.as_str() };
+    let stem = if body.stem.is_empty() {
+        format!("track_{}", body.track_index)
+    } else {
+        body.stem.replace(
+            |c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-',
+            "_",
+        )
+    };
+    let out_dir = input
+        .parent()
+        .map(|p| p.join("tracks"))
+        .unwrap_or_else(|| std::path::PathBuf::from("./tracks"));
+    let output = out_dir.join(format!("{stem}.{ext}"));
+    let bytes = match strivo_multitrack::extract_track(&input, body.track_index, &output) {
+        Ok(b) => b,
+        Err(e) => return Problem::internal(format!("ffmpeg: {e}")).into_response(),
+    };
+    Json(json!({
+        "recording_id": recording_id,
+        "track_index": body.track_index,
+        "output_path": output.to_string_lossy(),
+        "bytes": bytes,
+    }))
+    .into_response()
+}
+
 /// Open a plugin DB read-only. Returns None when the file is absent (plugin
 /// idle) so callers can serve an empty payload.
 fn open_ro(path: &std::path::Path) -> Option<Connection> {
@@ -1513,4 +1607,6 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/insights/compare", get(insights_compare))
         .route("/api/v1/plugins/insights/retention/{id}", get(insights_retention))
         .route("/api/v1/plugins/captions/{id}", get(captions_export))
+        .route("/api/v1/plugins/multitrack/{id}", get(multitrack_list))
+        .route("/api/v1/plugins/multitrack/{id}/extract", axum::routing::post(multitrack_extract))
 }
