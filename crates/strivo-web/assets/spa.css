@@ -2551,6 +2551,14 @@ body.modal-open { overflow: hidden; }
   background: rgba(0, 0, 0, 0.25);
 }
 .pg-cap-chip.pg-cap-available .pg-cap-state { background: rgba(0, 188, 212, 0.25); color: var(--accent2); }
+/* Explicit name span keeps the badge from collapsing into the link text
+ * (bare-text-node was visually fusing as "crunchravailable" on some
+ * browsers — flex gap only separates true flex items). */
+.pg-cap-name { font-weight: 500; }
+.pg-cap-chip.pg-cap-roadmap .pg-cap-state {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
 /* ── Crunchr transcript (iter 2) ─────────────────────────────── */
 .cr-chips {
   display: flex;

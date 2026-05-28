@@ -3112,7 +3112,13 @@ function renderCapabilityMatrix(matrix) {
       const chips = (row.providers || [])
         .map(
           (p) =>
-            `<a class="pg-cap-chip pg-cap-${escape(p.status)}" href="#/plugins/${escape(p.plugin)}" title="${escape(p.plugin)}">${escape(p.plugin)}<span class="pg-cap-state">${escape(p.status)}</span></a>`,
+            // Two visible spans so CSS can give the state badge a pill of
+            // its own — without the explicit element, `name+status` ran
+            // together visually ("crunchravailable" / "chaptersroadmap").
+            `<a class="pg-cap-chip pg-cap-${escape(p.status)}" href="#/plugins/${escape(p.plugin)}" title="${escape(p.plugin)} · ${escape(p.status)}">
+              <span class="pg-cap-name">${escape(p.plugin)}</span>
+              <span class="pg-cap-state pg-cap-state-${escape(p.status)}">${escape(p.status)}</span>
+            </a>`,
         )
         .join("");
       const label = row.capability.replace(/_/g, " ");

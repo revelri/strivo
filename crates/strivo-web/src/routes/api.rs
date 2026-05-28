@@ -1803,27 +1803,54 @@ async fn plugin_capabilities() -> impl IntoResponse {
     // (capability, [(plugin, status)]) where status is "available"
     // if the plugin is shipped or "roadmap" if the slot is reserved
     // for an upcoming plugin (matches the DAW-vision plan).
+    // Every entry here corresponds to an in-tree, shipped + tested
+    // plugin crate. The `roadmap` status now only applies to the two
+    // marketplace entries that still depend on external work (demucs,
+    // YouTube OAuth) — surfaced from the marketplace catalog below.
     let matrix = json!([
         { "capability": cap::TRANSCRIPTION,        "providers": [{"plugin": "crunchr", "status": "available"}] },
         { "capability": cap::WORD_TIMESTAMPS,      "providers": [{"plugin": "crunchr", "status": "available"}] },
         { "capability": cap::DIARISATION,          "providers": [{"plugin": "crunchr", "status": "available"}] },
         { "capability": cap::TOPIC_SEGMENTATION,   "providers": [{"plugin": "crunchr", "status": "available"}] },
-        { "capability": cap::CHAPTERS,             "providers": [{"plugin": "chapters", "status": "roadmap"}] },
-        { "capability": cap::SCENE_DETECTION,      "providers": [{"plugin": "cuepoints", "status": "roadmap"}] },
-        { "capability": cap::THUMBNAIL_RANKING,    "providers": [{"plugin": "thumbnails", "status": "roadmap"}] },
-        { "capability": cap::HIGHLIGHT_DETECTION,  "providers": [{"plugin": "clipper", "status": "roadmap"}] },
-        { "capability": cap::CLIP_EXTRACTION,      "providers": [{"plugin": "clipper", "status": "roadmap"}] },
-        { "capability": cap::TRANSLATION,          "providers": [{"plugin": "captions", "status": "roadmap"}] },
-        { "capability": cap::CAPTIONS,             "providers": [{"plugin": "captions", "status": "roadmap"}] },
-        { "capability": cap::AUDIENCE_RETENTION,   "providers": [{"plugin": "heatmap", "status": "roadmap"}] },
+        { "capability": cap::CHAPTERS,             "providers": [{"plugin": "chapters", "status": "available"}] },
+        { "capability": cap::SCENE_DETECTION,      "providers": [{"plugin": "cuepoints", "status": "available"}] },
+        { "capability": cap::THUMBNAIL_RANKING,    "providers": [{"plugin": "thumbnails", "status": "available"}] },
+        { "capability": cap::HIGHLIGHT_DETECTION,  "providers": [{"plugin": "clipper", "status": "available"}] },
+        { "capability": cap::CLIP_EXTRACTION,      "providers": [{"plugin": "clipper", "status": "available"}] },
+        { "capability": cap::TRANSLATION,          "providers": [{"plugin": "captions", "status": "available"}] },
+        { "capability": cap::CAPTIONS,             "providers": [{"plugin": "captions", "status": "available"}] },
+        { "capability": cap::AUDIENCE_RETENTION,   "providers": [
+            {"plugin": "heatmap",      "status": "available"},
+            {"plugin": "chat-density", "status": "available"}
+        ] },
         { "capability": cap::FRAUD_DETECTION,      "providers": [{"plugin": "viewguard", "status": "available"}] },
-        { "capability": cap::STREAM_COMPARISON,    "providers": [{"plugin": "insights", "status": "available"}] },
-        { "capability": cap::REPORTING,            "providers": [{"plugin": "casebook", "status": "roadmap"}] },
-        { "capability": cap::BRAND_SAFETY,         "providers": [{"plugin": "brandsafe", "status": "roadmap"}] },
+        { "capability": cap::STREAM_COMPARISON,    "providers": [
+            {"plugin": "insights",         "status": "available"},
+            {"plugin": "viewguard-trend",  "status": "available"}
+        ] },
+        { "capability": cap::REPORTING,            "providers": [{"plugin": "casebook", "status": "available"}] },
+        { "capability": cap::BRAND_SAFETY,         "providers": [{"plugin": "brandsafe", "status": "available"}] },
         { "capability": cap::ASSET_CATALOG,        "providers": [{"plugin": "archiver", "status": "available"}] },
-        { "capability": cap::SOURCE_TRACK_SPLIT,   "providers": [{"plugin": "multitrack", "status": "roadmap"}] },
-        { "capability": cap::PUBLISH_QUEUE,        "providers": [{"plugin": "reuse", "status": "roadmap"}] },
-        { "capability": cap::EDL_EDITOR,           "providers": [{"plugin": "editor", "status": "available"}] },
+        { "capability": cap::SOURCE_TRACK_SPLIT,   "providers": [
+            {"plugin": "multitrack",    "status": "available"},
+            {"plugin": "demucs-split",  "status": "roadmap"}
+        ] },
+        { "capability": cap::PUBLISH_QUEUE,        "providers": [
+            {"plugin": "reuse",      "status": "available"},
+            {"plugin": "yt-publish", "status": "roadmap"}
+        ] },
+        { "capability": cap::EDL_EDITOR,           "providers": [
+            {"plugin": "editor",   "status": "available"},
+            {"plugin": "deadair",  "status": "available"},
+            {"plugin": "branding", "status": "available"},
+            {"plugin": "broll",    "status": "available"}
+        ] },
+        // Net-new capabilities from iters 23–24. Use `x.`-prefixed tags so
+        // they don't drift from the WELL_KNOWN_CAPABILITIES constant set.
+        { "capability": "x.multistream",     "providers": [{"plugin": "multistream", "status": "available"}] },
+        { "capability": "x.chat",            "providers": [{"plugin": "chat",        "status": "available"}] },
+        { "capability": "x.pipelines_dag",   "providers": [{"plugin": "pipelines-dag", "status": "available"}] },
+        { "capability": "x.marketplace",     "providers": [{"plugin": "marketplace",   "status": "available"}] },
     ]);
     Json(matrix)
 }
