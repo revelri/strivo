@@ -237,6 +237,11 @@ const API = {
       `/plugins/scenes/${encodeURIComponent(recordingId)}/${encodeURIComponent(sceneId)}`,
       { method: "DELETE" },
     ),
+  sidechainBuild: (recordingId, body) =>
+    API._fetch(`/plugins/sidechain/${encodeURIComponent(recordingId)}`, {
+      method: "POST",
+      body,
+    }),
   vadAnalyze: (recordingId, opts = {}) => {
     const p = new URLSearchParams();
     if (opts.window_sec != null) p.set("window_sec", opts.window_sec);
@@ -5377,6 +5382,7 @@ async function openRecordingInfo(jobId) {
             <button class="sm rec-ed-delete" type="button">Ripple-delete range…</button>
             <button class="sm rec-ed-deadair" type="button" title="Detect dead air (silencedetect) and trim spans longer than 6s">▢ Trim dead air…</button>
             <button class="sm rec-ed-vad" type="button" title="DAW-style voice gate — hysteresis VAD finds speech runs and ripple-deletes the natural breath gaps">▢ Voice gate…</button>
+            <button class="sm rec-ed-sidechain" type="button" title="DAW sidechain — VAD voice intervals → ducking automation curve baked at render. Composes VAD + sidechain + automation in one click.">🦆 Sidechain duck…</button>
             <button class="sm rec-ed-branding" type="button" title="Watermark + intro/outro banner overlay applied at render">★ Branding…</button>
             <button class="sm rec-ed-loudness" type="button" title="EBU R128 loudness check + per-platform normalisation target">♪ Loudness…</button>
             <button class="sm rec-ed-history" type="button" title="Revision history — revert across saves (DAW-style undo)">↺ History…</button>
@@ -5631,6 +5637,47 @@ async function openRecordingInfo(jobId) {
             paint();
             Toast.success(`Voice gate · trimmed ${gaps.length} gap(s) · saved ${fmtClock(savings)}.`);
           }).catch((err) => Toast.error(`Voice-gate scan failed: ${err.message}`));
+        });
+        host.querySelector(".rec-ed-sidechain")?.addEventListener("click", async (e2) => {
+          // One-click sidechain compressor: VAD → sidechain → automation.
+          // Demonstrates the iter-46 + iter-50 + iter-41 plugin chain
+          // composing in a single user gesture. The result is persisted
+          // to the volume-automation store so the next ⚡ Render bakes
+          // the ducking curve via the existing asendcmd pipeline.
+          const sbtn = e2.currentTarget;
+          const promptDuck = prompt(
+            "Sidechain ducking — how many dB to drop the audio bus while voice is active?\n" +
+              "Default -12 dB (podcast-natural). Try -6 dB for a gentler duck or -20 dB for voice-over.",
+            "-12",
+          );
+          if (promptDuck == null) return;
+          const duckDb = parseFloat(promptDuck);
+          if (!isFinite(duckDb) || duckDb >= 0) { Toast.error("Duck depth must be < 0 dB"); return; }
+          await withBusy(sbtn, "Building VAD…", async () => {
+            const vad = await API.vadAnalyze(jobId, { window_sec: 3600 });
+            const intervals = vad.voice_intervals || [];
+            const envelopeDur = (vad.voice_intervals?.length
+              ? Math.max(vad.envelope_frames * 0.05, intervals[intervals.length - 1].end_sec + 1)
+              : (total_duration || dur || 0));
+            if (!intervals.length) {
+              Toast.success("VAD found no voice activity — nothing to duck. Try lowering open_db or raising window_sec.");
+              return;
+            }
+            sbtn.textContent = "Sidechain…";
+            const sc = await API.sidechainBuild(jobId, {
+              voice_intervals: intervals,
+              total_duration_sec: envelopeDur,
+              knobs: { duck_db: duckDb, attack_sec: 0.05, release_sec: 0.3, hold_sec: 0.1, step_sec: 0.05 },
+              persist: true,
+            });
+            if (!sc.persisted_to_automation_store) {
+              Toast.error("Sidechain built but persistence failed — check daemon logs");
+              return;
+            }
+            Toast.success(
+              `Sidechain ready · ${intervals.length} voice run(s) → ${sc.point_count} automation point(s) ducking to ${duckDb} dB. Hit ⚡ Render to bake.`,
+            );
+          }).catch((err) => Toast.error(`Sidechain failed: ${err.message}`));
         });
         host.querySelector(".rec-ed-branding")?.addEventListener("click", async (e2) => {
           const bbtn = e2.currentTarget;
