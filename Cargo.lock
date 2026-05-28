@@ -4163,6 +4163,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "strivo-vad"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "strivo-viewguard-trend"
 version = "0.3.0"
 dependencies = [
@@ -4220,6 +4228,7 @@ dependencies = [
  "strivo-schedule-optimizer",
  "strivo-structure",
  "strivo-thumbnails",
+ "strivo-vad",
  "strivo-viewguard-trend",
  "tempfile",
  "tokio",

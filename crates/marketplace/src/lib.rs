@@ -312,6 +312,28 @@ pub fn default_catalog() -> Catalog {
             },
             CatalogEntry {
                 manifest: PluginManifest {
+                    name: "vad".into(),
+                    version: "0.1.0".into(),
+                    author: "Chorosyne".into(),
+                    license: Some("MIT".into()),
+                    description:
+                        "Voice activity detection + auto-tighten — hysteresis-based DAW noise gate over ffmpeg astats envelopes."
+                            .into(),
+                    capabilities: vec!["x.voice_gate".into()],
+                    consumes: vec!["recording".into()],
+                    entry_point: EntryPoint::Cdylib { path: "vad.so".into() },
+                    min_host_version: "0.3.0".into(),
+                    price_cents: None,
+                    repository: Some("https://github.com/Chorosyne/vad".into()),
+                    icon: None,
+                    screenshots: vec![],
+                    category: Some("Editor".into()),
+                },
+                source: "first_party".into(),
+                installed: true,
+            },
+            CatalogEntry {
+                manifest: PluginManifest {
                     name: "beat-detect".into(),
                     version: "0.1.0".into(),
                     author: "Chorosyne".into(),

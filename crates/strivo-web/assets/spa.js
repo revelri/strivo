@@ -3539,6 +3539,7 @@ const PLUGIN_REGISTRY = [
   { name: "scenes",     label: "Scene snapshots", category: "Editor", proGated: true, description: "DAW-style session save/recall — bundle every per-recording plugin state as a named scene." },
   { name: "schedule-optimizer", label: "Schedule optimizer", category: "Publish", proGated: true, description: "Publish-slot recommender — engagement samples → top weekly publish times with confidence + plateau coverage." },
   { name: "beat-detect",        label: "Beat detection",     category: "Editor", proGated: true, description: "DAW-style tempo grid — onset detector + BPM autocorrelation for music-sync montage cuts." },
+  { name: "vad",                label: "Voice gate",         category: "Editor", proGated: true, description: "DAW-style noise gate — hysteresis VAD that surfaces auto-tighten ripple-deletes for podcast/commentary recordings." },
   // Asset / analytics / publishing.
   { name: "chapters",         label: "Chapters",         category: "Analytics", proGated: true, description: "Heuristic chapter markers extracted from pacing." },
   { name: "cuepoints",        label: "Cuepoints",        category: "Analytics", proGated: true, description: "Scene-change detection from ffmpeg's select filter." },

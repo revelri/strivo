@@ -1917,6 +1917,7 @@ async fn plugin_capabilities() -> impl IntoResponse {
         { "capability": "x.scenes",          "providers": [{"plugin": "scenes", "status": "available"}] },
         { "capability": "x.publish_slots",   "providers": [{"plugin": "schedule-optimizer", "status": "available"}] },
         { "capability": "x.tempo",           "providers": [{"plugin": "beat-detect", "status": "available"}] },
+        { "capability": "x.voice_gate",      "providers": [{"plugin": "vad", "status": "available"}] },
         { "capability": "x.multistream",     "providers": [{"plugin": "multistream", "status": "available"}] },
         { "capability": "x.chat",            "providers": [{"plugin": "chat",        "status": "available"}] },
         { "capability": "x.pipelines_dag",   "providers": [{"plugin": "pipelines-dag", "status": "available"}] },

@@ -2002,6 +2002,128 @@ async fn multistream_tiles(
 }
 
 #[derive(Debug, Deserialize, Default)]
+pub(super) struct VadQuery {
+    /// Window seconds to analyse from t=0 (0 = whole recording). Capped
+    /// 10..=3600.
+    #[serde(default)]
+    window_sec: Option<f32>,
+    /// dB threshold the gate opens at (defaults to GateKnobs::default().open_db).
+    #[serde(default)]
+    open_db: Option<f32>,
+    /// dB threshold the gate closes at (defaults to GateKnobs::default().close_db).
+    #[serde(default)]
+    close_db: Option<f32>,
+    /// Minimum natural pause to keep when surfacing tightening
+    /// recommendations (defaults to 1.0s — anything shorter is a
+    /// breath, not editable dead air).
+    #[serde(default)]
+    min_keep_sec: Option<f32>,
+}
+
+/// `POST /api/v1/plugins/vad/<recording_id>?window_sec=600&open_db=-30…`
+/// — extract the RMS envelope via ffmpeg's astats filter (same pipeline
+/// the beat-detect endpoint uses) and run the hysteresis gate. Returns
+/// voice intervals + recommended ripple-delete gaps the editor can
+/// apply via auto-tighten. Pro-gated.
+async fn vad_run(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+    Query(q): Query<VadQuery>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("vad") { return r; }
+    let input = match resolve_recording_path(&recording_id).await {
+        Ok(p) => p,
+        Err(e) => return Problem::not_found(e).into_response(),
+    };
+    if !input.exists() {
+        return Problem::not_found("recording file missing").into_response();
+    }
+    let window = q.window_sec.unwrap_or(600.0).clamp(10.0, 3600.0);
+    let tmp = std::env::temp_dir().join(format!(
+        "strivo-vad-{}.log",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let filter = format!(
+        "aresample=8000,asetnsamples=400:p=0,astats=metadata=1:reset=1,ametadata=print:file={}",
+        tmp.display()
+    );
+    let output = match tokio::process::Command::new("ffmpeg")
+        .args(["-hide_banner", "-loglevel", "warning", "-t", &format!("{:.3}", window), "-i"])
+        .arg(&input)
+        .args(["-af", &filter, "-vn", "-ac", "1", "-f", "null", "-"])
+        .output()
+        .await
+    {
+        Ok(o) => o,
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Problem::internal(format!("spawn ffmpeg: {e}")).into_response();
+        }
+    };
+    if !output.status.success() {
+        let _ = std::fs::remove_file(&tmp);
+        return Problem::internal(format!(
+            "ffmpeg exited {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        ))
+        .into_response();
+    }
+    let metadata = std::fs::read_to_string(&tmp).unwrap_or_default();
+    let _ = std::fs::remove_file(&tmp);
+    // Reuse beat-detect's parser shape — same astats output. Each
+    // OnsetSample becomes a vad EnvelopeFrame; the field names match
+    // so we can swap straight through.
+    let mut current_t: Option<f32> = None;
+    let mut envelope: Vec<strivo_vad::EnvelopeFrame> = Vec::new();
+    for line in metadata.lines() {
+        if let Some(idx) = line.find("pts_time:") {
+            let tail = &line[idx + "pts_time:".len()..];
+            let token: String = tail.chars().take_while(|c| !c.is_whitespace()).collect();
+            current_t = token.parse().ok();
+        }
+        if let Some(rest) = line.trim_start().strip_prefix("lavfi.astats.Overall.RMS_level=") {
+            if let (Some(t), Ok(db)) = (current_t, rest.trim().parse::<f32>()) {
+                if db.is_finite() {
+                    envelope.push(strivo_vad::EnvelopeFrame { time_sec: t, rms_db: db });
+                }
+            }
+        }
+    }
+    if envelope.is_empty() {
+        return Problem::internal("vad: ffmpeg emitted no astats frames").into_response();
+    }
+    let default_knobs = strivo_vad::GateKnobs::default();
+    let knobs = strivo_vad::GateKnobs {
+        open_db: q.open_db.unwrap_or(default_knobs.open_db),
+        close_db: q.close_db.unwrap_or(default_knobs.close_db),
+        ..default_knobs
+    };
+    let voice_intervals = strivo_vad::detect_voice(&envelope, &knobs);
+    let total = envelope.last().map(|f| f.time_sec).unwrap_or(0.0);
+    let recommended_gaps = strivo_vad::tightening_recommendations(
+        &voice_intervals,
+        total,
+        q.min_keep_sec.unwrap_or(1.0),
+    );
+    let total_savings: f32 = recommended_gaps.iter().map(|g| g.duration()).sum();
+    Json(json!({
+        "recording_id": recording_id,
+        "window_sec": window,
+        "envelope_frames": envelope.len(),
+        "voice_intervals": voice_intervals,
+        "recommended_gaps": recommended_gaps,
+        "total_savings_sec": total_savings,
+        "knobs": knobs,
+    }))
+    .into_response()
+}
+
+#[derive(Debug, Deserialize, Default)]
 pub(super) struct BeatDetectQuery {
     /// Window seconds to sample (0 = whole recording). Capped server-
     /// side so a one-hour stream doesn't run the detector across the
@@ -3451,4 +3573,5 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/scenes/{id}/{scene_id}", axum::routing::delete(scenes_delete))
         .route("/api/v1/plugins/schedule-optimizer/{id}", axum::routing::post(schedule_optimizer_recommend))
         .route("/api/v1/plugins/beat-detect/{id}", axum::routing::post(beat_detect_run))
+        .route("/api/v1/plugins/vad/{id}", axum::routing::post(vad_run))
 }
