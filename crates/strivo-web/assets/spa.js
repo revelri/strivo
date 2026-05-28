@@ -2293,6 +2293,12 @@ function paintRecordings() {
       openRecordingInfo(btn.dataset.jobId);
     });
   });
+  body.querySelectorAll("[data-action=rec-rescan]").forEach((btn) => {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); reScanRecording(btn); });
+  });
+  body.querySelectorAll("[data-action=rec-locate]").forEach((btn) => {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); showRecordingPath(btn.dataset.path); });
+  });
   body.querySelectorAll("[data-action=rec-delete]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -2539,7 +2545,15 @@ function recordingRow(r) {
     ? `<button class="danger sm" data-action="stop" data-job-id="${r.id}">Stop</button>`
     : `<button class="sm" data-action="rec-info" data-job-id="${r.id}" title="Recording details (I)">ⓘ Info</button>
        <button class="danger sm" data-action="rec-delete" data-job-id="${r.id}" title="Delete (Del)">✕</button>`;
-  const actions = `${playBtn}${tailBtns}`;
+  // File-error remediation: re-scan (re-check file_exists, in case the
+  // user remounted a drive or restored from backup) + locate (show the
+  // absolute path with a copy gesture). Distinct from Failed which is
+  // a process error — file-error means the journal-vs-disk drifted.
+  const fileErrorBtns = stateClass === "file-error"
+    ? `<button class="sm" data-action="rec-rescan" data-job-id="${r.id}" title="Re-check whether the file exists">↻ Re-scan</button>
+       <button class="sm" data-action="rec-locate" data-job-id="${r.id}" data-path="${escape(r.output_path || "")}" title="Show the expected file path">📂 Show path</button>`
+    : "";
+  const actions = `${playBtn}${fileErrorBtns}${tailBtns}`;
   return `
     <tr class="${recSelected.has(r.id) ? "rec-sel" : ""}" data-rec-row="${escape(r.id)}">
       <td class="rec-check"><input type="checkbox" class="rec-row-check" data-job-id="${escape(r.id)}" ${recSelected.has(r.id) ? "checked" : ""} aria-label="Select recording"></td>
@@ -2557,6 +2571,68 @@ function recordingRow(r) {
 // "Recording" reads wrong for a yt-dlp-backed VOD pull. Distinguish by
 // `source_url`: when set, label + colour as a download instead. Other
 // states (Finished/Failed/etc) read the same regardless.
+// File-error remediation: refetch /recordings so the backend re-runs
+// augment_recording's file_exists probe on the current row. When the
+// flag flips back to true (file restored / drive remounted) the next
+// render shows it as plain Finished again.
+async function reScanRecording(btn) {
+  const id = btn.dataset.jobId;
+  await withBusy(btn, "Scanning…", async () => {
+    try {
+      const r = await API.recordingOne(id);
+      if (r && r.file_exists !== false) {
+        Toast.success("File found — refreshing");
+      } else {
+        Toast.error("Still missing — file not present at the recorded path");
+      }
+      // Whichever way it went, repaint the current route so the badge updates.
+      render().catch(() => {});
+    } catch (err) {
+      Toast.error(`Re-scan failed: ${err.message}`);
+    }
+  });
+}
+
+// Pop a tiny copy-friendly modal showing the recording's intended file
+// path. Doesn't try to open a native file manager (the SPA can't reach
+// the desktop) — instead lets the user copy the path with one click so
+// they can paste it into their own shell / finder.
+function showRecordingPath(path) {
+  if (!path) {
+    Toast.error("No path recorded for this row");
+    return;
+  }
+  const overlay = ensureModalContainer("rec-locate-modal");
+  overlay.innerHTML = `
+    <div class="modal-card rec-locate-card">
+      <header class="rec-locate-head">
+        <h2>Recording file path</h2>
+        <button class="modal-close" data-action="modal-close" aria-label="Close">✕</button>
+      </header>
+      <p class="pg-cap-hint">The recording was written here. The SPA can't open your file manager directly — copy the path and open it yourself.</p>
+      <div class="rec-locate-row">
+        <code class="rec-locate-path">${escape(path)}</code>
+        <button class="primary sm rec-locate-copy">Copy path</button>
+      </div>
+    </div>`;
+  document.body.classList.add("modal-open");
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeRecLocate(); });
+  overlay.querySelector("[data-action=modal-close]").addEventListener("click", closeRecLocate);
+  overlay.querySelector(".rec-locate-copy").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(path);
+      Toast.success("Path copied to clipboard");
+      closeRecLocate();
+    } catch (err) {
+      Toast.error(`Copy failed: ${err.message}`);
+    }
+  });
+}
+function closeRecLocate() {
+  document.getElementById("rec-locate-modal")?.remove();
+  document.body.classList.remove("modal-open");
+}
+
 function recordingDisplayState(j) {
   const cls = stateClassName(j.state);
   const lbl = stateLabel(j.state);
@@ -6920,6 +6996,12 @@ function paintHistory() {
       openRecordingInfo(btn.dataset.jobId);
     });
   });
+  host.querySelectorAll("[data-action=rec-rescan]").forEach((btn) => {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); reScanRecording(btn); });
+  });
+  host.querySelectorAll("[data-action=rec-locate]").forEach((btn) => {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); showRecordingPath(btn.dataset.path); });
+  });
   host.querySelectorAll("[data-action=rec-delete]").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -6953,9 +7035,14 @@ function historyPillHtml(j) {
   const sourceBadge = j.source_url
     ? '<span class="mp-source" title="From Twitch/YouTube VOD backfill">VOD</span>' : "";
   const isFinished = stateClassName(j.state) === "finished" && j.file_exists !== false;
+  const isFileError = j.file_exists === false;
   const playBtn = isFinished
     ? `<button class="primary sm" data-action="rec-play" data-job-id="${escape(j.id)}" title="Open player">▶ Play</button>`
-    : `<button class="primary sm rec-play-disabled" disabled aria-disabled="true" title="${j.file_exists === false ? "File missing" : "Not finished"}">▶ Play</button>`;
+    : `<button class="primary sm rec-play-disabled" disabled aria-disabled="true" title="${isFileError ? "File missing" : "Not finished"}">▶ Play</button>`;
+  const fileErrorBtns = isFileError
+    ? `<button class="sm" data-action="rec-rescan" data-job-id="${escape(j.id)}" title="Re-check whether the file exists">↻ Re-scan</button>
+       <button class="sm" data-action="rec-locate" data-job-id="${escape(j.id)}" data-path="${escape(j.output_path || "")}" title="Show the expected file path">📂 Show path</button>`
+    : "";
   return `
     <div class="media-pill hist-pill${j.file_exists === false ? " mp-broken" : ""}"
          data-job-id="${escape(j.id)}">
@@ -6971,6 +7058,7 @@ function historyPillHtml(j) {
       </div>
       <div class="hist-actions">
         ${playBtn}
+        ${fileErrorBtns}
         <button class="sm" data-action="rec-info" data-job-id="${escape(j.id)}" title="Recording details">ⓘ Info</button>
         <button class="danger sm" data-action="rec-delete" data-job-id="${escape(j.id)}" title="Delete (moves file to 7-day trash)">✕</button>
       </div>

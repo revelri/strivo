@@ -843,13 +843,42 @@ button.sm {
 }
 /* Terminal data-loss state — the journal says Finished but the recording's
  * output_path is gone. Solid red (no pulse — pulse means in-flight) with a
- * brighter inner border so it reads clearly distinct from Failed (amber). */
+ * brighter inner border so it reads clearly distinct from Failed (amber).
+ * Diagonal hatching adds a "data integrity" visual cue separate from the
+ * solid-fill Failed pill. */
 .state-pill.file-error,
 .recordings-table .state-pill.file-error {
-  background: var(--recording);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      var(--recording) 0 6px,
+      hsl(0, 70%, 45%) 6px 12px
+    );
   color: #fff;
   border: 1px solid rgba(255, 255, 255, 0.45);
   font-weight: 700;
+}
+
+/* File-error remediation modal — surfaced from the Re-scan / Show path
+ * action buttons when a recording is flagged file_exists=false. */
+.rec-locate-card { padding: 1.2rem 1.4rem; max-width: 640px; }
+.rec-locate-head {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 0.4rem;
+}
+.rec-locate-head h2 { margin: 0; font-size: 1.05em; }
+.rec-locate-row {
+  display: flex; gap: 0.6rem; align-items: center;
+  margin-top: 0.6rem;
+}
+.rec-locate-path {
+  flex: 1; padding: 0.5rem 0.7rem;
+  background: rgba(0,0,0,0.35);
+  border-radius: 4px;
+  font-family: monospace;
+  font-size: 0.85em;
+  word-break: break-all;
+  user-select: all;
 }
 
 /* Login screen */
