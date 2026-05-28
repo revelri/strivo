@@ -1,5 +1,8 @@
 [workspace]
 members = [".", "crates/strivo-bin", "crates/strivo-web"]
+# strivo-plugins is its own workspace root (Git submodule with a
+# standalone build). Excluding it stops cargo from claiming it.
+exclude = ["strivo-plugins"]
 resolver = "2"
 
 # strivo-plugins git-deps strivo-core; route that back to the workspace
@@ -7,12 +10,19 @@ resolver = "2"
 [patch."https://github.com/Chorosyne/strivo"]
 strivo-core = { path = "." }
 
-# Route the strivo-plugins git dep to the local submodule checkout so in-tree
-# edits (e.g. new transcription backends) are picked up without round-tripping
-# through GitHub. The submodule has its own `[workspace]` table to keep it
-# build-isolated from this workspace.
-[patch."https://github.com/Chorosyne/strivo-plugins"]
-strivo-plugins = { path = "strivo-plugins" }
+# strivo-plugins is consumed via its public `git = "..."` URL, gated
+# behind the `pro` cargo feature in strivo-bin / strivo-web. Free-clone
+# builds (cargo build --no-default-features) skip the dep entirely.
+#
+# Pro contributors who want their local submodule edits picked up
+# without a remote push can drop the following into a *gitignored*
+# `.cargo/config.toml` (NOT in this file — cargo evaluates [patch]
+# eagerly which would break free clones):
+#
+#   [patch."https://github.com/Chorosyne/strivo-plugins"]
+#   strivo-plugins = { path = "strivo-plugins" }
+#
+# See PLUGINS_PRIVATE.md for the runbook.
 
 [package]
 name = "strivo-core"

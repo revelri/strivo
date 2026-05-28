@@ -73,14 +73,20 @@ pub async fn serve(cfg: ServeConfig) -> Result<()> {
     // recordings, schedule, settings, logs, system) are retired — they
     // served the old server-rendered UI at /, /channels, … and were the
     // reason the bare root showed the pre-redesign dashboard.
-    let guarded = Router::new()
+    // `mut` only needed when the pro feature toggles in extra routes.
+    #[allow(unused_mut)]
+    let mut guarded = Router::new()
         .merge(routes::events::router())
         .merge(routes::api::router())
-        .merge(routes::plugins::router())
         .merge(routes::licence::router())
         .merge(routes::recordings::router())
         .merge(routes::login::router())
-        .merge(routes::assets::router())
+        .merge(routes::assets::router());
+    #[cfg(feature = "pro")]
+    {
+        guarded = guarded.merge(routes::plugins::router());
+    }
+    let guarded = guarded
         .layer(middleware::from_fn_with_state(
             state.clone(),
             routes::login::session_refresh,

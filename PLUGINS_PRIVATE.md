@@ -61,3 +61,42 @@ on `Chorosyne/strivo-plugins`'s collaborator list. No deploy key
 needed locally — the submodule URL stays at the HTTPS form in
 `.gitmodules` and Git transparently falls through to whichever auth
 is configured (SSH agent for personal keys, deploy key for CI).
+
+## 6. Build modes
+
+`strivo-plugins` is consumed as an **optional** Cargo dependency in
+`strivo-bin` and `strivo-web`, gated by a `pro` feature that is
+**on by default**.
+
+```bash
+# Pro contributor (submodule present, default flow)
+cargo build
+
+# Free / public-fork build (no submodule access required)
+cargo build --no-default-features
+```
+
+The free build:
+- compiles without ever resolving the `strivo-plugins` git dep,
+- ships every other surface (recording, monitor, UI, licence client,
+  upgrade card, all 13 Settings sub-sections),
+- presents `/plugins` as an empty hub with the upgrade card,
+- has Pro plugin data routes return 404 (the module isn't mounted).
+
+The runtime licence gate still applies on top, so even Pro builds
+distributed publicly remain locked until activated.
+
+### Picking up local submodule edits without a push
+
+Cargo evaluates `[patch]` tables eagerly, so embedding the patch
+in the workspace `Cargo.toml` would break free clones (which
+don't have `strivo-plugins/`). Instead, contributors who want
+local edits to flow through without round-tripping GitHub drop
+this into a gitignored `.cargo/config.toml`:
+
+```toml
+[patch."https://github.com/Chorosyne/strivo-plugins"]
+strivo-plugins = { path = "strivo-plugins" }
+```
+
+`.cargo/` is already in the repo's `.gitignore`.

@@ -66,17 +66,9 @@ async fn handle_command(cmd: &Command, config_path: Option<&std::path::Path>) ->
             // W2 phase 2 — register first-party plugins so they
             // boot inside the daemon process (init_all opens DBs,
             // status_line + properties_section work for the webui).
+            #[allow(unused_mut)]
             let mut host = strivo_core::daemon::DaemonPluginHost::new();
-            host.registry
-                .register(Box::new(strivo_plugins::crunchr::CrunchrPlugin::new()));
-            host.registry
-                .register(Box::new(strivo_plugins::archiver::ArchiverPlugin::new()));
-            host.registry
-                .register(Box::new(strivo_plugins::insights::InsightsPlugin::new()));
-            host.registry
-                .register(Box::new(strivo_plugins::editor::EditorPlugin::new()));
-            host.registry
-                .register(Box::new(strivo_plugins::viewguard::ViewguardPlugin::new()));
+            register_first_party_plugins(&mut host.registry);
             daemon::run_with_plugins(host).await
         }
         Command::Enable => handle_enable().await,
@@ -1458,11 +1450,7 @@ async fn run_client(args: cli::Args) -> Result<()> {
     // Register plugins (first-party in-tree + dynamically-loaded
     // cdylibs declared in user manifests).
     let mut registry = plugin::registry::PluginRegistry::new();
-    registry.register(Box::new(strivo_plugins::crunchr::CrunchrPlugin::new()));
-    registry.register(Box::new(strivo_plugins::archiver::ArchiverPlugin::new()));
-    registry.register(Box::new(strivo_plugins::insights::InsightsPlugin::new()));
-    registry.register(Box::new(strivo_plugins::editor::EditorPlugin::new()));
-    registry.register(Box::new(strivo_plugins::viewguard::ViewguardPlugin::new()));
+    register_first_party_plugins(&mut registry);
     let manifests = strivo_core::plugin::scan_user_plugins(&strivo_core::plugin::user_plugin_dir());
     let n = registry.load_dylibs_from_manifests(&manifests);
     if n > 0 {
@@ -1672,11 +1660,7 @@ async fn run_tui(args: cli::Args) -> Result<()> {
 
     // Register plugins
     let mut registry = plugin::registry::PluginRegistry::new();
-    registry.register(Box::new(strivo_plugins::crunchr::CrunchrPlugin::new()));
-    registry.register(Box::new(strivo_plugins::archiver::ArchiverPlugin::new()));
-    registry.register(Box::new(strivo_plugins::insights::InsightsPlugin::new()));
-    registry.register(Box::new(strivo_plugins::editor::EditorPlugin::new()));
-    registry.register(Box::new(strivo_plugins::viewguard::ViewguardPlugin::new()));
+    register_first_party_plugins(&mut registry);
     registry.init_all(&config)?;
 
     tui::run(app_state, registry, event_rx, recording_tx).await?;
@@ -1685,4 +1669,21 @@ async fn run_tui(args: cli::Args) -> Result<()> {
 
     tracing::info!("StriVo exiting");
     Ok(())
+}
+
+/// Register every first-party (in-tree) plugin into `registry`. Empty
+/// no-op when built without the `pro` feature — free clones build
+/// cleanly without the private strivo-plugins submodule.
+#[cfg(feature = "pro")]
+fn register_first_party_plugins(registry: &mut plugin::registry::PluginRegistry) {
+    registry.register(Box::new(strivo_plugins::crunchr::CrunchrPlugin::new()));
+    registry.register(Box::new(strivo_plugins::archiver::ArchiverPlugin::new()));
+    registry.register(Box::new(strivo_plugins::insights::InsightsPlugin::new()));
+    registry.register(Box::new(strivo_plugins::editor::EditorPlugin::new()));
+    registry.register(Box::new(strivo_plugins::viewguard::ViewguardPlugin::new()));
+}
+
+#[cfg(not(feature = "pro"))]
+fn register_first_party_plugins(_registry: &mut plugin::registry::PluginRegistry) {
+    // No-op: free build ships without the private plugin crate.
 }
