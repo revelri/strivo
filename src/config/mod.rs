@@ -70,6 +70,13 @@ pub struct AppConfig {
     #[serde(default)]
     pub monitor_limits: MonitorLimits,
 
+    /// Per-plugin enable flags surfaced on Settings → Plugins. Keyed by
+    /// plugin name; missing entries default to enabled=true. The runtime
+    /// consults this when deciding whether to schedule a plugin's RPC
+    /// verb or surface its UI controls — the actual gate is plugin-side.
+    #[serde(default)]
+    pub plugin_toggles: BTreeMap<String, PluginToggle>,
+
     /// Tracks the path this config was loaded from, so save() can use it
     #[serde(skip)]
     pub config_path: Option<PathBuf>,
@@ -653,6 +660,20 @@ impl Default for NotificationsConfig {
     }
 }
 
+/// Per-plugin enable flag. Defaults to true so a missing entry preserves
+/// the previous always-on behaviour. Kept as its own struct so future
+/// per-plugin knobs (storage cap, RPC quota, …) land here without
+/// invalidating the existing config schema.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginToggle {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for PluginToggle {
+    fn default() -> Self { Self { enabled: true } }
+}
+
 /// Capture-time safety knobs. Both fields default to 0 (= disabled) so
 /// existing config files keep the previous unlimited behaviour. Set
 /// either to a positive value to opt in.
@@ -728,6 +749,7 @@ impl Default for AppConfig {
             web: WebConfig::default(),
             notifications: NotificationsConfig::default(),
             monitor_limits: MonitorLimits::default(),
+            plugin_toggles: BTreeMap::new(),
             config_path: None,
         }
     }

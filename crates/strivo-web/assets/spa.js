@@ -3499,6 +3499,42 @@ function toTitleCase(slug) {
   return slug.split(/[-_]/).map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
 }
 
+// Single source of truth for the plugin set across the Settings →
+// Plugins manager AND the hub. Every shipped plugin appears once with
+// the metadata the SPA needs to render its enable toggle + open link.
+const PLUGIN_REGISTRY = [
+  // First-party Pro plugins with dedicated SPA sub-routes.
+  { name: "crunchr",   label: "Crunchr",   category: "Transcription", route: "#/plugins/crunchr",   proGated: true,  description: "Transcribe every recording — speaker timeline, quote search, exportable subtitles." },
+  { name: "archiver",  label: "Archiver",  category: "Archive",       route: "#/plugins/archiver",  proGated: true,  description: "Auto-catalog the full back-catalog of any followed channel." },
+  { name: "insights",  label: "Insights",  category: "Analytics",     route: "#/plugins/insights",  proGated: true,  description: "Cross-stream analytics, word frequency, topic shifts, retention proxy." },
+  { name: "viewguard", label: "Viewguard", category: "Analytics",     route: "#/plugins/viewguard", proGated: true,  description: "Live fraud-signal scoring during captures + cross-stream trend dashboard." },
+  // Editor stack.
+  { name: "editor",     label: "EDL editor",   category: "Editor", proGated: true, description: "Non-destructive EDL with split / ripple-delete / dead-air trim / branding overlay + revision history." },
+  { name: "deadair",    label: "Dead-air trim", category: "Editor", proGated: true, description: "Silence detection + one-click EDL trim from inside the editor." },
+  { name: "branding",   label: "Branding",      category: "Editor", proGated: true, description: "Watermark + intro/outro banner overlay spec, applied via ffmpeg filter_complex on render." },
+  { name: "broll",      label: "B-roll finder", category: "Editor", proGated: true, description: "Suggest B-roll cuts from a tagged local library based on transcript topics." },
+  // Asset / analytics / publishing.
+  { name: "chapters",         label: "Chapters",         category: "Analytics", proGated: true, description: "Heuristic chapter markers extracted from pacing." },
+  { name: "cuepoints",        label: "Cuepoints",        category: "Analytics", proGated: true, description: "Scene-change detection from ffmpeg's select filter." },
+  { name: "thumbnails",       label: "Thumbnails",       category: "Analytics", proGated: true, description: "Frame ranking + facecam crop candidates." },
+  { name: "clipper",          label: "Clipper",          category: "Editor",    proGated: true, description: "Highlight detection + one-click clip extraction." },
+  { name: "captions",         label: "Captions",         category: "Transcription", proGated: true, description: "SRT / VTT / TXT export with translator-trait pluggable backend." },
+  { name: "multitrack",       label: "Multitrack",       category: "Editor",    proGated: true, description: "Audio track enumeration + extraction." },
+  { name: "brandsafe",        label: "Brand safety",     category: "Publish",   proGated: true, description: "Pre-publish content classifier." },
+  { name: "reuse",            label: "Reuse",            category: "Publish",   proGated: true, description: "Cross-format publish-queue drafter." },
+  { name: "casebook",         label: "Casebook",         category: "Reports",   proGated: true, description: "Post-stream markdown briefing." },
+  { name: "heatmap",          label: "Heatmap",          category: "Analytics", proGated: true, description: "Multi-signal retention overlay." },
+  { name: "insights-compare", label: "Compare", category: "Analytics", proGated: true, description: "Stream-vs-stream side-by-side." },
+  { name: "viewguard-trend",  label: "Viewguard trend",  category: "Analytics", proGated: true, description: "Cross-stream fraud trend dashboard." },
+  { name: "chat-density",     label: "Chat density",     category: "Analytics", proGated: true, description: "Audience-retention proxy from chat rate." },
+  // Viewer layer.
+  { name: "multistream", label: "Multistream viewer", category: "Viewer", route: "#/watch", proGated: true, description: "Auto-tile any subset of currently-live followed channels." },
+  { name: "chat",        label: "Chat client",       category: "Viewer", route: "#/chat",  proGated: true, description: "Chatterino-class IRC + tokenizer + filter pipeline + ring buffer." },
+  // Cross-cutting.
+  { name: "pipelines-dag", label: "Pipelines DAG", category: "Reports", route: "#/pipelines", proGated: true, description: "Cross-plugin pipeline graph." },
+  { name: "marketplace",   label: "Marketplace",   category: "Reports", route: "#/plugins",   proGated: true, description: "Third-party plugin catalog stub." },
+];
+
 // Per-plugin pitch lines for the upsell card. Keyed by plugin name so the
 // CTA copy stays specific instead of generic. Defaults to the plugin's
 // description fetched from the marketplace catalog when present.
@@ -3683,6 +3719,9 @@ async function renderPluginHub() {
           <span class="pg-icon pg-icon-${p.name}" aria-hidden="true">${escape((p.display || p.name)[0])}</span>
           <span class="pg-card-name">${escape(p.display || p.name)}</span>
           ${status}
+          <a class="pg-card-gear" href="#/settings/plugins"
+             title="Open plugin manager"
+             onclick="event.stopPropagation()">⚙</a>
         </div>
         <p class="pg-card-desc">${escape(p.description || "")}</p>
         ${statsHtml}
@@ -6179,25 +6218,61 @@ function renderSettingsPane(slug, s) {
       ].join("");
     }
 
-    case "plugins":
-      return [
-        group("Archiver", [
-          row("Enabled", toggle("archiver.enabled", arc.enabled),
-            "Back-catalog VOD archiver. Walks each tracked channel's history and downloads anything missing."),
-          row("Archive directory",
+    case "plugins": {
+      // Plugin manager. Lists every shipped plugin with a per-plugin
+      // enable toggle bound to plugins.<name>.enabled, plus an 'Open'
+      // CTA that deep-links into the plugin's own page (when one
+      // exists) or the marketplace catalog card otherwise. Pre-existing
+      // Archiver per-knob settings stay in their own group below.
+      const toggles = s.plugin_toggles || {};
+      // PLUGIN_REGISTRY is the same set the Plugins hub + marketplace
+      // share — lives at the bottom of spa.js. category drives the
+      // sub-group heading.
+      const groups = {};
+      for (const meta of PLUGIN_REGISTRY) {
+        (groups[meta.category] ||= []).push(meta);
+      }
+      const enabledFor = (name) => {
+        const t = toggles[name];
+        return t == null ? true : t.enabled !== false;
+      };
+      const pluginRow = (meta) => {
+        const open = meta.route
+          ? `<a href="${escape(meta.route)}" class="stg-linkbtn">Open →</a>`
+          : `<a href="#/plugins" class="stg-linkbtn">View in hub →</a>`;
+        return `
+          <div class="stg-row stg-plugin-row" data-plugin-name="${escape(meta.name)}">
+            <div class="stg-row-label">
+              <span class="stg-plugin-name">${escape(meta.label)}</span>
+              <span class="stg-hint" title="${escape(meta.description)}">ⓘ</span>
+              <span class="stg-plugin-tags">
+                ${meta.proGated ? '<span class="cfg-badge ok" title="Strivo Pro plugin">Pro</span>' : ""}
+                ${meta.installed === false ? '<span class="cfg-badge warn">not installed</span>' : ""}
+              </span>
+            </div>
+            <div class="stg-row-value stg-plugin-actions">
+              ${toggle(`plugins.${meta.name}.enabled`, enabledFor(meta.name))}
+              ${open}
+            </div>
+          </div>`;
+      };
+      const archiverExtras = `
+        <details class="stg-plugin-details">
+          <summary>Archiver advanced</summary>
+          ${row("Archive directory",
             textInput("archiver.archive_dir", arc.archive_dir, "/path/to/archives"),
-            "Where archived VODs land. Defaults under the main recording dir."),
-          row("Format",
+            "Where archived VODs land. Defaults under the main recording dir.")}
+          ${row("Format",
             textInput("archiver.format", arc.format, "best"),
-            "yt-dlp format selector. Default targets bestvideo+bestaudio with a sensible cap. See yt-dlp -F for options."),
-          row("Concurrent fragments", numInput("archiver.concurrent_fragments", arc.concurrent_fragments ?? 4, 1, 16),
-            "yt-dlp -N flag. Higher = faster downloads, more bandwidth/CPU. Range 1–16."),
-        ].join("")),
-        group("Other plugins", [
-          row("Pro plugins", `<a href="#/plugins" class="stg-linkbtn">Open Plugins page →</a>`,
-            "Crunchr, Viewguard, Insights. Activate Strivo Pro from the Plugins hub."),
-        ].join("")),
-      ].join("");
+            "yt-dlp format selector. Default targets bestvideo+bestaudio with a sensible cap.")}
+          ${row("Concurrent fragments", numInput("archiver.concurrent_fragments", arc.concurrent_fragments ?? 4, 1, 16),
+            "yt-dlp -N flag. 1–16; higher = faster but more rate-limit pressure.")}
+        </details>`;
+      const sections = Object.keys(groups).sort().map((cat) =>
+        group(cat, groups[cat].map(pluginRow).join("") + (cat === "Archive" ? archiverExtras : ""))
+      ).join("");
+      return sections;
+    }
 
     case "interface":
       return [

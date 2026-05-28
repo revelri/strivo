@@ -386,6 +386,7 @@ async fn settings(headers: HeaderMap, State(state): State<AppState>) -> impl Int
                 "archiver": cfg.archiver,
                 "notifications": cfg.notifications,
                 "monitor_limits": cfg.monitor_limits,
+                "plugin_toggles": cfg.plugin_toggles,
                 "twitch_configured": cfg.twitch.is_some(),
                 "youtube_configured": cfg.youtube.is_some(),
                 "patreon_configured": cfg.patreon.is_some(),
@@ -1099,6 +1100,28 @@ async fn update_setting(
                 Err("max_concurrent_recordings must be 0..=64".into())
             }
         }),
+        // Per-plugin toggles. Path shape: plugins.<name>.enabled — the
+        // <name> is allowed to be any kebab/snake-case identifier; we
+        // validate it inline rather than enumerating every plugin so
+        // new plugins land without an allowlist update.
+        path if path.starts_with("plugins.") && path.ends_with(".enabled") => {
+            let name = &path["plugins.".len()..path.len() - ".enabled".len()];
+            if name.is_empty()
+                || !name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+            {
+                Err(format!("invalid plugin name in path: {name:?}"))
+            } else {
+                take_bool(&body.value).map(|v| {
+                    let entry = cfg
+                        .plugin_toggles
+                        .entry(name.to_string())
+                        .or_insert_with(strivo_core::config::PluginToggle::default);
+                    entry.enabled = v;
+                })
+            }
+        }
         "monitor_limits.disk_budget_reserved_gb" => take_u32(&body.value).and_then(|v| {
             if v <= 100_000 {
                 cfg.monitor_limits.disk_budget_reserved_gb = v;
