@@ -179,8 +179,14 @@ const API = {
     API._fetch(`/plugins/heatmap/${encodeURIComponent(recordingId)}?bucket_secs=${bucketSecs}`),
   editorLoad: (recordingId) =>
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}`),
-  editorSave: (recordingId, edl) =>
-    API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}`, { method: "POST", body: edl }),
+  editorSave: (recordingId, edl, label) => {
+    const qs = label ? `?label=${encodeURIComponent(label)}` : "";
+    return API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}${qs}`, { method: "POST", body: edl });
+  },
+  editorRevisions: (recordingId) =>
+    API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/revisions`),
+  editorRevisionRestore: (recordingId, revId) =>
+    API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/revisions/${encodeURIComponent(revId)}/restore`, { method: "POST" }),
   editorRender: (recordingId) =>
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/render`, { method: "POST" }),
   deadairDetect: (recordingId, opts = {}) => {
@@ -4034,9 +4040,11 @@ async function openRecordingInfo(jobId) {
             <button class="sm rec-ed-delete" type="button">Ripple-delete range…</button>
             <button class="sm rec-ed-deadair" type="button" title="Detect dead air (silencedetect) and trim spans longer than 6s">▢ Trim dead air…</button>
             <button class="sm rec-ed-branding" type="button" title="Watermark + intro/outro banner overlay applied at render">★ Branding…</button>
+            <button class="sm rec-ed-history" type="button" title="Revision history — revert across saves (DAW-style undo)">↺ History…</button>
             <button class="btn-primary rec-ed-render" type="button">⚡ Render to MKV</button>
           </div>
           <div class="rec-branding" hidden></div>
+          <div class="rec-history" hidden></div>
           <div class="rec-ed-list">
             ${edl.cuts
               .map(
@@ -4054,9 +4062,9 @@ async function openRecordingInfo(jobId) {
           </div>
           <p class="pg-cap-hint">All edits are non-destructive — original recording stays intact. Render writes &lt;recording_parent&gt;/edl/&lt;id&gt;.mkv.</p>`;
 
-        const persist = async () => {
+        const persist = async (label) => {
           try {
-            await API.editorSave(jobId, edl);
+            await API.editorSave(jobId, edl, label);
           } catch (err) {
             Toast.error(`Save failed: ${err.message}`);
           }
@@ -4086,7 +4094,7 @@ async function openRecordingInfo(jobId) {
             }
             elapsed = out_hi;
           }
-          await persist();
+          await persist("split");
           paint();
           Toast.success("Split");
         });
@@ -4130,7 +4138,7 @@ async function openRecordingInfo(jobId) {
             next.push(left, right);
           }
           edl.cuts = next.filter((c) => c.end_sec - c.start_sec > 0.001);
-          await persist();
+          await persist("ripple-delete");
           paint();
           Toast.success("Range deleted");
         });
@@ -4138,7 +4146,7 @@ async function openRecordingInfo(jobId) {
           b.addEventListener("click", async () => {
             const i = +b.dataset.i;
             edl.cuts.splice(i, 1);
-            await persist();
+            await persist("remove cut");
             paint();
           });
         });
@@ -4155,7 +4163,7 @@ async function openRecordingInfo(jobId) {
             if (!isFinite(lo) || !isFinite(hi) || hi <= lo) { Toast.error("Invalid"); return; }
             c.start_sec = lo;
             c.end_sec = hi;
-            await persist();
+            await persist("trim cut");
             paint();
           });
         });
@@ -4210,7 +4218,7 @@ async function openRecordingInfo(jobId) {
               }
               edl.cuts = next.filter((c) => c.end_sec - c.start_sec > 0.001);
             }
-            await persist();
+            await persist("trim dead air");
             paint();
             Toast.success(`Trimmed ${cuts.length} dead-air span(s) · saved ${fmtClock(totalTrim)}.`);
           }).catch((err) => Toast.error(`Dead-air scan failed: ${err.message}`));
@@ -4301,6 +4309,46 @@ async function openRecordingInfo(jobId) {
               }).catch((err) => Toast.error(`Save failed: ${err.message}`));
             });
           }).catch((err) => Toast.error(`Branding failed: ${err.message}`));
+        });
+        host.querySelector(".rec-ed-history")?.addEventListener("click", async (e2) => {
+          const hbtn = e2.currentTarget;
+          await withBusy(hbtn, "Loading…", async () => {
+            const r = await API.editorRevisions(jobId);
+            const panel = host.querySelector(".rec-history");
+            if (!panel) return;
+            const revs = r.revisions || [];
+            panel.hidden = false;
+            if (!revs.length) {
+              panel.innerHTML = `<p class="pg-cap-hint">No revisions yet. Edits get logged here as you go.</p>`;
+              return;
+            }
+            panel.innerHTML = `
+              <h5>Revision history <span class="pg-cap-hint">${revs.length} saved</span></h5>
+              <div class="rec-hist-list">
+                ${revs.map((v, i) => `
+                  <div class="rec-hist-row" data-rev="${v.revision_id}">
+                    <span class="rec-hist-idx">v${revs.length - i}</span>
+                    <span class="rec-hist-label">${escape(v.label)}</span>
+                    <span class="rec-hist-meta pg-cap-hint">${v.cut_count} cut${v.cut_count===1?"":"s"} · ${fmtClock(v.total_duration_sec)} · ${escape(v.created_at.replace("T"," ").split(".")[0])}</span>
+                    <button class="sm rec-hist-restore" type="button" title="Restore this revision as the current EDL">Restore</button>
+                  </div>`).join("")}
+              </div>
+              <p class="pg-cap-hint">Restoring appends a new revision tagged "revert to vN" so restores are themselves undoable.</p>`;
+            panel.querySelectorAll(".rec-hist-restore").forEach((rb) => {
+              rb.addEventListener("click", async () => {
+                const revId = rb.closest(".rec-hist-row").dataset.rev;
+                if (!confirm(`Restore revision v${revId}? Current EDL will become the prior state; a new revision will be appended so this restore is itself undoable.`)) return;
+                await withBusy(rb, "Restoring…", async () => {
+                  const res = await API.editorRevisionRestore(jobId, revId);
+                  edl = res.edl;
+                  paint();
+                  Toast.success(`Restored · ${res.label}`);
+                  // refresh the panel
+                  host.querySelector(".rec-ed-history")?.click();
+                }).catch((err) => Toast.error(`Restore failed: ${err.message}`));
+              });
+            });
+          }).catch((err) => Toast.error(`History failed: ${err.message}`));
         });
         host.querySelector(".rec-ed-render")?.addEventListener("click", async (e2) => {
           const btnR = e2.currentTarget;

@@ -3033,11 +3033,24 @@ body.modal-open { overflow: hidden; }
 .cr-hm-top span { color: var(--text); font-weight: 600; }
 /* EDL editor panel (Editor plugin, iter 14). */
 .rec-editor { margin-top: 0.7rem; }
-.rec-branding {
+.rec-branding,
+.rec-history {
   margin-top: 0.7rem; padding: 0.6rem 0.8rem;
   border: 1px solid var(--border-light); border-radius: 6px;
   background: var(--bg-soft, rgba(255,255,255,0.02));
 }
+.rec-history h5 { margin: 0 0 0.5rem; font-size: 0.95em; }
+.rec-hist-list { display: flex; flex-direction: column; gap: 0.3rem; }
+.rec-hist-row {
+  display: grid;
+  grid-template-columns: 52px 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid var(--border-light); border-radius: 4px;
+}
+.rec-hist-idx { font-weight: 600; opacity: 0.8; }
+.rec-hist-label { font-weight: 500; }
 .rec-branding h5 { margin: 0 0 0.5rem; font-size: 0.95em; }
 .rec-br-wm, .rec-br-banner { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.4rem; flex-wrap: wrap; }
 .rec-br-on { display: inline-flex; gap: 0.3rem; align-items: center; }

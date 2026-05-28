@@ -1445,12 +1445,23 @@ async fn editor_load(
     .into_response()
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub(super) struct EditorSaveQuery {
+    /// Short label describing this edit (e.g. "manual edit", "trim dead air").
+    /// Recorded in the revision history so the SPA can render meaningful
+    /// undo targets. Defaults to "manual edit" when absent.
+    #[serde(default)]
+    label: Option<String>,
+}
+
 /// `POST /api/v1/plugins/editor/<recording_id>` — save the EDL the SPA
-/// has been editing locally.
+/// has been editing locally. Appends a revision tagged with `?label=` so
+/// the user can revert across saves (DAW-style undo across reloads).
 async fn editor_save(
     headers: HeaderMap,
     State(state): State<AppState>,
     Path(recording_id): Path<String>,
+    Query(q): Query<EditorSaveQuery>,
     Json(body): Json<strivo_editor::Edl>,
 ) -> impl IntoResponse {
     if authed(&headers, &state).is_err() {
@@ -1464,10 +1475,69 @@ async fn editor_save(
         Ok(s) => s,
         Err(e) => return Problem::internal(format!("open store: {e}")).into_response(),
     };
-    if let Err(e) = store.save(&edl) {
+    let label = q.label.as_deref().unwrap_or("manual edit");
+    if let Err(e) = store.save_with_label(&edl, label) {
         return Problem::internal(format!("save: {e}")).into_response();
     }
     Json(json!({ "ok": true, "total_duration": edl.total_duration() })).into_response()
+}
+
+/// `GET /api/v1/plugins/editor/<recording_id>/revisions` — newest-first
+/// metadata list of every saved revision; the SPA renders it as the undo
+/// stack.
+async fn editor_revisions_list(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("editor") { return r; }
+    let store = match strivo_editor::store::EdlStore::open(&editor_store_path()) {
+        Ok(s) => s,
+        Err(e) => return Problem::internal(format!("open store: {e}")).into_response(),
+    };
+    let revisions = match store.list_revisions(&recording_id, 200) {
+        Ok(r) => r,
+        Err(e) => return Problem::internal(format!("list: {e}")).into_response(),
+    };
+    Json(json!({ "recording_id": recording_id, "revisions": revisions })).into_response()
+}
+
+/// `POST /api/v1/plugins/editor/<recording_id>/revisions/<rev_id>/restore`
+/// — replace the current EDL with the contents of revision `rev_id` and
+/// append a new revision tagged "revert to v<rev_id>" so the restoration
+/// itself is undoable.
+async fn editor_revisions_restore(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path((recording_id, rev_id)): Path<(String, i64)>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("editor") { return r; }
+    let store = match strivo_editor::store::EdlStore::open(&editor_store_path()) {
+        Ok(s) => s,
+        Err(e) => return Problem::internal(format!("open store: {e}")).into_response(),
+    };
+    let edl = match store.load_revision(&recording_id, rev_id) {
+        Ok(Some(e)) => e,
+        Ok(None) => return Problem::not_found("revision not found").into_response(),
+        Err(e) => return Problem::internal(format!("load: {e}")).into_response(),
+    };
+    let label = format!("revert to v{rev_id}");
+    if let Err(e) = store.save_with_label(&edl, &label) {
+        return Problem::internal(format!("save: {e}")).into_response();
+    }
+    Json(json!({
+        "ok": true,
+        "edl": edl,
+        "total_duration": edl.total_duration(),
+        "label": label,
+    }))
+    .into_response()
 }
 
 /// `POST /api/v1/plugins/editor/<recording_id>/render` — bake the EDL
@@ -2522,6 +2592,11 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/heatmap/{id}", get(heatmap_compute))
         .route("/api/v1/plugins/editor/{id}", get(editor_load).post(editor_save))
         .route("/api/v1/plugins/editor/{id}/render", axum::routing::post(editor_render))
+        .route("/api/v1/plugins/editor/{id}/revisions", get(editor_revisions_list))
+        .route(
+            "/api/v1/plugins/editor/{id}/revisions/{rev_id}/restore",
+            axum::routing::post(editor_revisions_restore),
+        )
         .route("/api/v1/plugins/viewguard/trend", get(viewguard_trend))
         .route("/api/v1/plugins/broll/{id}", axum::routing::post(broll_suggest))
         .route("/api/v1/plugins/chat-density/{id}", axum::routing::post(chat_density_compute))

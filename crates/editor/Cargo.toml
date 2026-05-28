@@ -17,3 +17,6 @@ serde_json = "1"
 anyhow = "1"
 chrono = "0.4"
 rusqlite = { version = "0.33", features = ["bundled"] }
+
+[dev-dependencies]
+tempfile = "3"
