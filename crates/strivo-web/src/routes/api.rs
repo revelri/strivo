@@ -2073,6 +2073,23 @@ async fn patreon_pull(
     }
 }
 
+/// `GET /api/v1/marketplace/catalog` — the curated third-party plugin
+/// catalog. Each entry carries a validated [PluginManifest] + a source
+/// tag (`first_party` / `verified` / `community`) + an installed flag.
+/// Public surface (not Pro-gated) so free builds preview the upgrade
+/// path. Installed detection plugs in when the install endpoint lands;
+/// today it always reports `false`.
+async fn marketplace_catalog() -> impl IntoResponse {
+    let mut catalog = strivo_marketplace::default_catalog();
+    // Strip any catalog entries that fail validation — better to hide
+    // than to ship a broken row to the SPA.
+    catalog.entries.retain(|e| strivo_marketplace::validate_manifest(&e.manifest).is_ok());
+    Json(json!({
+        "host_version": strivo_marketplace::HOST_VERSION,
+        "catalog": catalog,
+    }))
+}
+
 /// `GET /api/v1/pipelines/dag` — the canonical DAW-vision pipeline
 /// DAG. Public surface (not Pro-gated) so the SPA's Pipelines page
 /// renders even on free builds, where it doubles as a roadmap teaser
@@ -2101,6 +2118,7 @@ async fn pipelines_dag() -> impl IntoResponse {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/pipelines/dag", get(pipelines_dag))
+        .route("/api/v1/marketplace/catalog", get(marketplace_catalog))
         .route("/api/v1/health", get(health))
         .route("/api/v1/health/checks", get(health_checks))
         .route("/api/v1/channels", get(channels))

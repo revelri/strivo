@@ -185,6 +185,7 @@ const API = {
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/render`, { method: "POST" }),
   viewguardTrend: () => API._fetch("/plugins/viewguard/trend"),
   pipelinesDag: () => API._fetch("/pipelines/dag"),
+  marketplaceCatalog: () => API._fetch("/marketplace/catalog"),
   patreonPull: (body) =>
     API._fetch("/patreon/pull", { method: "POST", body }),
   vodDownload: (body) =>
@@ -2635,14 +2636,15 @@ async function renderPluginHub() {
         : `<div class="pg-card pg-card-idle" data-plugin="${p.name}">${body}</div>`;
     })
     .join("");
-  // Capability matrix is a separate (fast) fetch; render the hub
-  // first and patch it in once it arrives so the page doesn't wait
-  // on the matrix to display the plugin grid.
+  // Capability matrix + marketplace both render lazily so the plugin
+  // grid paints first.
   API.pluginCapabilities().then(renderCapabilityMatrix).catch(() => {});
+  API.marketplaceCatalog().then(renderMarketplaceSection).catch(() => {});
   root.innerHTML = chrome(`
     ${pluginHeader("Plugins", "First-party plugins. Pick one to browse what it has produced.")}
     ${upgrade}
     <div id="pg-capability-matrix"></div>
+    <div id="pg-marketplace"></div>
     <div class="pg-grid">${
       cards ||
       (upgrade
@@ -2679,6 +2681,68 @@ function renderCapabilityMatrix(matrix) {
     <details class="pg-cap-matrix" open>
       <summary><strong>Capability matrix</strong> <span class="pg-cap-hint">— what each plugin contributes toward the DAW-for-streaming vision</span></summary>
       <div class="pg-cap-grid">${rows}</div>
+    </details>`;
+}
+
+// Render the marketplace catalog into #pg-marketplace. Renders each
+// plugin as a card with status badge (installed / available / coming
+// soon), price chip, capability tags, and a primary action (Install
+// when entry_point is real, "Watchlist" when roadmap).
+function renderMarketplaceSection(payload) {
+  const host = document.getElementById("pg-marketplace");
+  if (!host || !payload || !payload.catalog || !payload.catalog.entries) return;
+  const entries = payload.catalog.entries;
+  const sourceColour = {
+    first_party: "hsl(280, 60%, 65%)",
+    verified: "hsl(140, 60%, 60%)",
+    community: "hsl(35, 70%, 60%)",
+  };
+  const fmtPrice = (cents) => {
+    if (cents == null) return '<span class="mk-free">free</span>';
+    return `<span class="mk-price">$${(cents / 100).toFixed(2)}</span>`;
+  };
+  const entryStatus = (ep) => {
+    const kind = (ep && ep.kind) || "roadmap";
+    if (kind === "roadmap") return { label: "Coming soon", action: "Watchlist" };
+    return { label: "Available", action: "Install" };
+  };
+  const cards = entries
+    .map((e) => {
+      const m = e.manifest;
+      const sColour = sourceColour[e.source] || sourceColour.community;
+      const status = entryStatus(m.entry_point);
+      const caps = (m.capabilities || [])
+        .slice(0, 6)
+        .map((c) => `<span class="pl-cap pl-cap-produces" title="provides">${escape(c.replace(/_/g, " "))}</span>`)
+        .join("");
+      const consumes = (m.consumes || [])
+        .slice(0, 4)
+        .map((c) => `<span class="pl-cap pl-cap-consumes" title="needs">${escape(c.replace(/_/g, " "))}</span>`)
+        .join("");
+      return `<div class="mk-card" style="--mk-c:${sColour}">
+        <div class="mk-card-head">
+          <span class="mk-card-name">${escape(m.name)}</span>
+          <span class="mk-source">${escape(e.source)}</span>
+        </div>
+        <div class="mk-card-meta">
+          <span class="mk-version">v${escape(m.version)}</span>
+          <span class="mk-author">${escape(m.author)}</span>
+          ${fmtPrice(m.price_cents)}
+        </div>
+        <p class="mk-desc">${escape(m.description)}</p>
+        <div class="mk-caps">${caps}${consumes}</div>
+        <div class="mk-card-foot">
+          <span class="mk-status">${escape(status.label)}</span>
+          ${m.repository ? `<a class="pg-linkbtn" href="${escape(m.repository)}" target="_blank" rel="noopener">repository →</a>` : ""}
+          <button class="sm" type="button" disabled title="Install endpoint lands in a follow-up">${escape(status.action)}</button>
+        </div>
+      </div>`;
+    })
+    .join("");
+  host.innerHTML = `
+    <details class="pg-cap-matrix mk-section" open>
+      <summary><strong>Marketplace</strong> <span class="pg-cap-hint">third-party plugins · host v${escape(payload.host_version)}</span></summary>
+      <div class="mk-grid">${cards}</div>
     </details>`;
 }
 

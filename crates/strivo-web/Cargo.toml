@@ -38,6 +38,7 @@ strivo-heatmap = { path = "../heatmap" }
 strivo-editor = { path = "../editor" }
 strivo-viewguard-trend = { path = "../viewguard-trend" }
 strivo-pipelines-dag = { path = "../pipelines-dag" }
+strivo-marketplace = { path = "../marketplace" }
 rusqlite = { version = "0.33", features = ["bundled"] }
 
 # HTTP
