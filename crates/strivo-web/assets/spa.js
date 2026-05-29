@@ -647,6 +647,12 @@ const root = document.getElementById("app");
 
 async function render() {
   const r = currentRoute();
+  // Always dismiss the keymap overlay + any lingering body modal-open
+  // class on route change. Without this, navigating away from a page
+  // that opened the keymap (or a modal player) left the overlay
+  // stranded over the new route with no obvious dismiss path.
+  document.getElementById("kbd-help")?.classList.remove("open");
+  document.body.classList.remove("modal-open");
   // P0 perf: tear down per-route long-lived resources before painting
   // the next route. Chat WebSockets, chat buffers, and dataviz resize
   // listeners were accumulating across navigations.
@@ -4341,6 +4347,7 @@ async function renderWatch() {
   const focusId = params.get("focus") || "";
   const recordingId = params.get("recording") || "";
   const fresh = params.get("fresh") === "1";
+  const seekTo = parseFloat(params.get("t") || "0") || 0;
   if ((focusId || recordingId) && (fresh || (playerState.layout.kind === "slot" && !playerState.layout.streamId && !playerState.layout.recordingId))) {
     playerState.preset = "single";
     if (recordingId) playerState.layout = _slot(null, recordingId);
@@ -4379,6 +4386,18 @@ async function renderWatch() {
   }
   const streams = resp.streams || [];
   paintPlayerStage(watch, streams);
+  // Apply ?t=<sec> from in-context tools (Crunchr transcript jump,
+  // cuepoints tick, EDL jumps) once the video element has rendered.
+  if (seekTo > 0) {
+    setTimeout(() => {
+      const v = watch.querySelector("video.ms-video");
+      if (v) {
+        const apply = () => { try { v.currentTime = seekTo; v.play?.(); } catch (_) {} };
+        if (v.readyState >= 1) apply();
+        else v.addEventListener("loadedmetadata", apply, { once: true });
+      }
+    }, 0);
+  }
 
   // Background refresh: poll the tiles endpoint every 30s and patch the
   // per-tile viewer counts in place. Avoids tearing the iframes (the
@@ -6755,7 +6774,7 @@ async function openRecordingInfo(jobId) {
     b.addEventListener("click", closeRecordingModals));
   overlay.querySelector("[data-action=rec-info-play]")?.addEventListener("click", () => {
     closeRecordingModals();
-    openRecordingPlayer(jobId);
+    if (jobId) window.location.hash = `#/watch?recording=${encodeURIComponent(jobId)}&fresh=1`;
   });
   overlay.querySelector("[data-action=rec-info-cuepoints]")?.addEventListener("click", async (e) => {
     const btn = e.currentTarget;
@@ -8045,10 +8064,23 @@ async function openRecordingInfo(jobId) {
 // modal-open class) leak out.
 
 async function openRecordingPlayer(jobId, _opts = {}) {
+  // The inline modal player has been retired — every recording-open
+  // path now navigates to the Player tab so there's a single source of
+  // truth for playback. The seek parameter is preserved as a URL param
+  // so in-context tools (Crunchr transcript click, cuepoints tick,
+  // EDL editor jumps) still land at the right timecode.
+  if (!jobId) return;
+  // Defensive: dismiss any stray keymap/modal state before the route
+  // change so the new Player surface isn't covered by leftover chrome.
   closeRecordingModals();
-  // Defensive: if the keymap was left open from an earlier session it
-  // shouldn't obscure the player. Belt to the Shift+I binding above.
   document.getElementById("kbd-help")?.classList.remove("open");
+  document.body.classList.remove("modal-open");
+  const seek = _opts && _opts.seekTo ? `&t=${encodeURIComponent(_opts.seekTo)}` : "";
+  window.location.hash = `#/watch?recording=${encodeURIComponent(jobId)}&fresh=1${seek}`;
+  return;
+  // unreachable — old modal implementation kept below for reference
+  // during the deprecation window.
+  // eslint-disable-next-line no-unreachable
   const overlay = ensureModalContainer("rec-player-modal");
   overlay.innerHTML = `<div class="modal-card rec-player-card"><div class="empty sm">Loading…</div></div>`;
   document.body.classList.add("modal-open");
@@ -10706,14 +10738,20 @@ function injectKeyboardHelp() {
   div.className = "kbd-help";
   div.setAttribute("role", "dialog");
   div.setAttribute("aria-label", "Keyboard shortcuts");
-  // Click-outside dismiss. Without this the only escape route was Escape,
-  // and any video-element shortcut inside the player modal could pop it
-  // back open via the legacy `?` binding (now Shift+I).
-  div.addEventListener("click", (e) => {
-    if (e.target === div) div.classList.remove("open");
-  });
+  // Multiple dismiss paths: click backdrop, click X, ESC anywhere.
+  // The legacy version listened only for ESC; the user reported the
+  // overlay was undismissable when stacked behind a modal (the modal
+  // ate the ESC). Now ANY click on the backdrop closes it, the X
+  // button is always visible, and a delegated capture-phase ESC
+  // handler dismisses it before any modal can swallow the event.
+  const close = () => div.classList.remove("open");
+  div.addEventListener("click", (e) => { if (e.target === div) close(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && div.classList.contains("open")) { close(); }
+  }, true); // capture so we run before any modal handler
   div.innerHTML = `
     <div class="card">
+      <button class="kbd-help-close sm" type="button" aria-label="Close help">✕</button>
       <h2>Keyboard shortcuts</h2>
       <dl>
         <dt>Shift+I</dt><dd>This help</dd>
@@ -10733,9 +10771,7 @@ function injectKeyboardHelp() {
       </dl>
     </div>
   `;
-  div.addEventListener("click", (e) => {
-    if (e.target === div) div.classList.remove("open");
-  });
+  div.querySelector(".kbd-help-close")?.addEventListener("click", close);
   document.body.appendChild(div);
 }
 

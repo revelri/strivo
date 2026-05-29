@@ -327,7 +327,21 @@ input:focus-visible {
   padding: 1.5rem 2rem;
   width: 480px;
   max-width: 92vw;
+  position: relative;
 }
+.kbd-help-close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: inherit;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  padding: 0.15rem 0.45rem;
+  cursor: pointer;
+}
+.kbd-help-close:hover { background: rgba(255,255,255,0.18); }
 /* #74 — playlist scope picker modal (reuses .kbd-help overlay). */
 .pl-list {
   max-height: 50vh;
