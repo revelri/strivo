@@ -241,7 +241,6 @@ Three previously-listed gaps (sidechain, insert effects, pitch/time-stretch) shi
 - **Review-request workflow** — share a scene + checkbox approval log.
 
 ### SPA-side polish
-- **Multistream layout presets** — Quadrant / Highlight / Theatre overrides on top of the existing Auto / Focus / PiP modes.
 - **Editor cut → scenes "Capture before" auto-snapshot** — optional "auto-snapshot every save" config so the user always has a pre-edit recovery point.
 
 ### Surface gaps from the v1 audit (lower-priority)

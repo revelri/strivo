@@ -3432,6 +3432,9 @@ async function renderWatch() {
   let mode;
   if (modeName === "focus" && focusId) mode = { mode: "focus", stream_id: focusId };
   else if (modeName === "pip" && focusId) mode = { mode: "pip", main: focusId, side: sideId };
+  else if (modeName === "quadrant") mode = { mode: "quadrant" };
+  else if (modeName === "highlight") mode = { mode: "highlight", stream_id: focusId || "" };
+  else if (modeName === "theatre") mode = { mode: "theatre", stream_id: focusId || "" };
   else mode = { mode: "auto" };
   root.innerHTML = chrome(`<div id="watch" class="watch-root" role="main"><div class="empty">Loading live streams…</div></div>`);
   const watch = document.getElementById("watch");
@@ -3464,6 +3467,10 @@ async function renderWatch() {
       ${modeBtn("auto", "▦ Auto")}
       ${streams.map((s) => modeBtn("focus", `◉ ${htmlEscape(s.channel_name)}`, s.stream_id)).join("")}
       ${streams.length >= 2 ? modeBtn("pip", "⧉ PiP", `${streams[0].stream_id}|${streams[1].stream_id}`) : ""}
+      <span class="watch-tb-sep" aria-hidden="true">·</span>
+      ${modeBtn("quadrant", "▢▢ Quadrant")}
+      ${streams.length >= 2 ? modeBtn("highlight", "◐ Highlight", streams[0].stream_id) : ""}
+      ${streams.length >= 2 ? modeBtn("theatre", "🎭 Theatre", streams[0].stream_id) : ""}
       <span class="watch-tb-sep" aria-hidden="true">·</span>
       <button class="sm watch-mute-all ${muteAllPressed}" id="watch-mute-all" title="Mute every tile">🔇 Mute all</button>
     </div>`;
@@ -3524,6 +3531,10 @@ async function renderWatch() {
         p.set("focus", main || "");
         p.set("side", side || "");
       }
+      // Highlight + Theatre use the same focus= param to identify the
+      // hero stream; Quadrant has no hero (fixed 2×2 over the first
+      // four streams) so no param is needed.
+      if ((m === "highlight" || m === "theatre") && target) p.set("focus", target);
       // Preserve solo across mode changes.
       if (effectiveSolo) p.set("solo", effectiveSolo);
       window.location.hash = `#/watch?${p.toString()}`;

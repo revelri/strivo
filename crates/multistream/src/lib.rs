@@ -45,6 +45,18 @@ pub enum LayoutMode {
     /// `main` fills the container; `side` floats top-right at 25% width.
     #[serde(rename = "pip")]
     PiP { main: String, side: String },
+    /// Fixed 2×2 grid, even when fewer than four streams are present
+    /// — the empty slots stay blank so the layout doesn't reflow when
+    /// channels go online/offline. Static-dashboard friendly.
+    Quadrant,
+    /// One hero on the left at 60% width + every other stream stacked
+    /// in the right column. Hero defaults to the first stream when
+    /// `stream_id` is empty.
+    Highlight { stream_id: String },
+    /// Main fills the top 80% of the container; every other stream
+    /// shares a single horizontal strip across the bottom 20%.
+    /// Control-room / CCTV layout.
+    Theatre { stream_id: String },
 }
 
 /// One placed tile. Coordinates are in pixels relative to the container's
@@ -118,7 +130,91 @@ pub fn compute_tiles(
             let (cols, rows) = best_grid(streams.len() as u32, container_w, container_h);
             grid_tiles(streams, container_w, container_h, cols, rows)
         }
+        LayoutMode::Quadrant => grid_tiles(streams, container_w, container_h, 2, 2),
+        LayoutMode::Highlight { stream_id } => highlight_tiles(streams, container_w, container_h, stream_id),
+        LayoutMode::Theatre { stream_id } => theatre_tiles(streams, container_w, container_h, stream_id),
     }
+}
+
+/// Split a stream list into (hero, rest) honouring an optional explicit
+/// hero id. Empty / missing id falls back to the first stream.
+fn pick_hero<'a>(streams: &'a [Stream], hero_id: &str) -> Option<(&'a Stream, Vec<&'a Stream>)> {
+    if streams.is_empty() {
+        return None;
+    }
+    let hero = if hero_id.is_empty() {
+        &streams[0]
+    } else {
+        streams.iter().find(|s| s.id == hero_id).unwrap_or(&streams[0])
+    };
+    let rest: Vec<&Stream> = streams.iter().filter(|s| s.id != hero.id).collect();
+    Some((hero, rest))
+}
+
+/// Hero on the left at 60% width, rest stacked vertically on the right.
+fn highlight_tiles(streams: &[Stream], cw: u32, ch: u32, hero_id: &str) -> Vec<Tile> {
+    let Some((hero, rest)) = pick_hero(streams, hero_id) else {
+        return vec![];
+    };
+    let hero_w = (cw as u64 * 60 / 100) as u32;
+    let side_w = cw.saturating_sub(hero_w);
+    let mut out = vec![Tile {
+        stream_id: hero.id.clone(),
+        x: 0,
+        y: 0,
+        w: hero_w,
+        h: ch,
+        z: 0,
+    }];
+    if rest.is_empty() || side_w == 0 {
+        return out;
+    }
+    let rows = rest.len() as u32;
+    let row_h = ch / rows;
+    for (i, s) in rest.into_iter().enumerate() {
+        out.push(Tile {
+            stream_id: s.id.clone(),
+            x: hero_w,
+            y: i as u32 * row_h,
+            w: side_w,
+            h: row_h,
+            z: 0,
+        });
+    }
+    out
+}
+
+/// Hero across the top 80%, rest evenly across a bottom strip.
+fn theatre_tiles(streams: &[Stream], cw: u32, ch: u32, hero_id: &str) -> Vec<Tile> {
+    let Some((hero, rest)) = pick_hero(streams, hero_id) else {
+        return vec![];
+    };
+    let hero_h = (ch as u64 * 80 / 100) as u32;
+    let strip_h = ch.saturating_sub(hero_h);
+    let mut out = vec![Tile {
+        stream_id: hero.id.clone(),
+        x: 0,
+        y: 0,
+        w: cw,
+        h: hero_h,
+        z: 0,
+    }];
+    if rest.is_empty() || strip_h == 0 {
+        return out;
+    }
+    let cols = rest.len() as u32;
+    let col_w = cw / cols;
+    for (i, s) in rest.into_iter().enumerate() {
+        out.push(Tile {
+            stream_id: s.id.clone(),
+            x: i as u32 * col_w,
+            y: hero_h,
+            w: col_w,
+            h: strip_h,
+            z: 0,
+        });
+    }
+    out
 }
 
 fn grid_tiles(streams: &[Stream], cw: u32, ch: u32, cols: u32, rows: u32) -> Vec<Tile> {
@@ -439,10 +535,114 @@ mod tests {
             LayoutMode::Grid { cols: 3, rows: 2 },
             LayoutMode::Focus { stream_id: "x".into() },
             LayoutMode::PiP { main: "a".into(), side: "b".into() },
+            LayoutMode::Quadrant,
+            LayoutMode::Highlight { stream_id: "x".into() },
+            LayoutMode::Theatre { stream_id: "x".into() },
         ] {
             let s = serde_json::to_string(&mode).unwrap();
             let back: LayoutMode = serde_json::from_str(&s).unwrap();
             assert_eq!(format!("{mode:?}"), format!("{back:?}"));
         }
+    }
+
+    #[test]
+    fn quadrant_places_three_streams_in_first_three_slots() {
+        let tiles = compute_tiles(
+            &[s("a"), s("b"), s("c")],
+            1920,
+            1080,
+            &LayoutMode::Quadrant,
+        );
+        assert_eq!(tiles.len(), 3);
+        assert_eq!(tiles[0].w, 960);
+        assert_eq!(tiles[0].h, 540);
+        // 'c' goes to row 1, col 0 (bottom-left slot of the 2×2).
+        assert_eq!(tiles[2].x, 0);
+        assert_eq!(tiles[2].y, 540);
+    }
+
+    #[test]
+    fn quadrant_caps_at_four_streams() {
+        let streams: Vec<Stream> = (0..6).map(|i| s(&format!("s{i}"))).collect();
+        let tiles = compute_tiles(&streams, 1920, 1080, &LayoutMode::Quadrant);
+        // Only first four slots are filled — extra streams hide.
+        assert_eq!(tiles.len(), 4);
+    }
+
+    #[test]
+    fn highlight_hero_takes_60pct_width() {
+        let tiles = compute_tiles(
+            &[s("a"), s("b"), s("c")],
+            1000,
+            500,
+            &LayoutMode::Highlight { stream_id: "a".into() },
+        );
+        assert_eq!(tiles.len(), 3);
+        assert_eq!(tiles[0].x, 0);
+        assert_eq!(tiles[0].w, 600);
+        assert_eq!(tiles[0].h, 500);
+        // Side stack at x=600
+        assert_eq!(tiles[1].x, 600);
+        assert_eq!(tiles[1].w, 400);
+        assert_eq!(tiles[2].x, 600);
+        // Two side streams → each gets half the column height.
+        assert_eq!(tiles[1].h, 250);
+        assert_eq!(tiles[2].y, 250);
+    }
+
+    #[test]
+    fn highlight_empty_id_picks_first_stream() {
+        let tiles = compute_tiles(
+            &[s("a"), s("b")],
+            1000,
+            500,
+            &LayoutMode::Highlight { stream_id: "".into() },
+        );
+        assert_eq!(tiles[0].stream_id, "a");
+    }
+
+    #[test]
+    fn highlight_with_one_stream_is_fullscreen() {
+        let tiles = compute_tiles(
+            &[s("a")],
+            1000,
+            500,
+            &LayoutMode::Highlight { stream_id: "a".into() },
+        );
+        // Hero takes 60% even when alone — leaves blank right column so
+        // the layout doesn't suddenly fill the screen when a side stream
+        // goes offline mid-session. Avoids visual jitter.
+        assert_eq!(tiles.len(), 1);
+        assert_eq!(tiles[0].w, 600);
+    }
+
+    #[test]
+    fn theatre_hero_takes_80pct_height_and_strip_fills_bottom() {
+        let tiles = compute_tiles(
+            &[s("a"), s("b"), s("c"), s("d")],
+            1000,
+            500,
+            &LayoutMode::Theatre { stream_id: "a".into() },
+        );
+        assert_eq!(tiles.len(), 4);
+        // Hero: full width × 400 (80% of 500)
+        assert_eq!(tiles[0].h, 400);
+        assert_eq!(tiles[0].w, 1000);
+        // Strip starts at y=400, three streams across 1000 → ~333 each
+        assert_eq!(tiles[1].y, 400);
+        assert_eq!(tiles[1].h, 100);
+        assert_eq!(tiles[1].w, 333);
+        assert_eq!(tiles[3].x, 666);
+    }
+
+    #[test]
+    fn theatre_unknown_hero_falls_back_to_first() {
+        let tiles = compute_tiles(
+            &[s("a"), s("b")],
+            1000,
+            500,
+            &LayoutMode::Theatre { stream_id: "ghost".into() },
+        );
+        assert_eq!(tiles[0].stream_id, "a");
     }
 }
