@@ -1919,6 +1919,7 @@ async fn plugin_capabilities() -> impl IntoResponse {
         { "capability": "x.tempo",           "providers": [{"plugin": "beat-detect", "status": "available"}] },
         { "capability": "x.voice_gate",      "providers": [{"plugin": "vad", "status": "available"}] },
         { "capability": "x.sidechain",       "providers": [{"plugin": "sidechain", "status": "available"}] },
+        { "capability": "x.insert_fx",       "providers": [{"plugin": "insert-fx", "status": "available"}] },
         { "capability": "x.multistream",     "providers": [{"plugin": "multistream", "status": "available"}] },
         { "capability": "x.chat",            "providers": [{"plugin": "chat",        "status": "available"}] },
         { "capability": "x.pipelines_dag",   "providers": [{"plugin": "pipelines-dag", "status": "available"}] },

@@ -1,0 +1,16 @@
+[package]
+name = "strivo-insert-fx"
+version = "0.1.0"
+edition = "2021"
+description = "DAW-style ordered insert effects chain — voice bus, game bus, master bus. Each effect maps to one ffmpeg filter; chain composes left-to-right and bakes at render."
+authors = ["revelri <slrevoy@mailbox.org>"]
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"

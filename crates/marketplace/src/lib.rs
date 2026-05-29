@@ -334,6 +334,28 @@ pub fn default_catalog() -> Catalog {
             },
             CatalogEntry {
                 manifest: PluginManifest {
+                    name: "insert-fx".into(),
+                    version: "0.1.0".into(),
+                    author: "Chorosyne".into(),
+                    license: Some("MIT".into()),
+                    description:
+                        "DAW-style insert effects chain — ordered HP/EQ/NR/de-esser/compressor/limiter/reverb stages per recording, voice + game bus presets. Composes into one ffmpeg -af filter baked at render."
+                            .into(),
+                    capabilities: vec!["x.insert_fx".into()],
+                    consumes: vec!["recording".into()],
+                    entry_point: EntryPoint::Cdylib { path: "insert-fx.so".into() },
+                    min_host_version: "0.3.0".into(),
+                    price_cents: None,
+                    repository: Some("https://github.com/Chorosyne/insert-fx".into()),
+                    icon: None,
+                    screenshots: vec![],
+                    category: Some("Editor".into()),
+                },
+                source: "first_party".into(),
+                installed: true,
+            },
+            CatalogEntry {
+                manifest: PluginManifest {
                     name: "vad".into(),
                     version: "0.1.0".into(),
                     author: "Chorosyne".into(),

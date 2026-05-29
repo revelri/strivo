@@ -2067,6 +2067,113 @@ async fn sidechain_run(
     .into_response()
 }
 
+fn insert_fx_path(recording_id: &str) -> std::path::PathBuf {
+    strivo_core::config::AppConfig::data_dir()
+        .join("plugins")
+        .join("insert-fx")
+        .join(format!("{recording_id}.json"))
+}
+
+/// `GET /api/v1/plugins/insert-fx/<id>` — load the saved insert chain
+/// (empty when absent) plus the composed ffmpeg `-af` value the render
+/// path will splice in. The SPA renders the effects as draggable cards.
+async fn insert_fx_load(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("insert-fx") { return r; }
+    let chain: strivo_insert_fx::InsertChain = std::fs::read_to_string(insert_fx_path(&recording_id))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let filter = chain.to_filter();
+    Json(json!({
+        "recording_id": recording_id,
+        "chain": chain,
+        "audio_filter": filter,
+    }))
+    .into_response()
+}
+
+/// `POST /api/v1/plugins/insert-fx/<id>` — persist a fresh ordered
+/// chain (reorder, edit, delete all happen client-side; server just
+/// stores the final state). Echoes back the composed filter so the
+/// SPA can re-render without a follow-up GET.
+async fn insert_fx_save(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path(recording_id): Path<String>,
+    Json(chain): Json<strivo_insert_fx::InsertChain>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("insert-fx") { return r; }
+    let path = insert_fx_path(&recording_id);
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            return Problem::internal(format!("mkdir: {e}")).into_response();
+        }
+    }
+    match serde_json::to_string_pretty(&chain) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                return Problem::internal(format!("write: {e}")).into_response();
+            }
+        }
+        Err(e) => return Problem::internal(format!("serialise: {e}")).into_response(),
+    }
+    Json(json!({
+        "recording_id": recording_id,
+        "ok": true,
+        "audio_filter": chain.to_filter(),
+        "stage_count": chain.effects.len(),
+    }))
+    .into_response()
+}
+
+/// `POST /api/v1/plugins/insert-fx/<id>/preset/<bus>` — install one of
+/// the bundled presets (`voice` or `game`) without the user having to
+/// hand-stack the standard five-/three-stage chain.
+async fn insert_fx_preset(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Path((recording_id, bus)): Path<(String, String)>,
+) -> impl IntoResponse {
+    if authed(&headers, &state).is_err() {
+        return Problem::unauthorized().into_response();
+    }
+    if let Err(r) = gate_pro("insert-fx") { return r; }
+    let chain = match bus.as_str() {
+        "voice" => strivo_insert_fx::InsertChain::voice_bus_default(),
+        "game" => strivo_insert_fx::InsertChain::game_bus_default(),
+        other => {
+            return Problem::bad_request(format!(
+                "unknown bus '{other}' (expected 'voice' or 'game')"
+            ))
+            .into_response();
+        }
+    };
+    let path = insert_fx_path(&recording_id);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&chain) {
+        let _ = std::fs::write(&path, json);
+    }
+    Json(json!({
+        "recording_id": recording_id,
+        "bus": bus,
+        "chain": chain,
+        "audio_filter": chain.to_filter(),
+    }))
+    .into_response()
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub(super) struct VadQuery {
     /// Window seconds to analyse from t=0 (0 = whole recording). Capped
@@ -3641,4 +3748,12 @@ pub fn router() -> Router<AppState> {
         .route("/api/v1/plugins/beat-detect/{id}", axum::routing::post(beat_detect_run))
         .route("/api/v1/plugins/vad/{id}", axum::routing::post(vad_run))
         .route("/api/v1/plugins/sidechain/{id}", axum::routing::post(sidechain_run))
+        .route(
+            "/api/v1/plugins/insert-fx/{id}",
+            get(insert_fx_load).post(insert_fx_save),
+        )
+        .route(
+            "/api/v1/plugins/insert-fx/{id}/preset/{bus}",
+            axum::routing::post(insert_fx_preset),
+        )
 }

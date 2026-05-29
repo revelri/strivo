@@ -4034,6 +4034,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "strivo-insert-fx"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "strivo-insights-compare"
 version = "0.3.0"
 dependencies = [
@@ -4226,6 +4234,7 @@ dependencies = [
  "strivo-deadair",
  "strivo-editor",
  "strivo-heatmap",
+ "strivo-insert-fx",
  "strivo-insights-compare",
  "strivo-loudness",
  "strivo-marketplace",

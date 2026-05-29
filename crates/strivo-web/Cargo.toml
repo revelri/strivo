@@ -53,6 +53,7 @@ strivo-schedule-optimizer = { path = "../schedule-optimizer" }
 strivo-beat-detect = { path = "../beat-detect" }
 strivo-vad = { path = "../vad" }
 strivo-sidechain = { path = "../sidechain" }
+strivo-insert-fx = { path = "../insert-fx" }
 rusqlite = { version = "0.33", features = ["bundled"] }
 
 # HTTP

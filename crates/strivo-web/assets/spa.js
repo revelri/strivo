@@ -242,6 +242,18 @@ const API = {
       method: "POST",
       body,
     }),
+  insertFxLoad: (recordingId) =>
+    API._fetch(`/plugins/insert-fx/${encodeURIComponent(recordingId)}`),
+  insertFxSave: (recordingId, chain) =>
+    API._fetch(`/plugins/insert-fx/${encodeURIComponent(recordingId)}`, {
+      method: "POST",
+      body: chain,
+    }),
+  insertFxPreset: (recordingId, bus) =>
+    API._fetch(
+      `/plugins/insert-fx/${encodeURIComponent(recordingId)}/preset/${encodeURIComponent(bus)}`,
+      { method: "POST" },
+    ),
   vadAnalyze: (recordingId, opts = {}) => {
     const p = new URLSearchParams();
     if (opts.window_sec != null) p.set("window_sec", opts.window_sec);
@@ -3578,6 +3590,7 @@ const PLUGIN_REGISTRY = [
   { name: "beat-detect",        label: "Beat detection",     category: "Editor", proGated: true, description: "DAW-style tempo grid — onset detector + BPM autocorrelation for music-sync montage cuts." },
   { name: "vad",                label: "Voice gate",         category: "Editor", proGated: true, description: "DAW-style noise gate — hysteresis VAD that surfaces auto-tighten ripple-deletes for podcast/commentary recordings." },
   { name: "sidechain",          label: "Sidechain compressor", category: "Editor", proGated: true, description: "DAW sidechain — VAD voice intervals → ducking automation curve baked via the existing volume-automation render path." },
+  { name: "insert-fx",          label: "Insert FX chain",      category: "Editor", proGated: true, description: "DAW-style ordered insert chain per recording: HP, NR, de-esser, comp, limiter, reverb. Voice + game bus presets. Composes into one ffmpeg -af baked at render." },
   // Asset / analytics / publishing.
   { name: "chapters",         label: "Chapters",         category: "Analytics", proGated: true, description: "Heuristic chapter markers extracted from pacing." },
   { name: "cuepoints",        label: "Cuepoints",        category: "Analytics", proGated: true, description: "Scene-change detection from ffmpeg's select filter." },
@@ -5383,6 +5396,7 @@ async function openRecordingInfo(jobId) {
             <button class="sm rec-ed-deadair" type="button" title="Detect dead air (silencedetect) and trim spans longer than 6s">▢ Trim dead air…</button>
             <button class="sm rec-ed-vad" type="button" title="DAW-style voice gate — hysteresis VAD finds speech runs and ripple-deletes the natural breath gaps">▢ Voice gate…</button>
             <button class="sm rec-ed-sidechain" type="button" title="DAW sidechain — VAD voice intervals → ducking automation curve baked at render. Composes VAD + sidechain + automation in one click.">🦆 Sidechain duck…</button>
+            <button class="sm rec-ed-insertfx" type="button" title="DAW insert chain — ordered HP/NR/de-esser/comp/limiter etc. Voice + game bus presets, edits persist as a single ffmpeg -af baked at render.">🎛 Insert FX…</button>
             <button class="sm rec-ed-branding" type="button" title="Watermark + intro/outro banner overlay applied at render">★ Branding…</button>
             <button class="sm rec-ed-loudness" type="button" title="EBU R128 loudness check + per-platform normalisation target">♪ Loudness…</button>
             <button class="sm rec-ed-history" type="button" title="Revision history — revert across saves (DAW-style undo)">↺ History…</button>
@@ -5678,6 +5692,96 @@ async function openRecordingInfo(jobId) {
               `Sidechain ready · ${intervals.length} voice run(s) → ${sc.point_count} automation point(s) ducking to ${duckDb} dB. Hit ⚡ Render to bake.`,
             );
           }).catch((err) => Toast.error(`Sidechain failed: ${err.message}`));
+        });
+        host.querySelector(".rec-ed-insertfx")?.addEventListener("click", async (e2) => {
+          // DAW insert chain panel. Shows current stages, lets the user
+          // install a voice/game preset in one click, drop individual
+          // stages, then save. Each stage is one named effect mapping to
+          // a single ffmpeg filter; chain composes left-to-right and
+          // bakes at render via the existing -af path.
+          const ibtn = e2.currentTarget;
+          await withBusy(ibtn, "Loading FX…", async () => {
+            const r = await API.insertFxLoad(jobId);
+            const panel = host.querySelector(".rec-insertfx") || (() => {
+              const d = document.createElement("div");
+              d.className = "rec-insertfx";
+              host.appendChild(d);
+              return d;
+            })();
+            let chain = r.chain || { effects: [] };
+            const renderStages = () => (chain.effects || []).map((eff, i) => {
+              const params = Object.entries(eff)
+                .filter(([k]) => k !== "kind")
+                .map(([k, v]) => `${k}=${typeof v === "number" ? v : escape(String(v))}`)
+                .join(" · ");
+              return `<div class="rec-ifx-stage" data-i="${i}">
+                <span class="rec-ifx-num">${i + 1}</span>
+                <span class="rec-ifx-kind">${escape(eff.kind || "?")}</span>
+                <span class="rec-ifx-params pg-cap-hint">${params}</span>
+                <button class="sm danger rec-ifx-rm" type="button" title="Remove stage">✕</button>
+              </div>`;
+            }).join("");
+            const paintFx = () => {
+              panel.hidden = false;
+              panel.innerHTML = `
+                <h5>Insert FX chain <span class="pg-cap-hint">${(chain.effects||[]).length} stage(s)</span></h5>
+                <div class="rec-ifx-presets">
+                  <button class="sm rec-ifx-voice" type="button" title="HP@80 → NR → de-esser → 3:1 comp → limiter — single-mic talk-stream voice bus">🎤 Voice preset</button>
+                  <button class="sm rec-ifx-game" type="button" title="HP@40 → 2:1 comp → limiter — game/music bus that won't squash dialogue">🎮 Game preset</button>
+                  <button class="sm danger rec-ifx-clear" type="button" title="Empty the chain">Clear</button>
+                </div>
+                <div class="rec-ifx-stages">${renderStages() || '<div class="pg-cap-hint">No stages — pick a preset above or wire stages via API.</div>'}</div>
+                <div class="rec-ifx-actions">
+                  <button class="btn-primary rec-ifx-save" type="button">Save chain</button>
+                  <span class="pg-cap-hint">Saved chains bake into one ffmpeg <code>-af</code> at render.</span>
+                </div>
+                <pre class="rec-ifx-filter" title="ffmpeg -af value this chain produces">${escape(r.audio_filter || chain_to_filter_preview(chain))}</pre>
+              `;
+              panel.querySelector(".rec-ifx-voice").addEventListener("click", async (ev) => {
+                await withBusy(ev.currentTarget, "Installing voice…", async () => {
+                  const res = await API.insertFxPreset(jobId, "voice");
+                  chain = res.chain;
+                  r.audio_filter = res.audio_filter;
+                  paintFx();
+                  Toast.success(`Voice bus preset installed · ${chain.effects.length} stages`);
+                });
+              });
+              panel.querySelector(".rec-ifx-game").addEventListener("click", async (ev) => {
+                await withBusy(ev.currentTarget, "Installing game…", async () => {
+                  const res = await API.insertFxPreset(jobId, "game");
+                  chain = res.chain;
+                  r.audio_filter = res.audio_filter;
+                  paintFx();
+                  Toast.success(`Game bus preset installed · ${chain.effects.length} stages`);
+                });
+              });
+              panel.querySelector(".rec-ifx-clear").addEventListener("click", () => {
+                chain = { effects: [] };
+                paintFx();
+              });
+              panel.querySelectorAll(".rec-ifx-rm").forEach((b) => {
+                b.addEventListener("click", () => {
+                  const idx = parseInt(b.closest(".rec-ifx-stage").dataset.i, 10);
+                  chain.effects.splice(idx, 1);
+                  paintFx();
+                });
+              });
+              panel.querySelector(".rec-ifx-save").addEventListener("click", async (ev) => {
+                await withBusy(ev.currentTarget, "Saving…", async () => {
+                  const saved = await API.insertFxSave(jobId, chain);
+                  r.audio_filter = saved.audio_filter;
+                  panel.querySelector(".rec-ifx-filter").textContent = saved.audio_filter || "";
+                  Toast.success(`Insert FX saved · ${saved.stage_count} stage(s) · baked at next render`);
+                });
+              });
+            };
+            // Best-effort client-side preview so the empty/cleared state
+            // still shows something sensible without an extra round-trip.
+            function chain_to_filter_preview(c) {
+              return (c.effects || []).map((e) => `[${e.kind}]`).join(",");
+            }
+            paintFx();
+          }).catch((err) => Toast.error(`Insert FX failed: ${err.message}`));
         });
         host.querySelector(".rec-ed-branding")?.addEventListener("click", async (e2) => {
           const bbtn = e2.currentTarget;
