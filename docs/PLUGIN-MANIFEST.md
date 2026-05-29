@@ -162,7 +162,6 @@ log a warning and skip the entry; the other plugins keep loading.
 
 ## Companion docs
 
-- `YAZI-AUDIT.md` §5 — original audit + scope decision (no Lua).
 - `ROADMAP.md` M4 Phase 4 — plugin manifest + discovery item.
 - `src/plugin/mod.rs` — `Plugin` trait, `load_dylib_plugin`,
   `PLUGIN_REGISTER_SYMBOL`.

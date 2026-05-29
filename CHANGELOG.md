@@ -37,9 +37,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
   string when `serde_json::to_string(job)` fails.
 
 ### Removed
-- Internal-only design notes (`REVIEW.md`, `YAZI-AUDIT.md`) are no longer
-  tracked. They remain on the maintainer's filesystem; ROADMAP still cites
-  them as inline references.
+- Internal-only design notes (`REVIEW.md`, `YAZI-AUDIT.md`,
+  `FOLLOWUP-PLUGIN-WALK.md`) are no longer tracked — public-root sprawl
+  cleanup. Historical content is recoverable from git history.
+- `docs/ROADMAP.md` — stale internal engineering checklist (mostly
+  completed phases); the public product roadmap stays at `/ROADMAP.md`.
 
 ## [0.3.0] — 2026-05-18
 
