@@ -174,8 +174,8 @@ yt-dlp --print id --no-warnings --no-download --no-playlist \
   `--wait-for-video 30` under the `live_from_start` branch (YT-3).
 - `src/recording/mod.rs` — YouTube + from_start branch resolves the
   video URL before spawning the recorder.
-- `src/app.rs::AppAction::StartRecording` — now carries
-  `display_name`.
-- `src/recording/mod.rs::RecordingCommand::Start` — same.
+- `src/recording/mod.rs::RecordingCommand::Start` — carries
+  `display_name` (formerly via the TUI's `AppAction::StartRecording`;
+  that surface retired with `src/app.rs`).
 - `src/recording/mod.rs::build_output_path` callsite — uses
   `display_name` when present.

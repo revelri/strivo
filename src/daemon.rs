@@ -8,7 +8,7 @@ use tokio::sync::{broadcast, mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::app::{AppEvent, DaemonEvent};
+use crate::events::DaemonEvent;
 use crate::config::AppConfig;
 use crate::ipc::{self, ClientMessage, ServerMessage};
 use crate::monitor::ChannelMonitor;
@@ -292,7 +292,7 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
     let cancel = CancellationToken::new();
 
     // Internal event channel
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<AppEvent>();
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<DaemonEvent>();
 
     // Recording command channel
     let (recording_tx, recording_rx) = mpsc::unbounded_channel();
@@ -325,12 +325,12 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
             match platform.authenticate().await {
                 Ok(()) => {
                     tracing::info!("Twitch authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(PlatformKind::Twitch));
+                    let _ = tx.send(DaemonEvent::PlatformAuthenticated { kind: PlatformKind::Twitch });
                     notify.notify_one();
                 }
                 Err(e) => {
                     tracing::warn!("Twitch auth failed: {e}");
-                    let _ = tx.send(AppEvent::error(format!("Twitch auth: {e}")));
+                    let _ = tx.send(DaemonEvent::Error(format!("Twitch auth: {e}")));
                 }
             }
         });
@@ -354,12 +354,12 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
             match platform.authenticate().await {
                 Ok(()) => {
                     tracing::info!("YouTube authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(PlatformKind::YouTube));
+                    let _ = tx.send(DaemonEvent::PlatformAuthenticated { kind: PlatformKind::YouTube });
                     notify.notify_one();
                 }
                 Err(e) => {
                     tracing::warn!("YouTube auth failed: {e}");
-                    let _ = tx.send(AppEvent::error(format!("YouTube auth: {e}")));
+                    let _ = tx.send(DaemonEvent::Error(format!("YouTube auth: {e}")));
                 }
             }
         });
@@ -381,7 +381,7 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
             match patreon_client.authorize().await {
                 Ok(()) => {
                     tracing::info!("Patreon authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(PlatformKind::Patreon));
+                    let _ = tx.send(DaemonEvent::PlatformAuthenticated { kind: PlatformKind::Patreon });
 
                     let monitor = crate::monitor::patreon::PatreonMonitor::new(
                         patreon_client,
@@ -394,7 +394,7 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
                 }
                 Err(e) => {
                     tracing::warn!("Patreon auth failed: {e}");
-                    let _ = tx.send(AppEvent::error(format!("Patreon auth: {e}")));
+                    let _ = tx.send(DaemonEvent::Error(format!("Patreon auth: {e}")));
                 }
             }
         });
@@ -687,7 +687,8 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
             }
             // Process internal events
             Some(event) = event_rx.recv() => {
-                if let AppEvent::Daemon(ref de) = event {
+                {
+                    let de = &event;
                     state.apply(de);
                     // Fan out to all connected clients
                     let _ = broadcast_tx.send(de.clone());
@@ -717,6 +718,7 @@ pub async fn run_with_plugins(host: DaemonPluginHost) -> Result<()> {
                                             },
                                             twitch.clone(),
                                             recording_tx.clone(),
+                                            config.clone(),
                                         );
                                     }
                                 }
@@ -758,7 +760,7 @@ async fn handle_client(
     config: AppConfig,
     registry: Arc<tokio::sync::Mutex<crate::plugin::registry::PluginRegistry>>,
     recordings: HashMap<Uuid, RecordingJob>,
-    event_tx: mpsc::UnboundedSender<AppEvent>,
+    event_tx: mpsc::UnboundedSender<DaemonEvent>,
     poll_notify: Option<Arc<tokio::sync::Notify>>,
     interval_ctl: Option<(Arc<std::sync::atomic::AtomicU64>, Arc<tokio::sync::Notify>)>,
     persist_db: Option<Arc<crate::recording::persist::PersistDb>>,
@@ -867,22 +869,19 @@ async fn handle_client(
                 creator_name,
                 post_title,
             } => {
-                let output_path = crate::recording::build_output_path(
-                    &config,
-                    &creator_name,
-                    crate::platform::PlatformKind::Patreon,
-                    Some(&post_title),
-                );
-                let _ = recording_tx.send(RecordingCommand::DownloadVod {
+                // Patreon posts are gated; `CookieSource::FromConfig`
+                // pulls the patron's cookies path (same cookies used
+                // to list them). Path policy is Fresh — the SPA's
+                // pull request has no prior live file to live next to.
+                let spec = crate::intents::DownloadVodSpec {
                     url: embed_url,
                     channel_name: creator_name,
                     platform: crate::platform::PlatformKind::Patreon,
-                    output_path,
-                    // Patreon posts are gated; the patron's cookies are needed
-                    // to download them (same cookies used to list them).
-                    cookies_path: config.patreon.as_ref().and_then(|p| p.cookies_path.clone()),
                     post_title: Some(post_title),
-                });
+                    cookies: crate::intents::CookieSource::FromConfig,
+                    output_policy: crate::intents::OutputPathPolicy::Fresh,
+                };
+                let _ = recording_tx.send(crate::intents::download_vod(spec, &config));
             }
             ClientMessage::DownloadVod {
                 url,
@@ -890,33 +889,47 @@ async fn handle_client(
                 platform,
                 post_title,
             } => {
-                let output_path = crate::recording::build_output_path(
-                    &config,
-                    &channel_name,
-                    platform,
-                    post_title.as_deref(),
-                );
-                // Cookies: YouTube/Patreon may need them for gated VODs;
-                // Twitch past broadcasts are usually public.
-                let cookies_path = match platform {
-                    crate::platform::PlatformKind::YouTube => config
-                        .youtube
-                        .as_ref()
-                        .and_then(|y| y.cookies_path.clone()),
-                    crate::platform::PlatformKind::Patreon => config
-                        .patreon
-                        .as_ref()
-                        .and_then(|p| p.cookies_path.clone()),
-                    _ => None,
-                };
-                let _ = recording_tx.send(RecordingCommand::DownloadVod {
+                // Routed through `crate::intents::download_vod` so the
+                // cookies/output-path policy is shared with the other
+                // VOD-pull sites instead of being hand-rolled here.
+                let spec = crate::intents::DownloadVodSpec {
                     url,
                     channel_name,
                     platform,
-                    output_path,
-                    cookies_path,
                     post_title,
-                });
+                    cookies: crate::intents::CookieSource::FromConfig,
+                    output_policy: crate::intents::OutputPathPolicy::Fresh,
+                };
+                let _ = recording_tx.send(crate::intents::download_vod(spec, &config));
+            }
+            ClientMessage::Start {
+                channel_id,
+                channel_name,
+                display_name,
+                platform,
+                stream_title,
+                thumbnail_url,
+                from_start,
+                transcode_override,
+            } => {
+                // Webui-shaped envelope: minimal payload, daemon
+                // resolves cookies/transcode against `config`. Fixes
+                // the historical "webui-initiated start of a gated
+                // YouTube stream silently failed because the route
+                // hardcoded `cookies_path: None`."
+                let spec = crate::intents::StartSpec {
+                    channel_id,
+                    channel_name,
+                    display_name,
+                    platform,
+                    stream_title,
+                    thumbnail_url,
+                    from_start,
+                    job_id: None,
+                    transcode_override,
+                    cookies: crate::intents::CookieSource::FromConfig,
+                };
+                let _ = recording_tx.send(crate::intents::start_recording(spec, &config));
             }
             ClientMessage::DeleteRecording { job_id } => {
                 let Some(db) = persist_db.as_ref() else {
@@ -970,7 +983,7 @@ async fn handle_client(
                 // — it doesn't prune anything, just triggers a stale refetch
                 // that still surfaces the deleted row from the daemon snapshot.
                 if pruned {
-                    let _ = event_tx.send(AppEvent::recordings_pruned(vec![job_id]));
+                    let _ = event_tx.send(DaemonEvent::RecordingsPruned { job_ids: vec![job_id] });
                 }
             }
             ClientMessage::ClearErroredRecordings => {
@@ -1024,7 +1037,7 @@ async fn handle_client(
                     pruned = pruned_ids.len()
                 );
                 if !pruned_ids.is_empty() {
-                    let _ = event_tx.send(AppEvent::recordings_pruned(pruned_ids));
+                    let _ = event_tx.send(DaemonEvent::RecordingsPruned { job_ids: pruned_ids });
                 }
             }
             ClientMessage::ListPlaylists { channel_id } => {
@@ -1095,6 +1108,7 @@ async fn handle_client(
                     let mut reg = registry.lock().await;
                     let ctx = crate::plugin::VerbContext {
                         recordings: &recordings,
+                        plugin_toggles: &config.plugin_toggles,
                     };
                     reg.dispatch_verb(&plugin, &verb, &selection, &ctx)
                 };
@@ -1123,16 +1137,19 @@ async fn handle_client(
 fn process_daemon_plugin_actions(
     actions: Vec<crate::plugin::PluginAction>,
     registry: &Arc<tokio::sync::Mutex<crate::plugin::registry::PluginRegistry>>,
-    event_tx: &mpsc::UnboundedSender<AppEvent>,
+    event_tx: &mpsc::UnboundedSender<DaemonEvent>,
 ) {
     use crate::plugin::PluginAction as PA;
     for action in actions {
         match action {
             PA::SetStatus(s) => {
-                let _ = event_tx.send(AppEvent::notification("Plugin".to_string(), s));
+                let _ = event_tx.send(DaemonEvent::Notification {
+                    title: "Plugin".to_string(),
+                    body: s,
+                });
             }
             PA::Notify { title, body } => {
-                let _ = event_tx.send(AppEvent::notification(title, body));
+                let _ = event_tx.send(DaemonEvent::Notification { title, body });
             }
             PA::SpawnTask {
                 plugin_name,

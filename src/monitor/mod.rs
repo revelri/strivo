@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 
-use crate::app::AppEvent;
+use crate::events::DaemonEvent;
 use crate::config::AppConfig;
 use crate::platform::{ChannelEntry, Platform, PlatformKind};
 use crate::recording::RecordingCommand;
@@ -15,7 +15,7 @@ use crate::recording::RecordingCommand;
 pub struct ChannelMonitor {
     platforms: Vec<Arc<RwLock<dyn Platform>>>,
     config: AppConfig,
-    event_tx: mpsc::UnboundedSender<AppEvent>,
+    event_tx: mpsc::UnboundedSender<DaemonEvent>,
     recording_tx: mpsc::UnboundedSender<RecordingCommand>,
     cancel: CancellationToken,
     /// Track which channels were previously live for went-live/went-offline detection
@@ -49,7 +49,7 @@ impl ChannelMonitor {
     pub fn new(
         platforms: Vec<Arc<RwLock<dyn Platform>>>,
         config: AppConfig,
-        event_tx: mpsc::UnboundedSender<AppEvent>,
+        event_tx: mpsc::UnboundedSender<DaemonEvent>,
         recording_tx: mpsc::UnboundedSender<RecordingCommand>,
         cancel: CancellationToken,
     ) -> Self {
@@ -172,7 +172,7 @@ impl ChannelMonitor {
             tracing::error!("Initial poll error: {e}");
             let _ = self
                 .event_tx
-                .send(AppEvent::error(format!("Poll error: {e}")));
+                .send(DaemonEvent::Error(format!("Poll error: {e}")));
         }
 
         let interval_atomic = self.poll_interval_secs.clone();
@@ -193,14 +193,14 @@ impl ChannelMonitor {
                 _ = interval.tick() => {
                     if let Err(e) = self.poll_all().await {
                         tracing::error!("Monitor poll error: {e}");
-                        let _ = self.event_tx.send(AppEvent::error(format!("Poll error: {e}")));
+                        let _ = self.event_tx.send(DaemonEvent::Error(format!("Poll error: {e}")));
                     }
                 }
                 _ = self.poll_notify.notified() => {
                     tracing::info!("On-demand re-poll triggered");
                     if let Err(e) = self.poll_all().await {
                         tracing::error!("Monitor poll error: {e}");
-                        let _ = self.event_tx.send(AppEvent::error(format!("Poll error: {e}")));
+                        let _ = self.event_tx.send(DaemonEvent::Error(format!("Poll error: {e}")));
                     }
                     interval.reset();
                 }
@@ -213,7 +213,7 @@ impl ChannelMonitor {
                     tracing::info!("Platform auth event, re-polling");
                     if let Err(e) = self.poll_all().await {
                         tracing::error!("Monitor poll error: {e}");
-                        let _ = self.event_tx.send(AppEvent::error(format!("Poll error: {e}")));
+                        let _ = self.event_tx.send(DaemonEvent::Error(format!("Poll error: {e}")));
                     }
                     interval.reset();
                 }
@@ -297,7 +297,7 @@ impl ChannelMonitor {
                     for ch in &channels {
                         let was_live = self.prev_live.get(&ch.id).copied().unwrap_or(false);
                         if ch.is_live && !was_live {
-                            let _ = self.event_tx.send(AppEvent::channel_went_live(ch.clone()));
+                            let _ = self.event_tx.send(DaemonEvent::ChannelWentLive(ch.clone()));
 
                             // Auto-record trigger: use ch.auto_record from fresh data
                             if ch.auto_record
@@ -307,29 +307,31 @@ impl ChannelMonitor {
                                 && !self.disk_budget_exhausted().await
                             {
                                 self.auto_recorded.insert(ch.id.clone(), true);
-                                let cookies_path = self.get_cookies_path(ch.platform);
-                                // A channel's capture profile (item 21) overrides
-                                // the global transcode default.
-                                let transcode = self
-                                    .config
-                                    .effective_transcode(&ch.platform.to_string(), &ch.id);
-                                let _ = self.recording_tx.send(RecordingCommand::Start {
+                                // Cookies + transcode policy resolved
+                                // inside `intents::start_recording` via
+                                // `FromConfig` + `effective_transcode`.
+                                // The old `get_cookies_path` helper is
+                                // now redundant on this path.
+                                let spec = crate::intents::StartSpec {
                                     channel_id: ch.id.clone(),
                                     channel_name: ch.name.clone(),
                                     display_name: Some(ch.display_name.clone()),
                                     platform: ch.platform,
-                                    transcode,
-                                    cookies_path,
                                     stream_title: ch.stream_title.clone(),
+                                    thumbnail_url: ch.thumbnail_url.clone(),
                                     from_start: true,
                                     job_id: None,
-                                    thumbnail_url: ch.thumbnail_url.clone(),
-                                });
+                                    transcode_override: None,
+                                    cookies: crate::intents::CookieSource::FromConfig,
+                                };
+                                let _ = self
+                                    .recording_tx
+                                    .send(crate::intents::start_recording(spec, &self.config));
                             }
                         } else if !ch.is_live && was_live {
                             let _ = self
                                 .event_tx
-                                .send(AppEvent::channel_went_offline(ch.clone()));
+                                .send(DaemonEvent::ChannelWentOffline(ch.clone()));
                             self.auto_recorded.remove(&ch.id);
                         }
                         self.prev_live.insert(ch.id.clone(), ch.is_live);
@@ -370,7 +372,7 @@ impl ChannelMonitor {
                 )
         });
 
-        let _ = self.event_tx.send(AppEvent::channels_updated(all_channels));
+        let _ = self.event_tx.send(DaemonEvent::ChannelsUpdated(all_channels));
 
         // Persist last-seen-live so the "last live: N ago" label survives
         // restarts. Best-effort.
@@ -460,15 +462,13 @@ impl ChannelMonitor {
         }
     }
 
-    fn get_cookies_path(&self, platform: PlatformKind) -> Option<PathBuf> {
-        // Reload config to get fresh auto_record and cookies settings
-        let cfg =
-            AppConfig::load(self.config.config_path.as_deref()).unwrap_or(self.config.clone());
-        match platform {
-            PlatformKind::YouTube => cfg.youtube.as_ref().and_then(|y| y.cookies_path.clone()),
-            PlatformKind::Twitch | PlatformKind::Patreon => None,
-        }
-    }
+    // `get_cookies_path` retired: the live-record dispatch now routes
+    // through `crate::intents::start_recording` with
+    // `CookieSource::FromConfig`, which centralises the per-platform
+    // policy. The reload-on-every-fire pattern was specific to the old
+    // hand-rolled lookup; the monitor's `self.config` snapshot is
+    // refreshed by the daemon's config-reload path, so the read-through
+    // is no longer needed.
 }
 
 /// Free-space lookup for the disk-budget enforcement gate. statvfs on

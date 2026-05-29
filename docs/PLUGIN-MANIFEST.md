@@ -5,10 +5,9 @@
 > handshake with no version check, so a plugin built against a different
 > strivo build or a different rustc toolchain can silently corrupt memory
 > and crash the daemon — taking any in-flight recording with it. Run only
-> first-party plugins (Crunchr, Archiver) shipped from the matching
-> `Chorosyne/strivo-plugins` revision, unless you are the plugin author and
-> compiled it against this exact strivo checkout. A versioned ABI handshake
-> is tracked for 0.4.x.
+> first-party plugins (in-tree at `crates/strivo-plugins/`), unless you
+> are the plugin author and compiled against this exact strivo checkout.
+> A versioned ABI handshake is tracked for 0.4.x.
 
 Drop a TOML file at
 `~/.config/strivo/plugins/<slug>.toml` and StriVo will discover it on

@@ -26,22 +26,15 @@ the private-disclosure path.
 ## Local build
 
 ```bash
-git clone --recurse-submodules https://github.com/Chorosyne/strivo.git
+git clone https://github.com/Chorosyne/strivo.git
 cd strivo
 cargo build
 ```
 
-If you forgot `--recurse-submodules`:
-
-```bash
-git submodule update --init
-```
-
-The first-party plugins live in the
-[`Chorosyne/strivo-plugins`](https://github.com/Chorosyne/strivo-plugins)
-submodule. The binary crate pulls them via a git dependency, so changes to
-plugin code need a commit on the plugins repo before they show up in a
-`cargo build` of strivo proper.
+The first-party plugins live in the workspace at
+[`crates/strivo-plugins/`](./crates/strivo-plugins). They were folded
+into this repo when the separate `strivo-plugins` submodule was retired;
+plugin changes land in the same PR as host changes that depend on them.
 
 ## Before opening a pull request
 

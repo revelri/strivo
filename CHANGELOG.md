@@ -7,6 +7,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 
 ## [Unreleased]
 
+### Changed
+- **`strivo-plugins` folded into the workspace.** The separate
+  `Chorosyne/strivo-plugins` repo is retired. The five first-party
+  plugins (`crunchr`, `archiver`, `insights`, `editor`, `viewguard`)
+  now live in-tree at `crates/strivo-plugins/`. Removed: the git
+  submodule, the `pro` cargo feature gate in `strivo-bin` and
+  `strivo-web` (plugins always build), `PLUGINS_PRIVATE.md`,
+  `.gitmodules`, and the `[patch."https://github.com/Chorosyne/strivo"]`
+  block in the root `Cargo.toml`. Contributors no longer need
+  `--recurse-submodules` or a private plugins clone.
+
+### Removed
+- **The ratatui-based TUI is gone.** Deleted: `src/tui/` (36 files),
+  `src/app.rs` (4537 lines), the `strivo tui` CLI subcommand, the
+  `strivo theme` subcommand (was TUI theming), the `STRIVO_LEGACY_TUI`
+  escape hatch, `run_tui`/`run_client`/`run_legacy_tui` from
+  `crates/strivo-bin/src/main.rs`. Dropped deps: `ratatui`,
+  `crossterm`, `ratatui-image` (host workspace) + same from
+  `crates/strivo-plugins`. Plugin trait surgery: `on_key`,
+  `render_pane`, `panes`, `properties_section` removed; `key`/
+  `modifiers` fields removed from `PluginCommand`; `status_line`
+  takes no `&AppState`. Plugins (Crunchr, Archiver, Insights, Editor,
+  Viewguard) are now headless trigger shells — their webui surfaces
+  read the same SQLite stores directly. The non-TUI emitter sites
+  (platforms, monitor, recording, daemon) now publish
+  `DaemonEvent` directly instead of wrapping it in the retired
+  `AppEvent`.
+
 ### Added
 - Community-health files: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`,
   bug / feature issue templates, pull-request template, `CODEOWNERS`, weekly

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::app::{AppEvent, DaemonEvent};
+use crate::events::DaemonEvent;
 use crate::config::{AppConfig, RecordingFormat};
 use crate::platform::{Platform, PlatformKind, VodEntry};
 use crate::recording::catalog::{self, CatalogProgress, CatalogPullOptions};
@@ -54,7 +54,7 @@ pub enum BulkCommand {
 /// keeps it and forwards `ClientMessage::BulkDownload` onto it.
 pub fn spawn(
     config: AppConfig,
-    event_tx: mpsc::UnboundedSender<AppEvent>,
+    event_tx: mpsc::UnboundedSender<DaemonEvent>,
 ) -> mpsc::UnboundedSender<BulkCommand> {
     let (tx, mut rx) = mpsc::unbounded_channel::<BulkCommand>();
     // Internal clone so spawned pulls can self-deregister (Stop) without
@@ -110,10 +110,10 @@ pub fn spawn(
                             tracing::warn!("bulk-dl: fetch_playlists failed: {e:#}");
                             Vec::new()
                         });
-                        let _ = etx.send(AppEvent::Daemon(DaemonEvent::PlaylistList {
+                        let _ = etx.send(DaemonEvent::PlaylistList {
                             channel_id,
                             playlists,
-                        }));
+                        });
                     });
                 }
                 BulkCommand::FetchVods {
@@ -129,10 +129,10 @@ pub fn spawn(
                                 tracing::warn!("bulk-dl: fetch_recent_vods failed: {e:#}");
                                 Vec::new()
                             });
-                        let _ = etx.send(AppEvent::Daemon(DaemonEvent::ChannelVods {
+                        let _ = etx.send(DaemonEvent::ChannelVods {
                             channel_id,
                             vods,
-                        }));
+                        });
                     });
                 }
                 BulkCommand::ResolveChannel { platform, query } => {
@@ -155,7 +155,7 @@ pub fn spawn(
                                 error: Some(format!("{e:#}")),
                             },
                         };
-                        let _ = etx.send(AppEvent::Daemon(event));
+                        let _ = etx.send(event);
                     });
                 }
             }
@@ -242,15 +242,15 @@ async fn run_channel_pull(
     platform: PlatformKind,
     playlist_id: Option<&str>,
     cancel: CancellationToken,
-    event_tx: &mpsc::UnboundedSender<AppEvent>,
+    event_tx: &mpsc::UnboundedSender<DaemonEvent>,
 ) {
     let emit = |done: usize, total: usize, active: bool| {
-        let _ = event_tx.send(AppEvent::Daemon(DaemonEvent::BulkProgress {
+        let _ = event_tx.send(DaemonEvent::BulkProgress {
             channel_id: channel_id.to_string(),
             done,
             total,
             active,
-        }));
+        });
     };
 
     emit(0, 0, true);
@@ -259,17 +259,17 @@ async fn run_channel_pull(
         Ok(v) => v,
         Err(e) => {
             tracing::warn!(channel = %channel_name, "bulk-dl resolve failed: {e:#}");
-            let _ = event_tx.send(AppEvent::error(format!("Bulk DL {channel_name}: {e}")));
+            let _ = event_tx.send(DaemonEvent::Error(format!("Bulk DL {channel_name}: {e}")));
             emit(0, 0, false);
             return;
         }
     };
     let total = vods.len();
     if total == 0 {
-        let _ = event_tx.send(AppEvent::notification(
-            format!("Bulk DL: {channel_name}"),
-            "No new catalog items".to_string(),
-        ));
+        let _ = event_tx.send(DaemonEvent::Notification {
+            title: format!("Bulk DL: {channel_name}"),
+            body: "No new catalog items".to_string(),
+        });
         emit(0, 0, false);
         return;
     }
@@ -286,12 +286,12 @@ async fn run_channel_pull(
                 | CatalogProgress::Skipped { .. }
                 | CatalogProgress::Failed { .. } => {
                     done += 1;
-                    let _ = etx2.send(AppEvent::Daemon(DaemonEvent::BulkProgress {
+                    let _ = etx2.send(DaemonEvent::BulkProgress {
                         channel_id: cid.clone(),
                         done,
                         total,
                         active: true,
-                    }));
+                    });
                 }
                 _ => {}
             }
@@ -323,7 +323,7 @@ async fn run_channel_pull(
     let db = match PersistDb::open(&db_path) {
         Ok(db) => db,
         Err(e) => {
-            let _ = event_tx.send(AppEvent::error(format!("Bulk DL db: {e}")));
+            let _ = event_tx.send(DaemonEvent::Error(format!("Bulk DL db: {e}")));
             emit(0, total, false);
             return;
         }
@@ -331,18 +331,18 @@ async fn run_channel_pull(
 
     match catalog::run_pull(&db, vods, &opts, Some(ptx), Some(&cancel)).await {
         Ok(report) => {
-            let _ = event_tx.send(AppEvent::notification(
-                format!("Bulk DL: {channel_name}"),
-                format!(
+            let _ = event_tx.send(DaemonEvent::Notification {
+                title: format!("Bulk DL: {channel_name}"),
+                body: format!(
                     "downloaded {} · skipped {} · failed {}",
                     report.downloaded,
                     report.skipped_existing,
                     report.failed.len()
                 ),
-            ));
+            });
         }
         Err(e) => {
-            let _ = event_tx.send(AppEvent::error(format!("Bulk DL {channel_name}: {e}")));
+            let _ = event_tx.send(DaemonEvent::Error(format!("Bulk DL {channel_name}: {e}")));
         }
     }
     emit(total, total, false);

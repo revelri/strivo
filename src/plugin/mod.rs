@@ -5,12 +5,8 @@ use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::Rect;
-use ratatui::Frame;
-
-use crate::app::{AppState, DaemonEvent};
 use crate::config::AppConfig;
+use crate::events::DaemonEvent;
 
 /// Unique identifier for a plugin-contributed pane.
 pub type PaneId = &'static str;
@@ -43,45 +39,30 @@ pub enum PluginCommandScope {
 }
 
 
-/// A command that a plugin registers (for global keybinding + help overlay).
+/// A command that a plugin registers. The host surfaces these by name
+/// and description in the SPA's plugin hub. Previously carried
+/// `crossterm` key + modifier fields for the TUI's keybinding system;
+/// those were retired with the TUI deletion.
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct PluginCommand {
     pub name: &'static str,
     pub description: &'static str,
-    pub key: KeyCode,
-    pub modifiers: KeyModifiers,
-    /// Where the command applies. Defaults to `Global` for source
-    /// compatibility — existing PluginCommand struct literals don't
-    /// need to add a field, they pick up the default via
-    /// `..Default::default()` or via the `pub const fn new_global`
-    /// constructor.
     #[doc(hidden)]
     pub scope: PluginCommandScope,
 }
 
 impl PluginCommand {
-    /// Historical constructor that defaults the scope to `Global`.
-    /// Plugins migrating to item-scoped verbs use [`Self::item`].
-    pub const fn new(
-        name: &'static str,
-        description: &'static str,
-        key: KeyCode,
-        modifiers: KeyModifiers,
-    ) -> Self {
+    pub const fn new(name: &'static str, description: &'static str) -> Self {
         Self {
             name,
             description,
-            key,
-            modifiers,
             scope: PluginCommandScope::Global,
         }
     }
 
-    /// Register a verb against an item type. The key/modifiers are
-    /// only consulted when the host has a "press X in the actions
-    /// popup to invoke this verb" shortcut layer; for the MVP, the
-    /// popup just displays the verb by name.
+    /// Register a verb against an item type. The host surfaces it in
+    /// the actions popup for items of that kind.
     pub const fn item(
         name: &'static str,
         description: &'static str,
@@ -90,8 +71,6 @@ impl PluginCommand {
         Self {
             name,
             description,
-            key: KeyCode::Null,
-            modifiers: KeyModifiers::empty(),
             scope: PluginCommandScope::Item(kind),
         }
     }
@@ -188,9 +167,9 @@ pub struct PluginManifest {
     /// table doesn't bind this automatically yet — see audit follow-up.
     ///
     /// **Deprecated in favor of `activation_letter`** for the `,`
-    /// plugin-leader namespace (P4 / YAZI-AUDIT §5). Set
-    /// `activation_letter` instead and the plugin will land under
-    /// `,<letter>` without colliding with global bindings.
+    /// plugin-leader namespace. Set `activation_letter` instead and the
+    /// plugin will land under `,<letter>` without colliding with global
+    /// bindings.
     #[serde(default)]
     pub activation_key: Option<String>,
     /// Single letter that activates the plugin under the `,` leader
@@ -280,31 +259,10 @@ fn audit_manifest_conflicts(manifests: &[PluginManifest]) {
                 "plugin uses deprecated activation_key; please migrate to activation_letter (',X' namespace)",
             );
         }
-        let Some(ref key_spec) = m.activation_key else {
-            continue;
-        };
-        let Some(pattern) = crate::tui::keymap::KeyPattern::parse(key_spec) else {
-            tracing::warn!(
-                plugin = %m.name,
-                key = %key_spec,
-                "plugin manifest activation_key unparseable (expected `q`, `<C-x>`, `F2`, …)"
-            );
-            continue;
-        };
-        // Walk the entire base table; collisions in any layer count.
-        let chords = crate::tui::keymap::all_chords();
-        for chord in chords {
-            if chord.key.code == pattern.code && chord.key.modifiers == pattern.modifiers {
-                tracing::warn!(
-                    plugin = %m.name,
-                    key = %key_spec,
-                    bound_to = ?chord.action,
-                    layer = ?chord.layer,
-                    "plugin manifest activation_key collides with built-in binding",
-                );
-                break;
-            }
-        }
+        // Legacy `activation_key` collision check against the TUI
+        // keymap was retired with `src/tui/`. The webui plugin host
+        // surfaces activation by name; a new collision check can
+        // land if/when a webui-side keybinding system is introduced.
     }
 }
 
@@ -444,14 +402,13 @@ pub enum StatusSlot {
     None,
 }
 
-/// Minimal context for item-scoped verb dispatch (W2-phase-3). `on_verb`
-/// only ever needs the recording table to resolve the selected UUIDs, so
-/// it takes this narrow view rather than the full `&AppState`. That lets
-/// the headless daemon dispatch verbs over IPC — it has the recordings
-/// map but cannot construct an `AppState` (which initializes terminal
-/// image protocols). The TUI builds it from `&app.recordings`.
+/// Minimal context for plugin verb + event dispatch. `on_event` /
+/// `on_verb` only ever need the recording table to resolve UUIDs and
+/// the plugin toggles to honour per-plugin disable. Both the headless
+/// daemon and the (legacy) TUI build this from their respective state.
 pub struct VerbContext<'a> {
     pub recordings: &'a std::collections::HashMap<uuid::Uuid, crate::recording::job::RecordingJob>,
+    pub plugin_toggles: &'a std::collections::BTreeMap<String, crate::config::PluginToggle>,
 }
 
 pub trait Plugin: Send {
@@ -476,12 +433,10 @@ pub trait Plugin: Send {
     }
 
     /// Handle a daemon event. Return actions for the host to execute.
-    fn on_event(&mut self, _event: &DaemonEvent, _app: &AppState) -> Vec<PluginAction> {
-        Vec::new()
-    }
-
-    /// Handle a keyboard event when this plugin's pane is active.
-    fn on_key(&mut self, _key: KeyEvent, _app: &AppState) -> Vec<PluginAction> {
+    ///
+    /// Takes [`VerbContext`] so the headless daemon and webui-only host
+    /// can dispatch without instantiating TUI state.
+    fn on_event(&mut self, _event: &DaemonEvent, _ctx: &VerbContext) -> Vec<PluginAction> {
         Vec::new()
     }
 
@@ -510,16 +465,9 @@ pub trait Plugin: Send {
         Vec::new()
     }
 
-    /// Pane IDs this plugin contributes.
-    fn panes(&self) -> Vec<PaneId> {
-        Vec::new()
-    }
-
-    /// Render this plugin's pane.
-    fn render_pane(&self, _pane_id: PaneId, _frame: &mut Frame, _area: Rect, _app: &AppState) {}
-
-    /// Optional: contribute a segment to the status bar.
-    fn status_line(&self, _app: &AppState) -> Option<String> {
+    /// Optional: contribute a chip-style status string for the host.
+    /// Returns plain text; the host (SPA header) decides how to render.
+    fn status_line(&self) -> Option<String> {
         None
     }
 
@@ -532,16 +480,6 @@ pub trait Plugin: Send {
     /// telemetry/log only.
     fn status_slot(&self) -> StatusSlot {
         StatusSlot::Tray
-    }
-
-    /// Optional: contribute lines to the recording properties panel
-    /// (rendered under a plugin-owned heading).
-    fn properties_section(
-        &self,
-        _job_id: uuid::Uuid,
-        _app: &AppState,
-    ) -> Vec<ratatui::text::Line<'static>> {
-        Vec::new()
     }
 
     /// Downcast support.

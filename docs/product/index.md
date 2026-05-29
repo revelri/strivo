@@ -92,9 +92,8 @@ x86_64-linux, x86_64-macOS, and x86_64-windows builds.
 ## Source
 
 [github.com/Chorosyne/strivo](https://github.com/Chorosyne/strivo)
-— MIT. Strivo Pro plugins live under the
-[Chorosyne/strivo-plugins](https://github.com/Chorosyne/strivo-plugins)
-submodule under a separate licence.
+— MIT. First-party plugins live in-tree at `crates/strivo-plugins/`
+(folded in from the retired separate `strivo-plugins` repo).
 
 ---
 

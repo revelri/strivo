@@ -19,10 +19,11 @@ pub fn check_external_tools() {
     }
 }
 
-pub mod app;
 pub mod config;
 pub mod daemon;
 pub mod edl;
+pub mod events;
+pub mod intents;
 pub mod ipc;
 pub mod licence;
 pub mod media;
@@ -36,4 +37,3 @@ pub mod search;
 pub mod state;
 pub mod stream;
 pub mod tasks;
-pub mod tui;

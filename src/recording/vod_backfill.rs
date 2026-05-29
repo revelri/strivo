@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, RwLock};
 
+use crate::config::AppConfig;
 use crate::platform::twitch::TwitchPlatform;
 use crate::platform::{Platform, PlatformKind};
 use crate::recording::RecordingCommand;
@@ -41,9 +42,10 @@ pub fn spawn(
     req: BackfillRequest,
     twitch: Arc<RwLock<TwitchPlatform>>,
     recording_tx: mpsc::UnboundedSender<RecordingCommand>,
+    config: AppConfig,
 ) {
     tokio::spawn(async move {
-        if let Err(e) = run(req, twitch, recording_tx).await {
+        if let Err(e) = run(req, twitch, recording_tx, config).await {
             tracing::warn!(error = %e, "vod backfill failed");
         }
     });
@@ -53,6 +55,7 @@ async fn run(
     req: BackfillRequest,
     twitch: Arc<RwLock<TwitchPlatform>>,
     recording_tx: mpsc::UnboundedSender<RecordingCommand>,
+    config: AppConfig,
 ) -> anyhow::Result<()> {
     tracing::info!(
         channel = %req.channel_name,
@@ -87,57 +90,33 @@ async fn run(
         return Ok(());
     };
 
-    let output_path = vod_output_path(&req.live_output_path);
     tracing::info!(
         channel = %req.channel_name,
         vod_id = %vod.id,
         url = %vod.url,
-        output = %output_path.display(),
         "vod backfill: starting download"
     );
 
+    // `AdjacentTo` co-locates the VOD under `<base>_vod.<ext>` next to
+    // the live capture, replacing the bespoke local helper. `Inherit`
+    // for cookies — Twitch past broadcasts are public and use the same
+    // anonymous yt-dlp path as the live capture.
+    let spec = crate::intents::DownloadVodSpec {
+        url: vod.url,
+        channel_name: req.channel_name,
+        platform: PlatformKind::Twitch,
+        post_title: req.stream_title.or(Some(vod.title)),
+        cookies: crate::intents::CookieSource::Inherit,
+        output_policy: crate::intents::OutputPathPolicy::AdjacentTo(req.live_output_path),
+    };
     recording_tx
-        .send(RecordingCommand::DownloadVod {
-            url: vod.url,
-            channel_name: req.channel_name,
-            platform: PlatformKind::Twitch,
-            output_path,
-            cookies_path: None,
-            post_title: req.stream_title.or(Some(vod.title)),
-        })
+        .send(crate::intents::download_vod(spec, &config))
         .map_err(|e| anyhow::anyhow!("recording_tx send: {e}"))?;
 
     Ok(())
 }
 
-/// `<base>.<ext>` → `<base>_vod.<ext>`.
-fn vod_output_path(live: &std::path::Path) -> PathBuf {
-    let parent = live.parent().unwrap_or(std::path::Path::new("."));
-    let stem = live
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("recording");
-    let ext = live
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("mkv");
-    parent.join(format!("{stem}_vod.{ext}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::Path;
-
-    #[test]
-    fn vod_path_appends_suffix() {
-        assert_eq!(
-            vod_output_path(Path::new("/r/falco_2026-05-22.mkv")),
-            PathBuf::from("/r/falco_2026-05-22_vod.mkv")
-        );
-        assert_eq!(
-            vod_output_path(Path::new("/r/falco.mp4")),
-            PathBuf::from("/r/falco_vod.mp4")
-        );
-    }
-}
+// The path-suffix policy moved to `crate::intents::download_vod` and is
+// tested there (`adjacent_policy_appends_vod_suffix`,
+// `adjacent_policy_handles_missing_extension`). The backfill module no
+// longer needs its own test fixtures for path computation.

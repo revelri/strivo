@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::app::{AppEvent, DaemonEvent};
+use crate::events::DaemonEvent;
 use crate::config::AppConfig;
 use crate::platform::patreon::PatreonClient;
 use crate::platform::PlatformKind;
@@ -14,7 +14,7 @@ use crate::recording::RecordingCommand;
 pub struct PatreonMonitor {
     client: PatreonClient,
     config: AppConfig,
-    event_tx: mpsc::UnboundedSender<AppEvent>,
+    event_tx: mpsc::UnboundedSender<DaemonEvent>,
     recording_tx: mpsc::UnboundedSender<RecordingCommand>,
     cancel: CancellationToken,
     /// Last check time per campaign
@@ -27,7 +27,7 @@ impl PatreonMonitor {
     pub fn new(
         client: PatreonClient,
         config: AppConfig,
-        event_tx: mpsc::UnboundedSender<AppEvent>,
+        event_tx: mpsc::UnboundedSender<DaemonEvent>,
         recording_tx: mpsc::UnboundedSender<RecordingCommand>,
         cancel: CancellationToken,
     ) -> Self {
@@ -146,16 +146,14 @@ impl PatreonMonitor {
                 };
 
                 if is_new {
-                    let _ = self
-                        .event_tx
-                        .send(AppEvent::Daemon(DaemonEvent::PatreonPostFound {
-                            creator_name: creator.name.clone(),
-                            post_title: post.title.clone(),
-                        }));
-                    let _ = self.event_tx.send(AppEvent::notification(
-                        format!("Patreon: {}", creator.name),
-                        post.title.clone(),
-                    ));
+                    let _ = self.event_tx.send(DaemonEvent::PatreonPostFound {
+                        creator_name: creator.name.clone(),
+                        post_title: post.title.clone(),
+                    });
+                    let _ = self.event_tx.send(DaemonEvent::Notification {
+                        title: format!("Patreon: {}", creator.name),
+                        body: post.title.clone(),
+                    });
                 }
 
                 if is_new && auto_pull {
@@ -164,20 +162,20 @@ impl PatreonMonitor {
                         creator.name,
                         post.title
                     );
-                    let output_path = crate::recording::build_output_path(
-                        &self.config,
-                        &creator.name,
-                        PlatformKind::Patreon,
-                        Some(&post.title),
-                    );
-                    let _ = self.recording_tx.send(RecordingCommand::DownloadVod {
+                    // Monitor already holds the Patreon HTTP client's
+                    // live session; `CookieSource::Inherit` skips the
+                    // `--cookies` flag and lets the adapter carry the auth.
+                    let spec = crate::intents::DownloadVodSpec {
                         url: embed_url.clone(),
                         channel_name: creator.name.clone(),
                         platform: PlatformKind::Patreon,
-                        output_path,
-                        cookies_path: None,
                         post_title: Some(post.title.clone()),
-                    });
+                        cookies: crate::intents::CookieSource::Inherit,
+                        output_policy: crate::intents::OutputPathPolicy::Fresh,
+                    };
+                    let _ = self
+                        .recording_tx
+                        .send(crate::intents::download_vod(spec, &self.config));
                 }
             }
 
@@ -188,13 +186,11 @@ impl PatreonMonitor {
                 .insert(creator.campaign_id.clone(), Utc::now());
         }
 
-        // Push the snapshot to the TUI.
-        let _ = self
-            .event_tx
-            .send(AppEvent::Daemon(DaemonEvent::PatreonState {
-                creators: creator_entries,
-                posts: all_posts,
-            }));
+        // Push the snapshot to the host (SPA).
+        let _ = self.event_tx.send(DaemonEvent::PatreonState {
+            creators: creator_entries,
+            posts: all_posts,
+        });
 
         // Persist state
         save_state(&self.state_path, &self.last_checked).ok();

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::app::AppEvent;
+use crate::events::DaemonEvent;
 use crate::config::credentials;
 use crate::platform::{PlatformKind, VodEntry};
 
@@ -73,7 +73,7 @@ pub struct PatreonClient {
     client_secret: String,
     access_token: Arc<RwLock<Option<String>>>,
     refresh_token_value: Arc<RwLock<Option<String>>>,
-    event_tx: Option<tokio::sync::mpsc::UnboundedSender<AppEvent>>,
+    event_tx: Option<tokio::sync::mpsc::UnboundedSender<DaemonEvent>>,
 }
 
 impl PatreonClient {
@@ -88,7 +88,7 @@ impl PatreonClient {
         }
     }
 
-    pub fn set_event_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
+    pub fn set_event_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<DaemonEvent>) {
         self.event_tx = Some(tx);
     }
 
@@ -151,11 +151,11 @@ impl PatreonClient {
         tracing::info!("Patreon auth: open {auth_url}");
 
         if let Some(ref tx) = self.event_tx {
-            let _ = tx.send(AppEvent::device_code_required(
-                PlatformKind::Patreon,
-                auth_url.clone(),
-                "Open URL in browser".to_string(),
-            ));
+            let _ = tx.send(DaemonEvent::DeviceCodeRequired {
+                kind: PlatformKind::Patreon,
+                verification_uri: auth_url.clone(),
+                user_code: "Open URL in browser".to_string(),
+            });
         }
 
         // Wait for callback (with timeout)
@@ -194,7 +194,9 @@ impl PatreonClient {
         *self.access_token.write().await = Some(token.access_token);
 
         if let Some(ref tx) = self.event_tx {
-            let _ = tx.send(AppEvent::platform_authenticated(PlatformKind::Patreon));
+            let _ = tx.send(DaemonEvent::PlatformAuthenticated {
+                kind: PlatformKind::Patreon,
+            });
         }
 
         Ok(())

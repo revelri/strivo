@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::app::AppEvent;
+use crate::events::DaemonEvent;
 use crate::config::credentials;
 use crate::platform::{ChannelEntry, Platform, PlatformKind, VodEntry};
 
@@ -116,7 +116,7 @@ pub struct YouTubePlatform {
     access_token: Arc<RwLock<Option<String>>>,
     refresh_token_value: Arc<RwLock<Option<String>>>,
     pub pending_device_code: Arc<RwLock<Option<DeviceCodeInfo>>>,
-    event_tx: Option<tokio::sync::mpsc::UnboundedSender<AppEvent>>,
+    event_tx: Option<tokio::sync::mpsc::UnboundedSender<DaemonEvent>>,
     /// Cached subscription list + when it was fetched. Subs barely change, so
     /// we refresh on a long TTL instead of every poll (quota: 1 unit/page).
     subs_cache: Arc<RwLock<Option<(std::time::Instant, Vec<ChannelEntry>)>>>,
@@ -153,7 +153,7 @@ impl YouTubePlatform {
         }
     }
 
-    pub fn set_event_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
+    pub fn set_event_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<DaemonEvent>) {
         self.event_tx = Some(tx);
     }
 
@@ -208,11 +208,11 @@ impl YouTubePlatform {
         });
 
         if let Some(ref tx) = self.event_tx {
-            let _ = tx.send(AppEvent::device_code_required(
-                PlatformKind::YouTube,
-                resp.verification_url.clone(),
-                resp.user_code.clone(),
-            ));
+            let _ = tx.send(DaemonEvent::DeviceCodeRequired {
+                kind: PlatformKind::YouTube,
+                verification_uri: resp.verification_url.clone(),
+                user_code: resp.user_code.clone(),
+            });
         }
 
         tracing::info!(

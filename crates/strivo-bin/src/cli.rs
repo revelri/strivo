@@ -1,7 +1,11 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser, Debug)]
-#[command(name = "strivo", version, about = "TUI Live Stream PVR")]
+#[command(
+    name = "strivo",
+    version,
+    about = "Self-hosted live-stream PVR (web UI)"
+)]
 pub struct Args {
     /// Path to config file
     #[arg(short, long, global = true)]
@@ -39,11 +43,6 @@ pub enum Command {
     Search {
         /// Search query (fuzzy match against filenames and metadata)
         query: String,
-    },
-    /// Manage themes (import Kitty/Ghostty .conf files, list installed themes)
-    Theme {
-        #[command(subcommand)]
-        action: ThemeAction,
     },
     /// Pull a creator's full back-catalog (Patreon, YouTube, Twitch) and feed
     /// each episode to the recording + Crunchr pipeline.
@@ -185,20 +184,6 @@ pub enum ConfigAction {
     },
     /// Reset config to defaults (preserves platform credentials)
     Reset,
-}
-
-#[derive(Subcommand, Debug)]
-pub enum ThemeAction {
-    /// List available themes (built-ins + user themes from ~/.config/strivo/themes)
-    List,
-    /// Import a Kitty or Ghostty .conf theme into ~/.config/strivo/themes/<name>.toml
-    Import {
-        /// Path to the .conf file
-        path: std::path::PathBuf,
-        /// Override the theme name (defaults to the file stem)
-        #[arg(long)]
-        name: Option<String>,
-    },
 }
 
 #[derive(Subcommand, Debug)]

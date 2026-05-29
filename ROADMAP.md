@@ -1,9 +1,12 @@
 # StriVo Roadmap
 
-StriVo is a TUI Live-Stream PVR for Twitch and YouTube whose Pro tier ships
-a complete DAW-equivalent post-production toolkit, delivered as a swarm
-of pure-data Rust plugin crates wired through a web SPA + a daemon over
-IPC.
+StriVo is a self-hosted live-stream PVR for Twitch, YouTube, and Patreon.
+The web UI (an SPA over the daemon IPC socket) is the primary frontend;
+Pro-tier features ship as plugin crates accessible from the SPA.
+
+> **TUI removed.** The legacy ratatui TUI and its source tree are gone.
+> `strivo` with no arguments launches the web UI. See
+> [CHANGELOG.md](./CHANGELOG.md) for the inventory.
 
 This document records every shipped milestone, the remaining vision gaps,
 and the concrete TODOs that future iters should pick up. **Status legend:**
@@ -194,11 +197,11 @@ All green at the time of merge. Both feature modes (`pro` + `--no-default-featur
 
 ## Marketplace catalog
 
-18 entries shipped (`crates/marketplace/src/lib.rs::default_catalog()`):
+17 entries shipped (`crates/marketplace/src/lib.rs::default_catalog()`):
 
 ✅ Installed Cdylib (16): branding · multistream · chat · deadair · twitch-chat-density · broll-finder · loudness · structure · automation · scenes · schedule-optimizer · beat-detect · vad · sidechain · insert-fx · pitch
 
-🗺 Roadmap (2): `demucs-split` (needs external `demucs` binary) · `yt-publish` (needs YouTube OAuth + API creds)
+🗺 Roadmap (1): `yt-publish` (needs YouTube OAuth + API creds)
 
 ---
 
@@ -212,7 +215,7 @@ Per `GET /api/v1/plugins/capabilities`:
   - `stream_comparison` → insights + viewguard-trend
   - `captions` → captions + captions-ass
   - `edl_editor` → editor + deadair + branding + broll
-  - `source_track_split` → multitrack + demucs-split (roadmap)
+  - `source_track_split` → multitrack
   - `publish_queue` → reuse + yt-publish (roadmap)
 - New `x.`-prefixed capabilities from iters 23+: `x.multistream`, `x.chat`, `x.pipelines_dag`, `x.marketplace`, `x.loudness`, `x.structure`, `x.audio_automation`, `x.scenes`, `x.publish_slots`, `x.tempo`, `x.voice_gate`, `x.sidechain`, `x.insert_fx`, `x.pitch_time`
 

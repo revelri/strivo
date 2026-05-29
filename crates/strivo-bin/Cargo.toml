@@ -17,20 +17,10 @@ rust-version = "1.75"
 name = "strivo"
 path = "src/main.rs"
 
-[features]
-# `pro` pulls in the strivo-plugins submodule (private). Default-on so
-# contributors with submodule access keep the existing flow:
-#   cargo build
-# Free-clone / public-fork builds drop the feature:
-#   cargo build --no-default-features
-# See PLUGINS_PRIVATE.md for the runbook.
-default = ["pro"]
-pro = ["dep:strivo-plugins", "strivo-web/pro"]
-
 [dependencies]
 strivo-core = { path = "../.." }
-strivo-plugins = { git = "https://github.com/Chorosyne/strivo-plugins", branch = "main", optional = true }
-strivo-web = { path = "../strivo-web", default-features = false }
+strivo-plugins = { path = "../strivo-plugins" }
+strivo-web = { path = "../strivo-web" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"

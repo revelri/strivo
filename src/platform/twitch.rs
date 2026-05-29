@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::app::AppEvent;
+use crate::events::DaemonEvent;
 use crate::config::credentials;
 use crate::platform::{ChannelEntry, Platform, PlatformKind, VodEntry};
 
@@ -97,7 +97,7 @@ pub struct TwitchPlatform {
     user_id: Arc<RwLock<Option<String>>>,
     /// Set during device code flow for the TUI to display
     pub pending_device_code: Arc<RwLock<Option<DeviceCodeInfo>>>,
-    event_tx: Option<tokio::sync::mpsc::UnboundedSender<AppEvent>>,
+    event_tx: Option<tokio::sync::mpsc::UnboundedSender<DaemonEvent>>,
 }
 
 #[allow(dead_code)]
@@ -121,7 +121,7 @@ impl TwitchPlatform {
         }
     }
 
-    pub fn set_event_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<AppEvent>) {
+    pub fn set_event_tx(&mut self, tx: tokio::sync::mpsc::UnboundedSender<DaemonEvent>) {
         self.event_tx = Some(tx);
     }
 
@@ -238,11 +238,11 @@ impl TwitchPlatform {
         });
 
         if let Some(ref tx) = self.event_tx {
-            let _ = tx.send(AppEvent::device_code_required(
-                PlatformKind::Twitch,
-                resp.verification_uri.clone(),
-                resp.user_code.clone(),
-            ));
+            let _ = tx.send(DaemonEvent::DeviceCodeRequired {
+                kind: PlatformKind::Twitch,
+                verification_uri: resp.verification_uri.clone(),
+                user_code: resp.user_code.clone(),
+            });
         }
 
         tracing::info!(

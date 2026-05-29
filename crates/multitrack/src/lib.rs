@@ -58,10 +58,10 @@ pub enum TrackKind {
     Other,
 }
 
-/// Future hook for actual source-separation backends (demucs / vocal
-/// remover / OpenVINO). The trait lets the SPA call the same UI for
-/// either real tracks (probed) or split tracks (separated) — only the
-/// implementation behind this differs.
+/// Future hook for actual source-separation backends (vocal remover /
+/// OpenVINO / hosted services). The trait lets the SPA call the same
+/// UI for either real tracks (probed) or split tracks (separated) —
+/// only the implementation behind this differs.
 pub trait SourceSplitter: Send + Sync {
     fn split(&self, input: &Path, out_dir: &Path) -> Result<Vec<AudioTrack>>;
 }

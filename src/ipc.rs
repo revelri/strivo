@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::app::DaemonEvent;
+use crate::events::DaemonEvent;
 use crate::platform::{ChannelEntry, PlatformKind};
 use crate::recording::job::RecordingJob;
 use crate::recording::RecordingCommand;
@@ -71,6 +71,34 @@ pub enum ClientMessage {
         /// Display title for the slug; falls back to channel + date.
         #[serde(default)]
         post_title: Option<String>,
+    },
+    /// Minimal "start a live capture" envelope used by the webui. The
+    /// daemon translates this through `intents::start_recording` so
+    /// cookies and the transcode default are resolved against the
+    /// daemon's `AppConfig` — the webui has no config in its route
+    /// handlers and shouldn't reach for it. Mirrors the `DownloadVod`
+    /// shape above: client sends intent, daemon owns policy.
+    ///
+    /// The fat `Recording(RecordingCommand::Start { … cookies_path,
+    /// transcode … })` envelope stays on the wire for the legacy TUI;
+    /// it goes away with TUI deletion (task #13).
+    Start {
+        channel_id: String,
+        channel_name: String,
+        #[serde(default)]
+        display_name: Option<String>,
+        platform: PlatformKind,
+        #[serde(default)]
+        stream_title: Option<String>,
+        #[serde(default)]
+        thumbnail_url: Option<String>,
+        #[serde(default)]
+        from_start: bool,
+        /// `None` defers to `config.effective_transcode(platform,
+        /// channel_id)`. The webui sets `Some(true|false)` based on
+        /// the user's checkbox.
+        #[serde(default)]
+        transcode_override: Option<bool>,
     },
     /// Hard-delete a finished or errored recording: move the file into the
     /// 7-day trash and drop the jobs.db row. Active recordings are rejected;

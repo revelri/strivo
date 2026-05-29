@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::app::AppEvent;
+use crate::events::DaemonEvent;
 use crate::config::AppConfig;
 use crate::platform::PlatformKind;
 use crate::recording::RecordingCommand;
@@ -134,7 +134,7 @@ pub fn parse_channel_spec(spec: &str) -> Option<(PlatformKind, String)> {
 pub async fn run_schedule_manager(
     config: AppConfig,
     recording_tx: mpsc::UnboundedSender<RecordingCommand>,
-    event_tx: mpsc::UnboundedSender<AppEvent>,
+    event_tx: mpsc::UnboundedSender<DaemonEvent>,
     cancel: CancellationToken,
 ) {
     if config.schedule.is_empty() {
@@ -160,7 +160,7 @@ pub async fn run_schedule_manager(
                     entry.cron,
                     entry.channel
                 );
-                let _ = event_tx.send(AppEvent::error(format!(
+                let _ = event_tx.send(DaemonEvent::Error(format!(
                     "Invalid schedule cron '{}': {e}",
                     entry.cron
                 )));
@@ -262,29 +262,37 @@ pub async fn run_schedule_manager(
                                 job_id,
                             );
 
-                            let _ = recording_tx.send(RecordingCommand::Start {
+                            // Bug fix on the way in: the historical
+                            // `cookies_path: None` meant a schedule-fired
+                            // recording of a gated YouTube channel
+                            // silently failed. `CookieSource::FromConfig`
+                            // gives the same auth behaviour the live
+                            // monitor uses for the same channel.
+                            let spec = crate::intents::StartSpec {
                                 channel_id: sched.channel_name.clone(),
                                 channel_name: sched.channel_name.clone(),
-                                display_name: None, // schedules don't have a separate display name yet
+                                display_name: None,
                                 platform: sched.platform,
-                                transcode: false,
-                                cookies_path: None,
                                 stream_title: Some("Scheduled recording".to_string()),
+                                thumbnail_url: None,
                                 from_start: false,
                                 job_id: Some(job_id),
-                                thumbnail_url: None,
-                            });
+                                transcode_override: Some(false),
+                                cookies: crate::intents::CookieSource::FromConfig,
+                            };
+                            let _ = recording_tx
+                                .send(crate::intents::start_recording(spec, &config));
 
-                            let _ = event_tx.send(AppEvent::schedule_fired(
-                                sched.channel_name.clone(),
-                                sched.platform,
+                            let _ = event_tx.send(DaemonEvent::ScheduleFired {
+                                channel: sched.channel_name.clone(),
+                                platform: sched.platform,
                                 job_id,
                                 duration_secs,
-                            ));
-                            let _ = event_tx.send(AppEvent::notification(
-                                "Scheduled Recording".to_string(),
-                                format!("Starting scheduled recording: {}", sched.channel_name),
-                            ));
+                            });
+                            let _ = event_tx.send(DaemonEvent::Notification {
+                                title: "Scheduled Recording".to_string(),
+                                body: format!("Starting scheduled recording: {}", sched.channel_name),
+                            });
 
                             sched.recording_active = true;
                             sched.job_id = Some(job_id);

@@ -21,7 +21,7 @@ use futures::Stream;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-use strivo_core::app::DaemonEvent;
+use strivo_core::events::DaemonEvent;
 use strivo_core::ipc::{self, ClientMessage, ServerMessage};
 
 pub struct IpcClient {

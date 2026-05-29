@@ -6,22 +6,12 @@
 
 mod cli;
 
-use strivo_core::check_external_tools;
-use strivo_core::{app, config, daemon, ipc, platform, plugin, recording, tui};
-
-use std::sync::Arc;
+use strivo_core::{config, daemon, ipc, plugin, recording};
 
 use anyhow::{Context, Result};
 use clap::{CommandFactory, Parser};
-use tokio::sync::{mpsc, RwLock};
-use tokio_util::sync::CancellationToken;
-use tracing_subscriber::EnvFilter;
 
-use crate::cli::{Command, ConfigAction, LogAction, ThemeAction};
-use strivo_core::app::AppEvent;
-use strivo_core::monitor::ChannelMonitor;
-use strivo_core::platform::Platform;
-use strivo_core::tui::theme::Theme;
+use crate::cli::{Command, ConfigAction, LogAction};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -31,42 +21,51 @@ async fn main() -> Result<()> {
         return handle_command(cmd, args.config.as_deref()).await;
     }
 
-    // Initialize theme + motion prefs from config (needed before TUI rendering).
-    // M4.6: NO_COLOR forces the monochrome theme regardless of config; the
-    // canonical opt-out lets users honor the cross-tool convention without
-    // editing their strivo config.
-    let no_color = std::env::var("NO_COLOR")
-        .map(|v| !v.is_empty())
-        .unwrap_or(false);
-    let theme_config = config::AppConfig::load(args.config.as_deref()).ok();
-    if no_color {
-        Theme::init("monochrome");
-    } else if let Some(cfg) = theme_config.as_ref() {
-        Theme::init_with_overrides(cfg.theme.name(), cfg.theme.colors(), cfg.theme.ansi());
-        // Config flag is an opt-in that layers on top of the env var — either
-        // signal enables reduce-motion; neither needs to explicitly disable.
-        if cfg.ui.reduce_motion {
-            strivo_core::tui::anim::set_reduce_motion(true);
+    run_default_webui(args).await
+}
+
+/// New default: launch the webui. Spawns the daemon in-process if it is
+/// not already running, waits briefly for the IPC socket to come up, then
+/// serves the SPA. Polling-then-serve keeps the entry point one command
+/// for users; advanced setups still split daemon and webui across
+/// processes with `strivo daemon` + `strivo serve` as before.
+async fn run_default_webui(args: cli::Args) -> Result<()> {
+    let _ = config::AppConfig::load(args.config.as_deref()).ok();
+
+    if !ipc::is_daemon_running() {
+        // Same plugin host bring-up as `Command::Daemon`. Spawned as a
+        // task so the webui can run alongside in the same process; the
+        // task outlives the await below and only exits when the daemon
+        // shuts down.
+        tokio::spawn(async move {
+            #[allow(unused_mut)]
+            let mut host = strivo_core::daemon::DaemonPluginHost::new();
+            register_first_party_plugins(&mut host.registry);
+            if let Err(e) = daemon::run_with_plugins(host).await {
+                tracing::error!("daemon exited: {e}");
+            }
+        });
+
+        // Wait up to ~3s for the daemon to bind its socket. The probe is
+        // intentionally cheap; once we move past this, handle_serve will
+        // fail loudly if the daemon never came up.
+        for _ in 0..30 {
+            if ipc::is_daemon_running() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-    } else {
-        Theme::init("neon");
     }
 
-    // Default: try connecting to daemon, fall back to standalone TUI
-    if ipc::is_daemon_running() {
-        run_client(args).await
-    } else {
-        run_tui(args).await
-    }
+    handle_serve("127.0.0.1:8181", None).await
 }
 
 async fn handle_command(cmd: &Command, config_path: Option<&std::path::Path>) -> Result<()> {
     match cmd {
         Command::Daemon => {
-            // W2 phase 2 — register first-party plugins so they
-            // boot inside the daemon process (init_all opens DBs,
-            // status_line + properties_section work for the webui).
-            #[allow(unused_mut)]
+            // Plugins boot inside the daemon process: init_all opens
+            // each plugin's SQLite DB, status_line contributions and
+            // PluginRpc dispatch hang off here.
             let mut host = strivo_core::daemon::DaemonPluginHost::new();
             register_first_party_plugins(&mut host.registry);
             daemon::run_with_plugins(host).await
@@ -77,7 +76,6 @@ async fn handle_command(cmd: &Command, config_path: Option<&std::path::Path>) ->
         Command::Config { action } => handle_config_command(action, config_path),
         Command::Log { action } => handle_log_command(action).await,
         Command::Search { query } => handle_search(query, config_path),
-        Command::Theme { action } => handle_theme_command(action),
         Command::Doctor => handle_doctor().await,
         Command::Serve { bind, api_key } => handle_serve(bind, api_key.as_deref()).await,
         Command::Chapter { file, every } => handle_chapter(file, *every),
@@ -263,54 +261,6 @@ fn handle_man() -> Result<()> {
     Ok(())
 }
 
-fn handle_theme_command(action: &ThemeAction) -> Result<()> {
-    use strivo_core::tui::theme;
-    match action {
-        ThemeAction::List => {
-            let current = config::AppConfig::load(None)
-                .map(|c| c.theme.name().to_string())
-                .unwrap_or_else(|_| "neon".to_string());
-            let names = theme::available_themes();
-            let builtins: std::collections::HashSet<String> = theme::builtin_themes()
-                .into_iter()
-                .map(|t| t.name)
-                .collect();
-            println!("Themes ({} total)", names.len());
-            for n in &names {
-                let marker = if *n == current { "*" } else { " " };
-                let source = if builtins.contains(n) {
-                    "built-in"
-                } else {
-                    "user"
-                };
-                println!("  {marker} {n}  [{source}]");
-            }
-            Ok(())
-        }
-        ThemeAction::Import { path, name } => {
-            let contents = std::fs::read_to_string(path)
-                .with_context(|| format!("read {}", path.display()))?;
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("imported");
-            let theme_name = name.clone().unwrap_or_else(|| stem.to_string());
-            let theme = theme::kitty_import::parse(&theme_name, &contents)
-                .map_err(|e| anyhow::anyhow!("parse {}: {e}", path.display()))?;
-
-            let dest_dir = config::AppConfig::config_dir().join("themes");
-            std::fs::create_dir_all(&dest_dir)
-                .with_context(|| format!("create {}", dest_dir.display()))?;
-            let dest = dest_dir.join(format!("{theme_name}.toml"));
-            let serialized = toml::to_string_pretty(&theme).context("serialize imported theme")?;
-            std::fs::write(&dest, serialized)
-                .with_context(|| format!("write {}", dest.display()))?;
-            println!("Imported '{theme_name}' → {}", dest.display());
-            println!("Activate with: strivo config set theme {theme_name}");
-            Ok(())
-        }
-    }
-}
 
 fn handle_import(source: &cli::ImportSource, config_path: Option<&std::path::Path>) -> Result<()> {
     use strivo_core::config::import::{parse_obs_export, parse_streamlink_lines, Candidate};
@@ -1230,460 +1180,15 @@ fn truncate_str(s: &str, max: usize) -> String {
     }
 }
 
-/// Do one connect+hello+snapshot handshake. Returns `(reader, writer, snapshot)`.
-async fn daemon_connect_once(
-    socket_path: &std::path::Path,
-) -> Result<(
-    tokio::io::BufReader<tokio::io::ReadHalf<tokio::net::UnixStream>>,
-    tokio::io::WriteHalf<tokio::net::UnixStream>,
-    ipc::ServerMessage,
-)> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::UnixStream;
-
-    let stream = UnixStream::connect(socket_path).await?;
-    let (reader, mut writer) = tokio::io::split(stream);
-    let mut buf_reader = BufReader::new(reader);
-
-    let hello = ipc::encode_message(&ipc::ClientMessage::Hello)?;
-    writer.write_all(hello.as_bytes()).await?;
-
-    let mut line = String::new();
-    buf_reader.read_line(&mut line).await?;
-    let snapshot: ipc::ServerMessage = serde_json::from_str(line.trim())?;
-
-    Ok((buf_reader, writer, snapshot))
-}
-
-/// TUI client mode: connect to running daemon via Unix socket, with a
-/// supervised auto-reconnect loop so a daemon restart or crash surfaces as a
-/// banner + retry rather than a frozen TUI.
-async fn run_client(args: cli::Args) -> Result<()> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-
-    let config = config::AppConfig::load(args.config.as_deref())?;
-
-    let socket_path = ipc::socket_path();
-
-    // Initial connect — if this fails, fall back to the pre-existing friendly
-    // error message because the daemon probably isn't running yet.
-    let (mut buf_reader, mut writer, snapshot) = match daemon_connect_once(&socket_path).await {
-        Ok(x) => x,
-        Err(e) => {
-            eprintln!(
-                "Failed to connect to daemon at {}: {e}\n\n\
-                 Is the daemon running? Start with:\n  \
-                 strivo daemon    (foreground)\n  \
-                 strivo enable    (systemd service)",
-                socket_path.display()
-            );
-            return Err(e);
-        }
-    };
-
-    // Create app state from snapshot
-    let config_ref = config.clone();
-    let mut app_state = app::AppState::new(config);
-    if let ipc::ServerMessage::StateSnapshot {
-        channels,
-        recordings,
-        twitch_connected,
-        youtube_connected,
-        patreon_connected,
-        pending_auth,
-        ..
-    } = snapshot
-    {
-        app_state.channels = channels;
-        app_state.recordings = recordings;
-        // Apply persisted watch history to the initial snapshot.
-        for (id, job) in app_state.recordings.iter_mut() {
-            if app_state.state.watched.contains(id) {
-                job.watched = true;
-            }
-        }
-        app_state.twitch_connected = twitch_connected;
-        app_state.youtube_connected = youtube_connected;
-        app_state.patreon_connected = patreon_connected;
-        app_state.pending_auth = pending_auth;
-        app_state.rebuild_sidebar_order();
-        app_state.reconcile_selected_recording();
-    }
-
-    // Channels for daemon communication. `daemon_tx` lives forever in
-    // AppState — the supervisor transparently rebinds the underlying
-    // socket on reconnect.
-    let (event_tx, event_rx) = mpsc::unbounded_channel::<AppEvent>();
-    let (daemon_tx, mut daemon_rx) = mpsc::unbounded_channel::<ipc::ClientMessage>();
-
-    // Tracing → event-ring bridge: the registered Layer forwards events
-    // from `tracing::{info,warn,error}!` macros (in strivo* targets) onto
-    // this channel as AppEvent::LogBridge. AppState.event_ring picks them
-    // up alongside daemon events.
-    strivo_core::tui::log_bridge::install_sender(event_tx.clone());
-
-    let (recording_tx, _recording_rx) = mpsc::unbounded_channel();
-    app_state.daemon_tx = Some(daemon_tx);
-
-    // Supervisor: pumps reader → event_tx and daemon_rx → writer, reconnects
-    // with exponential backoff (1 s, 2 s, 5 s, 10 s, 30 s, 30 s…) on error.
-    let event_tx_sup = event_tx.clone();
-    let socket_path_sup = socket_path.clone();
-    tokio::spawn(async move {
-        let mut attempt: u32 = 0;
-        loop {
-            // Pump until reader or writer breaks.
-            let mut line = String::new();
-            loop {
-                tokio::select! {
-                    read = buf_reader.read_line(&mut line) => {
-                        match read {
-                            Ok(0) => {
-                                tracing::info!("Daemon disconnected");
-                                break;
-                            }
-                            Ok(_) => {
-                                if let Ok(msg) = serde_json::from_str::<ipc::ServerMessage>(line.trim()) {
-                                    match msg {
-                                        ipc::ServerMessage::Event(de) => {
-                                            let _ = event_tx_sup.send(AppEvent::Daemon(de));
-                                        }
-                                        ipc::ServerMessage::StateSnapshot {
-                                            channels,
-                                            twitch_connected,
-                                            youtube_connected,
-                                            patreon_connected,
-                                            ..
-                                        } => {
-                                            // Re-snapshot after reconnect: push
-                                            // state back into the TUI.
-                                            let _ = event_tx_sup.send(
-                                                AppEvent::channels_updated(channels),
-                                            );
-                                            if twitch_connected {
-                                                let _ = event_tx_sup.send(
-                                                    AppEvent::platform_authenticated(
-                                                        platform::PlatformKind::Twitch,
-                                                    ),
-                                                );
-                                            }
-                                            if youtube_connected {
-                                                let _ = event_tx_sup.send(
-                                                    AppEvent::platform_authenticated(
-                                                        platform::PlatformKind::YouTube,
-                                                    ),
-                                                );
-                                            }
-                                            if patreon_connected {
-                                                let _ = event_tx_sup.send(
-                                                    AppEvent::platform_authenticated(
-                                                        platform::PlatformKind::Patreon,
-                                                    ),
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                line.clear();
-                            }
-                            Err(e) => {
-                                tracing::warn!("Socket read error: {e}");
-                                break;
-                            }
-                        }
-                    }
-                    msg = daemon_rx.recv() => {
-                        match msg {
-                            Some(m) => {
-                                if let Ok(encoded) = ipc::encode_message(&m) {
-                                    if let Err(e) = writer.write_all(encoded.as_bytes()).await {
-                                        tracing::warn!("Socket write error: {e}");
-                                        break;
-                                    }
-                                }
-                            }
-                            None => {
-                                // AppState dropped — TUI is exiting.
-                                return;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Disconnected. Signal the TUI.
-            let _ = event_tx_sup.send(AppEvent::DaemonDisconnected);
-
-            // Reconnect loop with exponential backoff.
-            loop {
-                attempt = attempt.saturating_add(1);
-                let delay_secs: u64 = match attempt {
-                    1 => 1,
-                    2 => 2,
-                    3 => 5,
-                    4 => 10,
-                    _ => 30,
-                };
-                tokio::time::sleep(std::time::Duration::from_secs(delay_secs)).await;
-
-                match daemon_connect_once(&socket_path_sup).await {
-                    Ok((new_reader, new_writer, _snapshot)) => {
-                        buf_reader = new_reader;
-                        writer = new_writer;
-                        attempt = 0;
-                        let _ = event_tx_sup.send(AppEvent::DaemonReconnected);
-                        // Next iteration of outer loop resumes pumping on the
-                        // new stream. The daemon's initial StateSnapshot was
-                        // consumed inside `daemon_connect_once`; subsequent
-                        // server-pushed snapshots will flow through normally.
-                        break;
-                    }
-                    Err(e) => {
-                        tracing::debug!("Reconnect attempt {attempt} failed: {e}");
-                        continue;
-                    }
-                }
-            }
-        }
-    });
-
-    // Register plugins (first-party in-tree + dynamically-loaded
-    // cdylibs declared in user manifests).
-    let mut registry = plugin::registry::PluginRegistry::new();
-    register_first_party_plugins(&mut registry);
-    let manifests = strivo_core::plugin::scan_user_plugins(&strivo_core::plugin::user_plugin_dir());
-    let n = registry.load_dylibs_from_manifests(&manifests);
-    if n > 0 {
-        tracing::info!("loaded {n} dynamic plugin(s)");
-    }
-    registry.init_all(&config_ref)?;
-
-    // Run TUI with the event channel
-    tui::run(app_state, registry, event_rx, recording_tx).await?;
-
-    Ok(())
-}
-
-/// Standalone TUI mode: runs everything in-process (no daemon).
-async fn run_tui(args: cli::Args) -> Result<()> {
-    let state_dir = config::AppConfig::state_dir();
-    std::fs::create_dir_all(&state_dir)?;
-
-    let log_path = state_dir.join("strivo.log");
-    let log_file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)?;
-
-    // File-tail layer + in-memory bridge to AppState.event_ring.
-    use tracing_subscriber::prelude::*;
-    let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&args.log_level));
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_writer(log_file)
-        .with_ansi(false);
-    tracing_subscriber::registry()
-        .with(env_filter)
-        .with(fmt_layer)
-        .with(strivo_core::tui::log_bridge::LogBridgeLayer)
-        .init();
-
-    tracing::info!("StriVo starting (standalone mode)");
-
-    check_external_tools();
-
-    let config = config::AppConfig::load(args.config.as_deref())?;
-    tracing::info!(
-        "Config loaded from {}",
-        config::AppConfig::config_path().display()
-    );
-
-    let cancel = CancellationToken::new();
-    let (event_tx, event_rx) = mpsc::unbounded_channel::<AppEvent>();
-    let (recording_tx, recording_rx) = mpsc::unbounded_channel();
-
-    let auth_notify = Arc::new(tokio::sync::Notify::new());
-
-    let mut platforms: Vec<Arc<RwLock<dyn Platform>>> = Vec::new();
-    let mut twitch_handle: Option<Arc<RwLock<platform::twitch::TwitchPlatform>>> = None;
-
-    if let Some(ref twitch_config) = config.twitch {
-        let mut twitch = platform::twitch::TwitchPlatform::new(
-            twitch_config.client_id.clone(),
-            twitch_config.client_secret.clone(),
-        );
-        twitch.set_event_tx(event_tx.clone());
-        let twitch = Arc::new(RwLock::new(twitch));
-        platforms.push(twitch.clone() as Arc<RwLock<dyn Platform>>);
-        twitch_handle = Some(twitch.clone());
-
-        let tx = event_tx.clone();
-        let notify = auth_notify.clone();
-        tokio::spawn(async move {
-            let platform = twitch.read().await;
-            match platform.authenticate().await {
-                Ok(()) => {
-                    tracing::info!("Twitch authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(
-                        strivo_core::platform::PlatformKind::Twitch,
-                    ));
-                    notify.notify_one();
-                }
-                Err(e) => {
-                    tracing::warn!("Twitch auth failed: {e}");
-                    let _ = tx.send(AppEvent::error(format!("Twitch auth: {e}")));
-                }
-            }
-        });
-    }
-
-    if let Some(ref yt_config) = config.youtube {
-        let mut youtube = platform::youtube::YouTubePlatform::new(
-            yt_config.client_id.clone(),
-            yt_config.client_secret.clone(),
-            yt_config.cookies_path.clone(),
-        );
-        youtube.set_event_tx(event_tx.clone());
-        let youtube = Arc::new(RwLock::new(youtube));
-        platforms.push(youtube.clone() as Arc<RwLock<dyn Platform>>);
-
-        let tx = event_tx.clone();
-        let notify = auth_notify.clone();
-        tokio::spawn(async move {
-            let platform = youtube.read().await;
-            match platform.authenticate().await {
-                Ok(()) => {
-                    tracing::info!("YouTube authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(
-                        strivo_core::platform::PlatformKind::YouTube,
-                    ));
-                    notify.notify_one();
-                }
-                Err(e) => {
-                    tracing::warn!("YouTube auth failed: {e}");
-                    let _ = tx.send(AppEvent::error(format!("YouTube auth: {e}")));
-                }
-            }
-        });
-    }
-
-    // Spawn Patreon in standalone mode too
-    if let Some(ref patreon_config) = config.patreon {
-        let mut patreon_client = strivo_core::platform::patreon::PatreonClient::new(
-            patreon_config.client_id.clone(),
-            patreon_config.client_secret.clone(),
-        );
-        patreon_client.set_event_tx(event_tx.clone());
-
-        let tx = event_tx.clone();
-        let rec_tx = recording_tx.clone();
-        let cfg = config.clone();
-        let cancel_clone = cancel.clone();
-        tokio::spawn(async move {
-            match patreon_client.authorize().await {
-                Ok(()) => {
-                    tracing::info!("Patreon authenticated");
-                    let _ = tx.send(AppEvent::platform_authenticated(
-                        strivo_core::platform::PlatformKind::Patreon,
-                    ));
-
-                    let monitor = strivo_core::monitor::patreon::PatreonMonitor::new(
-                        patreon_client,
-                        cfg,
-                        tx,
-                        rec_tx,
-                        cancel_clone,
-                    );
-                    monitor.run().await;
-                }
-                Err(e) => {
-                    tracing::warn!("Patreon auth failed: {e}");
-                    let _ = tx.send(AppEvent::error(format!("Patreon auth: {e}")));
-                }
-            }
-        });
-    }
-
-    let rec_config = config.clone();
-    let rec_tx = event_tx.clone();
-    let rec_cancel = cancel.clone();
-    let rec_twitch = twitch_handle.clone();
-    tokio::spawn(async move {
-        recording::run_manager(rec_config, rec_twitch, recording_rx, rec_tx, rec_cancel).await;
-    });
-
-    let standalone_poll_notify: Option<Arc<tokio::sync::Notify>> = if !platforms.is_empty() {
-        let mut monitor = ChannelMonitor::new(
-            platforms.clone(),
-            config.clone(),
-            event_tx.clone(),
-            recording_tx.clone(),
-            cancel.clone(),
-        );
-        monitor.set_auth_notify(auth_notify.clone());
-        let poll_notify = monitor.poll_notify();
-        tokio::spawn(async move {
-            monitor.run().await;
-        });
-        Some(poll_notify)
-    } else {
-        None
-    };
-
-    // Spawn schedule manager
-    if !config.schedule.is_empty() {
-        let sched_config = config.clone();
-        let sched_rec_tx = recording_tx.clone();
-        let sched_event_tx = event_tx.clone();
-        let sched_cancel = cancel.clone();
-        tokio::spawn(async move {
-            recording::schedule::run_schedule_manager(
-                sched_config,
-                sched_rec_tx,
-                sched_event_tx,
-                sched_cancel,
-            )
-            .await;
-        });
-    }
-
-    let scanned = recording::scan::scan_existing_recordings(&config);
-
-    let mut app_state = app::AppState::new(config.clone());
-    app_state.twitch_connected = false;
-    app_state.youtube_connected = false;
-    app_state.poll_notify_standalone = standalone_poll_notify;
-
-    for job in scanned {
-        app_state.recordings.insert(job.id, job);
-    }
-
-    // Register plugins
-    let mut registry = plugin::registry::PluginRegistry::new();
-    register_first_party_plugins(&mut registry);
-    registry.init_all(&config)?;
-
-    tui::run(app_state, registry, event_rx, recording_tx).await?;
-
-    cancel.cancel();
-
-    tracing::info!("StriVo exiting");
-    Ok(())
-}
-
-/// Register every first-party (in-tree) plugin into `registry`. Empty
-/// no-op when built without the `pro` feature — free clones build
-/// cleanly without the private strivo-plugins submodule.
-#[cfg(feature = "pro")]
+/// Register every first-party plugin into the daemon's registry. Was
+/// feature-gated while strivo-plugins lived in a private submodule;
+/// the gate was removed when the plugins were folded into the
+/// workspace, and the function shrank to this list when the TUI host
+/// retired.
 fn register_first_party_plugins(registry: &mut plugin::registry::PluginRegistry) {
     registry.register(Box::new(strivo_plugins::crunchr::CrunchrPlugin::new()));
     registry.register(Box::new(strivo_plugins::archiver::ArchiverPlugin::new()));
     registry.register(Box::new(strivo_plugins::insights::InsightsPlugin::new()));
     registry.register(Box::new(strivo_plugins::editor::EditorPlugin::new()));
     registry.register(Box::new(strivo_plugins::viewguard::ViewguardPlugin::new()));
-}
-
-#[cfg(not(feature = "pro"))]
-fn register_first_party_plugins(_registry: &mut plugin::registry::PluginRegistry) {
-    // No-op: free build ships without the private plugin crate.
 }

@@ -20,7 +20,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::app::AppEvent;
+use crate::events::DaemonEvent;
 use crate::config::{AppConfig, RecordingFormat, ResolvedFormat};
 use crate::platform::PlatformKind;
 use crate::recording::ffmpeg::{FfmpegBuilder, FfmpegProcess};
@@ -143,7 +143,7 @@ pub async fn run_manager(
     config: AppConfig,
     twitch: Option<std::sync::Arc<tokio::sync::RwLock<crate::platform::twitch::TwitchPlatform>>>,
     mut cmd_rx: mpsc::UnboundedReceiver<RecordingCommand>,
-    event_tx: mpsc::UnboundedSender<AppEvent>,
+    event_tx: mpsc::UnboundedSender<DaemonEvent>,
     cancel: CancellationToken,
 ) {
     let mut active: HashMap<Uuid, ActiveRecording> = HashMap::new();
@@ -179,7 +179,7 @@ pub async fn run_manager(
                                 && !matches!(r.job.state, RecordingState::Finished | RecordingState::Failed)
                         });
                         if already {
-                            let _ = event_tx.send(AppEvent::error(
+                            let _ = event_tx.send(DaemonEvent::Error(
                                 format!("Already recording {channel_name}")
                             ));
                             continue;
@@ -213,7 +213,7 @@ pub async fn run_manager(
                             let dest = thumbnail_cache_path(&config, job_id);
                             tokio::spawn(async move { snapshot_thumbnail(&url, &dest).await; });
                         }
-                        let _ = event_tx.send(AppEvent::recording_started(job.clone()));
+                        let _ = event_tx.send(DaemonEvent::RecordingStarted { job: job.clone() });
 
                         active.insert(job_id, ActiveRecording {
                             job,
@@ -433,10 +433,10 @@ pub async fn run_manager(
                                     }
                                 };
 
-                                let _ = etx.send(AppEvent::stream_url_resolved(
-                                    channel_id.clone(),
-                                    stream_url.clone(),
-                                ));
+                                let _ = etx.send(DaemonEvent::StreamUrlResolved {
+                                    channel_id: channel_id.clone(),
+                                    url: stream_url.clone(),
+                                });
                                 match FfmpegBuilder::new(stream_url, output_path)
                                     .transcode(transcode)
                                     .format(fmt)
@@ -462,7 +462,7 @@ pub async fn run_manager(
                                 }
                             }
                             rec.job.state = RecordingState::Finished;
-                            let _ = event_tx.send(AppEvent::recording_finished(job_id, RecordingState::Finished, None));
+                            let _ = event_tx.send(DaemonEvent::RecordingFinished { job_id, final_state: RecordingState::Finished, error: None });
                         }
                     }
                     RecordingCommand::StopAll => {
@@ -475,11 +475,11 @@ pub async fn run_manager(
                                         proc.stop().await.ok();
                                     }
                                     rec.job.state = RecordingState::Finished;
-                                    let _ = event_tx.send(AppEvent::recording_finished(id, RecordingState::Finished, None));
+                                    let _ = event_tx.send(DaemonEvent::RecordingFinished { job_id: id, final_state: RecordingState::Finished, error: None });
                                 }
                             }
                         }
-                        let _ = event_tx.send(AppEvent::all_recordings_stopped());
+                        let _ = event_tx.send(DaemonEvent::AllRecordingsStopped);
                     }
                     RecordingCommand::DownloadVod { url, channel_name, platform, output_path, cookies_path, post_title } => {
                         let mut job = RecordingJob::new(
@@ -495,7 +495,7 @@ pub async fn run_manager(
                         // (no FIFO-by-channel heuristic).
                         job.source_url = Some(url.clone());
                         let job_id = job.id;
-                        let _ = event_tx.send(AppEvent::recording_started(job.clone()));
+                        let _ = event_tx.send(DaemonEvent::RecordingStarted { job: job.clone() });
 
                         active.insert(job_id, ActiveRecording {
                             job,
@@ -536,13 +536,13 @@ pub async fn run_manager(
                             rec.process = Some(process);
                             rec.job.state = RecordingState::Recording;
                             rec.job.started_at = chrono::Utc::now();
-                            let _ = event_tx.send(AppEvent::recording_started(rec.job.clone()));
+                            let _ = event_tx.send(DaemonEvent::RecordingStarted { job: rec.job.clone() });
                         }
                         Err(e) => {
                             rec.job.state = RecordingState::Failed;
                             rec.job.error = Some(e.clone());
-                            let _ = event_tx.send(AppEvent::recording_finished(job_id, RecordingState::Failed, Some(e.clone())));
-                            let _ = event_tx.send(AppEvent::error(e));
+                            let _ = event_tx.send(DaemonEvent::RecordingFinished { job_id, final_state: RecordingState::Failed, error: Some(e.clone()) });
+                            let _ = event_tx.send(DaemonEvent::Error(e));
                         }
                     }
                 }
@@ -573,14 +573,14 @@ pub async fn run_manager(
                             .num_seconds() as f64;
                         let dp = proc.download_progress();
 
-                        let _ = event_tx.send(AppEvent::recording_progress(
-                            *id,
-                            rec.job.bytes_written,
-                            rec.job.duration_secs,
-                            dp.pct,
-                            dp.eta_secs,
-                            dp.rate_bps,
-                        ));
+                        let _ = event_tx.send(DaemonEvent::RecordingProgress {
+                            job_id: *id,
+                            bytes_written: rec.job.bytes_written,
+                            duration_secs: rec.job.duration_secs,
+                            download_pct: dp.pct,
+                            download_eta_secs: dp.eta_secs,
+                            download_rate_bps: dp.rate_bps,
+                        });
 
                         match proc.try_wait() {
                             Ok(Some(status)) => {
@@ -687,7 +687,7 @@ pub async fn run_manager(
 
                     if needs_merge || trim_ads {
                         let Some(r) = rec else {
-                            let _ = event_tx.send(AppEvent::recording_finished(id, final_state, error));
+                            let _ = event_tx.send(DaemonEvent::RecordingFinished { job_id: id, final_state, error });
                             continue;
                         };
                         let etx = event_tx.clone();
@@ -716,11 +716,11 @@ pub async fn run_manager(
                                         if let Err(e) = tokio::fs::rename(&temp, &base).await {
                                             tracing::warn!(error = %e, "rename merged file failed");
                                             let _ = tokio::fs::remove_file(&temp).await;
-                                            let _ = etx.send(AppEvent::recording_finished(
+                                            let _ = etx.send(DaemonEvent::RecordingFinished {
                                                 job_id,
-                                                RecordingState::Finished,
-                                                Some(format!("merged segments preserved as {}", temp.display())),
-                                            ));
+                                                final_state: RecordingState::Finished,
+                                                error: Some(format!("merged segments preserved as {}", temp.display())),
+                                            });
                                             return;
                                         }
                                         for s in segs.iter().skip(1) {
@@ -754,10 +754,10 @@ pub async fn run_manager(
                                 }
                             }
 
-                            let _ = etx.send(AppEvent::recording_finished(job_id, RecordingState::Finished, warn));
+                            let _ = etx.send(DaemonEvent::RecordingFinished { job_id, final_state: RecordingState::Finished, error: warn });
                         });
                     } else {
-                        let _ = event_tx.send(AppEvent::recording_finished(id, final_state, error));
+                        let _ = event_tx.send(DaemonEvent::RecordingFinished { job_id: id, final_state, error });
                     }
                 }
             }

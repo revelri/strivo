@@ -10,20 +10,12 @@ rust-version = "1.75"
 [lib]
 path = "src/lib.rs"
 
-[features]
-# Mirror of strivo-bin's gate: `pro` pulls in the strivo-plugins
-# submodule. Default-on so contributors with submodule access keep the
-# existing build flow; free-clone builds drop the feature with
-# `cargo build --no-default-features`.
-default = ["pro"]
-pro = ["dep:strivo-plugins"]
-
 [dependencies]
 strivo-core = { path = "../.." }
 # First-party plugins: the web UI reads their on-disk SQLite DBs (read-only)
 # to surface transcripts, catalogs, verdicts, and insights. Actions still go
 # through the daemon over IPC (PluginRpc verb dispatch).
-strivo-plugins = { git = "https://github.com/Chorosyne/strivo-plugins", branch = "main", optional = true }
+strivo-plugins = { path = "../strivo-plugins" }
 strivo-chapters = { path = "../chapters" }
 strivo-cuepoints = { path = "../cuepoints" }
 strivo-clipper = { path = "../clipper" }

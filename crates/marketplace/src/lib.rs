@@ -23,9 +23,16 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Minimum host version a manifest can declare. Bumped by the host
-/// when an incompatible API change ships.
-pub const HOST_VERSION: &str = "0.3.0";
+/// The host (`strivo-core`) version this marketplace crate validates
+/// against. A manifest's `min_host_version` must be ≤ this value, or
+/// `validate_manifest` rejects it with "upgrade StriVo first".
+///
+/// Policy: bumped in lockstep with `strivo-core`'s `Cargo.toml`
+/// `version` field. Marketplace lives in its own crate without a
+/// build-script or path-dep on strivo-core, so this is kept by hand —
+/// look for it in the same PR that bumps the host version. Drift
+/// trips `default_catalog_is_non_empty_and_each_entry_validates`.
+pub const HOST_VERSION: &str = "0.5.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginManifest {
@@ -220,27 +227,6 @@ pub fn default_catalog() -> Catalog {
                     icon: None,
                     screenshots: vec![],
                     category: Some("Analytics".into()),
-                },
-                source: "first_party".into(),
-                installed: true,
-            },
-            CatalogEntry {
-                manifest: PluginManifest {
-                    name: "demucs-split".into(),
-                    version: "0.1.0".into(),
-                    author: "Chorosyne".into(),
-                    license: Some("MIT".into()),
-                    description:
-                        "Source separation via Demucs — split a mixed stereo into voice / drums / bass / music stems. Requires the `demucs` Python CLI on PATH (`pip install demucs`).".into(),
-                    capabilities: vec!["source_track_split".into()],
-                    consumes: vec![],
-                    entry_point: EntryPoint::Cdylib { path: "demucs-split.so".into() },
-                    min_host_version: "0.4.0".into(),
-                    price_cents: None,
-                    repository: Some("https://github.com/Chorosyne/demucs-split".into()),
-                    icon: None,
-                    screenshots: vec![],
-                    category: Some("Audio".into()),
                 },
                 source: "first_party".into(),
                 installed: true,

@@ -698,18 +698,20 @@ async fn start_recording(
     if check_key(&headers, &state).is_err() {
         return crate::problem::Problem::unauthorized().into_response();
     }
-    let cmd = ClientMessage::Recording(RecordingCommand::Start {
+    // Minimal envelope; the daemon resolves cookies + transcode default
+    // against its own AppConfig. Replaces the prior fat
+    // `Recording(RecordingCommand::Start)` shape that hardcoded
+    // `cookies_path: None` and silently broke gated YouTube starts.
+    let cmd = ClientMessage::Start {
         channel_id: body.channel_id,
         channel_name: body.channel_name,
         display_name: body.display_name,
         platform: body.platform,
-        transcode: body.transcode,
-        cookies_path: None,
         stream_title: body.stream_title,
-        from_start: body.from_start,
-        job_id: None,
         thumbnail_url: body.thumbnail_url,
-    });
+        from_start: body.from_start,
+        transcode_override: Some(body.transcode),
+    };
     match state.ipc.send_command(cmd).await {
         Ok(()) => (StatusCode::ACCEPTED, Json(json!({"status": "queued"}))).into_response(),
         Err(e) => crate::problem::Problem::unavailable(e.to_string()).into_response(),
@@ -1870,9 +1872,10 @@ async fn plugin_capabilities() -> impl IntoResponse {
     // if the plugin is shipped or "roadmap" if the slot is reserved
     // for an upcoming plugin (matches the DAW-vision plan).
     // Every entry here corresponds to an in-tree, shipped + tested
-    // plugin crate. The `roadmap` status now only applies to the two
-    // marketplace entries that still depend on external work (demucs,
-    // YouTube OAuth) — surfaced from the marketplace catalog below.
+    // plugin crate. The `roadmap` status now applies to the one
+    // marketplace entry (`yt-publish`) that still depends on external
+    // work (YouTube OAuth + API creds) — surfaced from the
+    // marketplace catalog below.
     let matrix = json!([
         { "capability": cap::TRANSCRIPTION,        "providers": [{"plugin": "crunchr", "status": "available"}] },
         { "capability": cap::WORD_TIMESTAMPS,      "providers": [{"plugin": "crunchr", "status": "available"}] },
@@ -1901,8 +1904,7 @@ async fn plugin_capabilities() -> impl IntoResponse {
         { "capability": cap::BRAND_SAFETY,         "providers": [{"plugin": "brandsafe", "status": "available"}] },
         { "capability": cap::ASSET_CATALOG,        "providers": [{"plugin": "archiver", "status": "available"}] },
         { "capability": cap::SOURCE_TRACK_SPLIT,   "providers": [
-            {"plugin": "multitrack",    "status": "available"},
-            {"plugin": "demucs-split",  "status": "roadmap"}
+            {"plugin": "multitrack",    "status": "available"}
         ] },
         { "capability": cap::PUBLISH_QUEUE,        "providers": [
             {"plugin": "reuse",      "status": "available"},
