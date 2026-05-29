@@ -369,4 +369,148 @@ mod tests {
             assert_eq!(node.status, "available", "node {} expected available", node.id);
         }
     }
+
+    // ── Zapier/n8n-style recipe chains ───────────────────────────────
+    #[test]
+    fn empty_recipe_is_valid_but_inert() {
+        let r = RecipeChain {
+            id: "noop".into(),
+            label: "Empty".into(),
+            trigger: RecipeTrigger::RecordingFinished,
+            steps: vec![],
+            enabled: true,
+        };
+        assert!(r.validate().is_ok());
+    }
+
+    #[test]
+    fn recipe_validates_known_plugin_ids() {
+        let r = RecipeChain {
+            id: "publish-pipeline".into(),
+            label: "On finish → chapters → captions → reuse".into(),
+            trigger: RecipeTrigger::RecordingFinished,
+            steps: vec![
+                RecipeStep { plugin: "chapters".into(), verb: "generate".into(), gate: None },
+                RecipeStep { plugin: "captions".into(), verb: "export".into(), gate: None },
+                RecipeStep { plugin: "reuse".into(),    verb: "queue".into(),   gate: None },
+            ],
+            enabled: true,
+        };
+        assert!(r.validate().is_ok());
+        assert_eq!(r.steps.len(), 3);
+    }
+
+    #[test]
+    fn recipe_serde_round_trip() {
+        let r = RecipeChain {
+            id: "demo".into(),
+            label: "Demo".into(),
+            trigger: RecipeTrigger::Manual,
+            steps: vec![
+                RecipeStep { plugin: "thumbnails".into(), verb: "rank".into(), gate: Some(RecipeGate::DurationGteSec { secs: 60.0 }) },
+            ],
+            enabled: false,
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        let back: RecipeChain = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, "demo");
+        assert!(!back.enabled);
+        assert_eq!(back.steps.len(), 1);
+    }
+
+    #[test]
+    fn empty_id_or_step_plugin_is_rejected() {
+        let bad_id = RecipeChain {
+            id: "".into(),
+            label: "x".into(),
+            trigger: RecipeTrigger::Manual,
+            steps: vec![],
+            enabled: true,
+        };
+        assert!(bad_id.validate().is_err());
+        let bad_step = RecipeChain {
+            id: "ok".into(),
+            label: "x".into(),
+            trigger: RecipeTrigger::Manual,
+            steps: vec![RecipeStep { plugin: "".into(), verb: "v".into(), gate: None }],
+            enabled: true,
+        };
+        assert!(bad_step.validate().is_err());
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Recipe chains — Zapier/n8n-style sequenced plugin runs.
+// Pure-data: the host executor walks the steps and invokes each
+// plugin via the existing IPC verb dispatch. Triggers are surfaced
+// by the daemon's event loop (RecordingFinished, recurring cron,
+// manual run). Gates short-circuit a step when the condition fails.
+
+/// What kicks off the recipe.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RecipeTrigger {
+    /// Fire after each capture transitions to `Finished`.
+    RecordingFinished,
+    /// Fire on a fixed daily wall-clock time (`HH:MM` local). Reserved
+    /// for future cron-integration iters.
+    DailyAt { hour: u8, minute: u8 },
+    /// User clicks ▶ Run in the SPA — no automatic firing.
+    Manual,
+}
+
+/// Optional per-step gate. None means the step always runs once
+/// reached. Concrete gates target the cheap-to-test conditions a
+/// streamer cares about (clip length, brand-safe verdict, viewer
+/// count tier).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RecipeGate {
+    /// Skip when the recording's duration is below `secs`.
+    DurationGteSec { secs: f64 },
+    /// Skip when the brand-safe verdict isn't one of the allowed
+    /// labels (`unsafe` / `caution` / `safe`).
+    BrandsafeIn { allowed: Vec<String> },
+    /// Skip when peak viewer count was below the floor.
+    PeakViewersGte { floor: u32 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecipeStep {
+    pub plugin: String,
+    pub verb: String,
+    #[serde(default)]
+    pub gate: Option<RecipeGate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RecipeChain {
+    pub id: String,
+    pub label: String,
+    pub trigger: RecipeTrigger,
+    #[serde(default)]
+    pub steps: Vec<RecipeStep>,
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+impl RecipeChain {
+    /// Reject obviously-broken chains so they don't burn an IPC verb
+    /// dispatch at runtime: id must be non-empty, every step's plugin
+    /// and verb must be non-empty. Stricter cross-checks (plugin
+    /// actually exists, verb declared) live in the host scheduler.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.id.trim().is_empty() {
+            return Err("recipe id must be non-empty".into());
+        }
+        for (i, step) in self.steps.iter().enumerate() {
+            if step.plugin.trim().is_empty() {
+                return Err(format!("step {i}: plugin id required"));
+            }
+            if step.verb.trim().is_empty() {
+                return Err(format!("step {i}: verb required"));
+            }
+        }
+        Ok(())
+    }
 }

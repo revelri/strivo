@@ -244,7 +244,6 @@ Three previously-listed gaps (sidechain, insert effects, pitch/time-stretch) shi
 (all shipped — last cleared at iter 60)
 
 ### Surface gaps from the v1 audit (lower-priority)
-- **Recordings table date range filter** — filter by `started_at` lo/hi to scope the view
 - **History date heatmap** — small calendar grid above the History list, click a day to filter
 
 ### Operational

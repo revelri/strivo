@@ -25,6 +25,7 @@ use serde_json::json;
 use strivo_core::ipc::{BulkAction, ClientMessage, ServerMessage};
 use strivo_core::platform::PlatformKind;
 use strivo_core::recording::RecordingCommand;
+use crate::problem::Problem;
 use uuid::Uuid;
 
 use crate::server::AppState;
@@ -2195,6 +2196,73 @@ async fn marketplace_catalog() -> impl IntoResponse {
 /// DAG. Public surface (not Pro-gated) so the SPA's Pipelines page
 /// renders even on free builds, where it doubles as a roadmap teaser
 /// alongside the upgrade card.
+fn chains_dir() -> std::path::PathBuf {
+    strivo_core::config::AppConfig::data_dir()
+        .join("plugins")
+        .join("recipe-chains")
+}
+fn chain_path(id: &str) -> Option<std::path::PathBuf> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+        return None;
+    }
+    Some(chains_dir().join(format!("{id}.json")))
+}
+
+/// `GET /api/v1/pipelines/chains` — every persisted recipe chain.
+async fn pipelines_chains_list() -> impl IntoResponse {
+    let dir = chains_dir();
+    let mut out: Vec<strivo_pipelines_dag::RecipeChain> = vec![];
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for ent in rd.flatten() {
+            if let Ok(s) = std::fs::read_to_string(ent.path()) {
+                if let Ok(c) = serde_json::from_str(&s) {
+                    out.push(c);
+                }
+            }
+        }
+    }
+    Json(json!({ "chains": out })).into_response()
+}
+
+/// `POST /api/v1/pipelines/chains` — upsert a chain by `id`.
+async fn pipelines_chains_save(
+    Json(body): Json<strivo_pipelines_dag::RecipeChain>,
+) -> impl IntoResponse {
+    if let Err(e) = body.validate() {
+        return Problem::bad_request(e).into_response();
+    }
+    let Some(path) = chain_path(&body.id) else {
+        return Problem::bad_request("chain id must be alphanumeric/dash/underscore").into_response();
+    };
+    let dir = chains_dir();
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        return Problem::internal(format!("mkdir: {e}")).into_response();
+    }
+    match serde_json::to_string_pretty(&body) {
+        Ok(s) => match std::fs::write(&path, s) {
+            Ok(()) => Json(json!({ "ok": true, "id": body.id })).into_response(),
+            Err(e) => Problem::internal(format!("write: {e}")).into_response(),
+        },
+        Err(e) => Problem::internal(format!("serialise: {e}")).into_response(),
+    }
+}
+
+/// `DELETE /api/v1/pipelines/chains/<id>` — drop a chain.
+async fn pipelines_chains_delete(
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> impl IntoResponse {
+    let Some(path) = chain_path(&id) else {
+        return Problem::bad_request("chain id must be alphanumeric/dash/underscore").into_response();
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => Json(json!({ "ok": true })).into_response(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            Json(json!({ "ok": true, "missing": true })).into_response()
+        }
+        Err(e) => Problem::internal(format!("remove: {e}")).into_response(),
+    }
+}
+
 async fn pipelines_dag() -> impl IntoResponse {
     let pipelines = strivo_pipelines_dag::default_pipelines();
     // Bundle each pipeline with its topological order so the SPA can
@@ -2219,6 +2287,8 @@ async fn pipelines_dag() -> impl IntoResponse {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/pipelines/dag", get(pipelines_dag))
+        .route("/api/v1/pipelines/chains", get(pipelines_chains_list).post(pipelines_chains_save))
+        .route("/api/v1/pipelines/chains/{id}", axum::routing::delete(pipelines_chains_delete))
         .route("/api/v1/marketplace/catalog", get(marketplace_catalog))
         .route("/api/v1/health", get(health))
         .route("/api/v1/health/checks", get(health_checks))

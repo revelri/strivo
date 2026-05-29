@@ -4133,6 +4133,19 @@ body.modal-open { overflow: hidden; }
 .logs-trace:hover { background: rgba(176, 124, 255, 0.08); }
 /* Editor topbar 📸 Auto-snap toggle — active state mirrors the gauge classes. */
 .rec-ed-autosnap.active { box-shadow: inset 0 0 0 1px rgba(72, 200, 128, 0.55); }
+/* Sweet-folders category glyphs in Settings group titles. */
+.stg-group-title { display: flex; align-items: center; gap: 0.45rem; }
+.stg-group-icon { width: 20px; height: 20px; opacity: 0.85; flex-shrink: 0; }
+/* Kodi/Aeon-style reorderable lists in Settings → Interface → Layout */
+.stg-reorder { display: flex; flex-direction: column; gap: 0.3rem; }
+.stg-reorder-list { display: flex; flex-direction: column; gap: 0.2rem; padding: 0.4rem; background: rgba(0,0,0,0.2); border: 1px solid var(--border-light); border-radius: 4px; }
+.stg-reorder-item { display: flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.5rem; background: rgba(255,255,255,0.03); border-radius: 3px; }
+.stg-reorder-label { flex: 1; font-variant-numeric: tabular-nums; }
+.stg-reorder-reset { align-self: flex-start; }
+.stg-layout-select { padding: 0.35rem 0.5rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-light); border-radius: 4px; color: inherit; }
+/* Recordings date-range filter. Mirrors logs-daterange. */
+.rec-daterange { display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.85em; }
+.rec-date { padding: 0.3rem 0.4rem; background: rgba(0,0,0,0.3); border: 1px solid var(--border-light); border-radius: 4px; color: inherit; font-family: inherit; }
 .sopt-controls label {
   display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85em;
 }

@@ -425,8 +425,15 @@ let recStateFilter = new Set(
   (localStorage.getItem("strivo-rec-state-filter") || "")
     .split(",").filter(Boolean),
 );
-// Group-by toggle — "none" or "channel". Persisted.
-let recGroupBy = localStorage.getItem("strivo-rec-groupby") || "none";
+// Group-by toggle — "none" or "channel". Persisted; respects the
+// Settings → Layout default when one has been set.
+let recGroupBy = localStorage.getItem("strivo-rec-groupby")
+  || localStorage.getItem("strivo-layout-rec-groupby")
+  || "none";
+// Date-range filter on started_at — ISO-prefix bounds, inclusive.
+// Empty string = unbounded on that side.
+let recDateFrom = "";
+let recDateTo = "";
 // Anchor for shift+click range selection. Tracks the last row whose
 // selection state was toggled by direct interaction (click on checkbox or
 // modifier+click on row). Reset when the recordings page re-renders.
@@ -713,7 +720,21 @@ const TOPNAV = [
 
 function chrome(content) {
   const r = currentRoute();
-  const nav = TOPNAV.map(([route, glyph, label, key, iconHref]) => {
+  // Apply the user's Aeon-style top-nav reorder if any. Unknown
+  // entries fall through in their default position so new releases
+  // can extend TOPNAV without breaking saved order.
+  let layoutOrder;
+  try { layoutOrder = JSON.parse(localStorage.getItem("strivo-layout-topnav") || ""); }
+  catch { layoutOrder = null; }
+  const navItems = Array.isArray(layoutOrder)
+    ? [
+        ...layoutOrder
+          .map((name) => TOPNAV.find((e) => e[0] === name))
+          .filter(Boolean),
+        ...TOPNAV.filter((e) => !layoutOrder.includes(e[0])),
+      ]
+    : TOPNAV;
+  const nav = navItems.map(([route, glyph, label, key, iconHref]) => {
     const inner = iconHref
       ? `<img class="topnav-icon" src="${iconHref}" alt="" />`
       : `<span aria-hidden="true">${glyph}</span>`;
@@ -2137,6 +2158,11 @@ async function renderRecordings() {
       <input id="rec-filter" class="grid-filter" type="search"
              placeholder="Filter by channel or title… (/)"
              aria-label="Filter recordings" value="${htmlEscape(recFilter)}">
+      <label class="rec-daterange" title="Filter recordings by started_at; inclusive.">
+        from <input id="rec-from" class="rec-date" type="datetime-local" step="60" value="${htmlEscape(recDateFrom || "")}"/>
+        to <input id="rec-to" class="rec-date" type="datetime-local" step="60" value="${htmlEscape(recDateTo || "")}"/>
+        <button id="rec-clear-range" class="sm" type="button" title="Clear date range">✕</button>
+      </label>
       <button id="rec-groupby" class="sm" title="Group rows by channel">
         ${recGroupBy === "channel" ? "▼ Grouped by channel" : "≣ Group by channel"}
       </button>
@@ -2173,6 +2199,20 @@ async function renderRecordings() {
 
   document.getElementById("rec-filter")?.addEventListener("input", (e) => {
     recFilter = e.target.value;
+    paintRecordings();
+  });
+  document.getElementById("rec-from")?.addEventListener("change", (e) => {
+    recDateFrom = e.target.value;
+    paintRecordings();
+  });
+  document.getElementById("rec-to")?.addEventListener("change", (e) => {
+    recDateTo = e.target.value;
+    paintRecordings();
+  });
+  document.getElementById("rec-clear-range")?.addEventListener("click", () => {
+    recDateFrom = ""; recDateTo = "";
+    const f = document.getElementById("rec-from"); const t = document.getElementById("rec-to");
+    if (f) f.value = ""; if (t) t.value = "";
     paintRecordings();
   });
   document.getElementById("rec-density")?.addEventListener("click", () => {
@@ -2318,6 +2358,13 @@ function paintRecordings() {
   const q = recFilter.trim().toLowerCase();
   let rows = recCache.filter((r) => {
     if (recStateFilter.size > 0 && !recStateFilter.has(stateClassName(r.state))) return false;
+    // Started-at date-range filter. Empty bound = unbounded.
+    if (recDateFrom || recDateTo) {
+      const sa = (r.started_at || "").slice(0, 19); // YYYY-MM-DDTHH:MM:SS
+      if (!sa) return false;
+      if (recDateFrom && sa < recDateFrom) return false;
+      if (recDateTo && sa > recDateTo) return false;
+    }
     if (!q) return true;
     return (
       (r.channel_name || "").toLowerCase().includes(q) ||
@@ -7144,6 +7191,54 @@ function wireSettingsControls() {
     Toast.success("Per-page hints reset · will reappear next visit");
     render().catch(() => {});
   });
+  // Layout reorder widgets — Kodi/Aeon-style up/down lists.
+  // Each .stg-reorder reads its current order from localStorage
+  // (falling back to data-default), renders one row per entry with
+  // ▲ / ▼ buttons, and persists on any movement.
+  pane.querySelectorAll(".stg-reorder").forEach((box) => {
+    const key = box.dataset.reorderKey;
+    const def = JSON.parse(box.dataset.default || "[]");
+    let order;
+    try { order = JSON.parse(localStorage.getItem(key) || ""); if (!Array.isArray(order)) order = def; }
+    catch { order = def; }
+    // Repair: keep only known entries, append any default entries that
+    // got added in a later release so the list never goes stale.
+    order = order.filter((x) => def.includes(x));
+    for (const d of def) if (!order.includes(d)) order.push(d);
+    const list = box.querySelector(".stg-reorder-list");
+    const render = () => {
+      list.innerHTML = order.map((name, i) => `
+        <div class="stg-reorder-item">
+          <span class="stg-reorder-label">${htmlEscape(name)}</span>
+          <button class="sm stg-reorder-up" data-i="${i}" type="button" ${i === 0 ? "disabled" : ""}>▲</button>
+          <button class="sm stg-reorder-down" data-i="${i}" type="button" ${i === order.length - 1 ? "disabled" : ""}>▼</button>
+        </div>`).join("");
+      list.querySelectorAll(".stg-reorder-up").forEach((btn) => btn.addEventListener("click", () => {
+        const i = +btn.dataset.i;
+        if (i > 0) { [order[i - 1], order[i]] = [order[i], order[i - 1]]; persist(); render(); }
+      }));
+      list.querySelectorAll(".stg-reorder-down").forEach((btn) => btn.addEventListener("click", () => {
+        const i = +btn.dataset.i;
+        if (i < order.length - 1) { [order[i + 1], order[i]] = [order[i], order[i + 1]]; persist(); render(); }
+      }));
+    };
+    const persist = () => localStorage.setItem(key, JSON.stringify(order));
+    render();
+    box.querySelector(".stg-reorder-reset")?.addEventListener("click", () => {
+      order = def.slice();
+      persist(); render();
+      Toast.success("Reset to default order");
+    });
+  });
+  pane.querySelectorAll(".stg-layout-select").forEach((sel) => {
+    const key = sel.dataset.layoutKey;
+    const stored = localStorage.getItem(key);
+    if (stored) sel.value = stored;
+    sel.addEventListener("change", () => {
+      localStorage.setItem(key, sel.value);
+      Toast.success("Layout preference saved");
+    });
+  });
   // Per-plugin Size / Clear actions — wired here so all plugin rows
   // pick up the handlers via a single querySelectorAll regardless of
   // which section painted them.
@@ -7237,9 +7332,24 @@ function renderSettingsPane(slug, s) {
       </div>
       <div class="stg-row-value">${value}</div>
     </div>`;
+  // Sweet-folders glyphs picked by category semantic. Falls back to
+  // generic folder.svg for unknown categories.
+  const categoryIcon = (title) => {
+    const t = (title || "").toLowerCase();
+    if (t.includes("editor") || t.includes("publish")) return "folder-templates.svg";
+    if (t.includes("audio") || t.includes("music")) return "folder-music.svg";
+    if (t.includes("video") || t.includes("recording") || t.includes("watch")) return "folder-videos.svg";
+    if (t.includes("archive") || t.includes("download")) return "folder-download.svg";
+    if (t.includes("brand") || t.includes("thumbnail") || t.includes("picture")) return "folder-pictures.svg";
+    if (t.includes("transcript") || t.includes("caption") || t.includes("report") || t.includes("doc")) return "folder-documents.svg";
+    if (t.includes("share") || t.includes("multi") || t.includes("stream")) return "folder-publicshare.svg";
+    if (t.includes("home") || t.includes("glance")) return "folder-home.svg";
+    if (t.includes("chat") || t.includes("network") || t.includes("remote")) return "folder-remote-symbolic.svg";
+    return "folder.svg";
+  };
   const group = (title, rows) => `
     <section class="stg-group">
-      <h3 class="stg-group-title">${htmlEscape(title)}</h3>
+      <h3 class="stg-group-title"><img class="stg-group-icon" src="/assets/icons/sweet-folders/${categoryIcon(title)}" alt="" aria-hidden="true"/> ${htmlEscape(title)}</h3>
       <div class="stg-rows">${rows}</div>
     </section>`;
 
@@ -7439,6 +7549,26 @@ function renderSettingsPane(slug, s) {
 
     case "interface":
       return [
+        group("Layout", [
+          row("Top-nav order",
+            `<div class="stg-reorder" data-reorder-key="strivo-layout-topnav" data-default='${JSON.stringify(["library","recordings","schedule","pipelines","plugins","watch","chat","history","logs","system","settings"]).replace(/'/g, "&apos;")}'><div class="stg-reorder-list"></div><button class="sm stg-reorder-reset" type="button">Reset</button></div>`,
+            "Drag entries up/down to reorder the top navigation bar. Order persists locally."),
+          row("Rail platform order",
+            `<div class="stg-reorder" data-reorder-key="strivo-layout-rail-platforms" data-default='${JSON.stringify(["Twitch","YouTube","Patreon"]).replace(/'/g, "&apos;")}'><div class="stg-reorder-list"></div><button class="sm stg-reorder-reset" type="button">Reset</button></div>`,
+            "Group the live-channel rail by platform in your preferred order. Order persists locally."),
+          row("Recordings group-by default",
+            `<select class="stg-layout-select" data-layout-key="strivo-layout-rec-groupby">
+              <option value="channel">By channel</option>
+              <option value="platform">By platform</option>
+              <option value="date">By date</option>
+              <option value="state">By state</option>
+              <option value="none">Flat list</option>
+            </select>`,
+            "Default group-by applied when you open Recordings."),
+          row("Plugin hub category order",
+            `<div class="stg-reorder" data-reorder-key="strivo-layout-plugin-cats" data-default='${JSON.stringify(["Editor","Publish","Viewer","Analytics","Archive","Transcription","Reports"]).replace(/'/g, "&apos;")}'><div class="stg-reorder-list"></div><button class="sm stg-reorder-reset" type="button">Reset</button></div>`,
+            "Reorder how categories appear when the plugin hub or Settings → Plugins groups by category."),
+        ].join("")),
         group("Onboarding", [
           row("Welcome tour",
             `<button class="sm" id="stg-replay-tour" type="button">Replay tour</button>`,
