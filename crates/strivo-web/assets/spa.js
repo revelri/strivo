@@ -215,6 +215,11 @@ const API = {
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/revisions/${encodeURIComponent(revId)}/restore`, { method: "POST" }),
   editorRender: (recordingId) =>
     API._fetch(`/plugins/editor/${encodeURIComponent(recordingId)}/render`, { method: "POST" }),
+  chatDensityCompute: (recordingId, body) =>
+    API._fetch(`/plugins/chat-density/${encodeURIComponent(recordingId)}`, {
+      method: "POST",
+      body,
+    }),
   scheduleOptimizerRun: (recordingId, body) =>
     API._fetch(`/plugins/schedule-optimizer/${encodeURIComponent(recordingId)}`, {
       method: "POST",
@@ -4075,7 +4080,12 @@ async function renderScheduleOptimizer() {
     <div class="sopt-grid">
       <section class="cfg-card sopt-input">
         <h2 class="cfg-title">Engagement samples</h2>
-        <p class="pg-cap-hint">JSON list of <code>{day_of_week (0–6), hour_of_day (0–23), score}</code>. The seeded dataset shows the canonical plateau-vs-spike scenario; paste your own from chat-density or VOD-views data.</p>
+        <p class="pg-cap-hint">JSON list of <code>{day_of_week (0–6), hour_of_day (0–23), score}</code>. Seed below shows the canonical plateau-vs-spike scenario; the buttons fill the box from real recordings.</p>
+        <div class="sopt-autofeed">
+          <button id="sopt-feed-history" class="sm" type="button" title="Build a sample per finished recording from its started_at + duration. Score weighted by hours streamed in that hour slot. Useful baseline of when you've historically been live.">↘ My streaming history</button>
+          <button id="sopt-feed-chatdens" class="sm" type="button" title="Paste a chat log for one of your recordings; chat-density runs server-side, density points map to (DoW, hour, score) via the recording's started_at.">↘ Chat density…</button>
+          <span class="pg-cap-hint sopt-autofeed-hint">Auto-feed pulls a real signal into the textarea; edit before running if you want.</span>
+        </div>
         <textarea id="sopt-samples" class="sopt-samples" spellcheck="false"></textarea>
         <div class="sopt-controls">
           <label><span>Top N</span>
@@ -4102,6 +4112,8 @@ async function renderScheduleOptimizer() {
   setupChromeHandlers();
   document.getElementById("sopt-samples").value = schedOptState.samplesText;
   document.getElementById("sopt-run").addEventListener("click", () => runScheduleOptimizer());
+  document.getElementById("sopt-feed-history")?.addEventListener("click", autoFeedFromHistory);
+  document.getElementById("sopt-feed-chatdens")?.addEventListener("click", autoFeedFromChatDensity);
   // Auto-run on mount if we never have — gives users an instant view.
   if (!schedOptState.lastResp) {
     runScheduleOptimizer().catch(() => {});
@@ -4137,6 +4149,120 @@ async function runScheduleOptimizer() {
   } catch (err) {
     out.innerHTML = `<h2 class="cfg-title">Recommendations</h2><div class="empty"><div class="glyph">⚠</div>${htmlEscape(err.message)}</div>`;
   }
+}
+
+// ── Schedule-optimizer auto-feed helpers ──────────────────────────
+// Build EngagementSample[] from sources that already exist in the
+// app — historical recordings (presence + duration) and a chat log
+// pasted through chat-density.
+
+/** Bucket finished recordings into (day_of_week, hour_of_day) cells
+ * keyed by their started_at. Score for each cell = sum of recording
+ * durations in hours (a longer presence in that slot is a stronger
+ * "people watch me here" signal). Clamped 0.1..5.0 per cell so a
+ * single 8h marathon doesn't drown the rest of the week. */
+function recordingsToEngagementSamples(recordings) {
+  const cells = new Map(); // "dow,hour" → score
+  for (const r of recordings) {
+    if (r.state !== "Finished" || !r.started_at) continue;
+    const ts = Date.parse(r.started_at);
+    if (!isFinite(ts)) continue;
+    const dur = Number(r.duration_secs) || 0;
+    // If duration is zero (older rec), treat as one-hour presence.
+    const hours = Math.max(dur / 3600, 1.0);
+    const d = new Date(ts);
+    const dow = d.getDay();
+    const hour = d.getHours();
+    const key = `${dow},${hour}`;
+    cells.set(key, (cells.get(key) || 0) + hours);
+  }
+  const out = [];
+  for (const [k, score] of cells.entries()) {
+    const [dow, hour] = k.split(",").map(Number);
+    out.push({ day_of_week: dow, hour_of_day: hour, score: Math.min(5.0, Math.max(0.1, score)) });
+  }
+  // Sort for stable diffs.
+  out.sort((a, b) => (a.day_of_week - b.day_of_week) || (a.hour_of_day - b.hour_of_day));
+  return out;
+}
+
+async function autoFeedFromHistory() {
+  const btn = document.getElementById("sopt-feed-history");
+  await withBusy(btn, "Loading…", async () => {
+    const r = await API.recordings();
+    const recs = r.recordings || r.items || (Array.isArray(r) ? r : []);
+    const samples = recordingsToEngagementSamples(recs);
+    if (!samples.length) {
+      Toast.error("No finished recordings with started_at — nothing to feed");
+      return;
+    }
+    schedOptState.samplesText = JSON.stringify(samples, null, 2);
+    const ta = document.getElementById("sopt-samples");
+    if (ta) ta.value = schedOptState.samplesText;
+    Toast.success(`Loaded ${samples.length} slot(s) from ${recs.length} recording(s) — review then ▶ Run`);
+  }).catch((err) => Toast.error(`History feed failed: ${err.message}`));
+}
+
+/** Density points → samples. Each point's wall-clock time is
+ * `started_at + time_sec`; bucket score by (dow, hour). */
+function densityToEngagementSamples(densityPoints, startedAtMs) {
+  const cells = new Map();
+  for (const p of densityPoints) {
+    const t = (Number(p.time_sec) || 0) * 1000 + startedAtMs;
+    const d = new Date(t);
+    if (isNaN(d.getTime())) continue;
+    const key = `${d.getDay()},${d.getHours()}`;
+    cells.set(key, (cells.get(key) || 0) + (Number(p.score) || Number(p.count) || 0));
+  }
+  // Normalise to 0..5 so the optimizer's confidence math stays in
+  // the same range as the seeded dataset.
+  let max = 0;
+  for (const v of cells.values()) if (v > max) max = v;
+  const out = [];
+  for (const [k, v] of cells.entries()) {
+    const [dow, hour] = k.split(",").map(Number);
+    const score = max > 0 ? (v / max) * 5.0 : v;
+    out.push({ day_of_week: dow, hour_of_day: hour, score: Math.max(0.1, score) });
+  }
+  out.sort((a, b) => (a.day_of_week - b.day_of_week) || (a.hour_of_day - b.hour_of_day));
+  return out;
+}
+
+async function autoFeedFromChatDensity() {
+  // One-shot prompt-driven mini-flow: pick a recording, paste its
+  // chat log, the rest is automatic.
+  const r = await API.recordings();
+  const recs = (r.recordings || r.items || []).filter((x) => x.state === "Finished" && x.started_at);
+  if (!recs.length) {
+    Toast.error("No finished recordings with started_at — nothing to map chat density onto");
+    return;
+  }
+  const pickerLines = recs.slice(0, 12).map((x, i) => `${i + 1}. ${(x.stream_title || x.channel_name || x.id).slice(0, 48)} (${x.started_at})`).join("\n");
+  const idx = prompt(`Pick the recording the chat log belongs to (enter row number 1..${Math.min(12, recs.length)}):\n\n${pickerLines}`, "1");
+  if (idx == null) return;
+  const rec = recs[(parseInt(idx, 10) || 1) - 1];
+  if (!rec) { Toast.error("No recording at that row"); return; }
+  const csvHint = "Paste an IRC dump OR a CSV with header `time_sec,user,message`.";
+  const log = prompt(`${csvHint}\nLeave blank to abort.`, "");
+  if (!log || !log.trim()) return;
+  const looksLikeCsv = /^[\s]*time_sec\s*,/i.test(log) || /^[\s]*\d+\s*,/.test(log);
+  const btn = document.getElementById("sopt-feed-chatdens");
+  await withBusy(btn, "Running chat-density…", async () => {
+    const body = looksLikeCsv
+      ? { csv: log, bucket_secs: 30.0 }
+      : { log, stream_start_ts_ms: Date.parse(rec.started_at) || 0, bucket_secs: 30.0 };
+    const cd = await API.chatDensityCompute(rec.id, body);
+    const points = cd.points || [];
+    if (!points.length) {
+      Toast.error("chat-density returned no points — log may be empty or malformed");
+      return;
+    }
+    const samples = densityToEngagementSamples(points, Date.parse(rec.started_at) || 0);
+    schedOptState.samplesText = JSON.stringify(samples, null, 2);
+    const ta = document.getElementById("sopt-samples");
+    if (ta) ta.value = schedOptState.samplesText;
+    Toast.success(`Loaded ${samples.length} slot(s) from ${points.length} density point(s) (${cd.event_count} chat events)`);
+  }).catch((err) => Toast.error(`Chat-density feed failed: ${err.message}`));
 }
 
 function paintScheduleOptimizer() {

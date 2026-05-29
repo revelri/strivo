@@ -4115,6 +4115,11 @@ body.modal-open { overflow: hidden; }
 .sopt-controls {
   display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap;
 }
+/* Auto-feed row above the samples textarea — pulls real signals
+   (recordings history, chat-density) so users don't have to
+   hand-roll the JSON. */
+.sopt-autofeed { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.2rem; }
+.sopt-autofeed-hint { font-style: italic; }
 .sopt-controls label {
   display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.85em;
 }

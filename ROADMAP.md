@@ -241,7 +241,6 @@ Three previously-listed gaps (sidechain, insert effects, pitch/time-stretch) shi
 - **Review-request workflow** — share a scene + checkbox approval log.
 
 ### SPA-side polish
-- **Insights / chat-density → schedule-optimizer auto-feed** — pickable per-recording on the optimizer page; one-click "use this stream's engagement curve".
 - **Heatmap row clicks → publish-time recommender deep link** — `audience_retention` row → schedule optimizer pre-loaded with the recording's bucket data.
 - **Multistream layout presets** — Quadrant / Highlight / Theatre overrides on top of the existing Auto / Focus / PiP modes.
 - **Editor cut → scenes "Capture before" auto-snapshot** — optional "auto-snapshot every save" config so the user always has a pre-edit recovery point.
