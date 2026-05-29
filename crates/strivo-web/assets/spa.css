@@ -646,9 +646,15 @@ th[data-sort]:hover {
   scroll-snap-type: x proximity;
   scrollbar-width: thin;
 }
-.dash-scroll > .media-pill,
-.dash-scroll > .live-card {
+.dash-scroll > .media-pill {
   flex: 0 0 320px;
+  scroll-snap-align: start;
+}
+/* Live Now cards are thumbnail-sized so the whole row of currently-
+ * live channels fits on screen and scrolls horizontally. Much smaller
+ * than the recording pill above. */
+.dash-scroll > .live-card {
+  flex: 0 0 180px;
   scroll-snap-align: start;
 }
 .dash-scroll > .empty.sm {
@@ -673,18 +679,18 @@ th[data-sort]:hover {
 }
 .live-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .live-card-badge {
-  position: absolute; top: 0.4rem; left: 0.4rem;
+  position: absolute; top: 0.3rem; left: 0.3rem;
   background: var(--recording, #f04444); color: white;
-  font-size: 0.65rem; font-weight: 700; letter-spacing: 0.04em;
-  padding: 0.15rem 0.4rem; border-radius: 3px;
+  font-size: 0.55rem; font-weight: 700; letter-spacing: 0.04em;
+  padding: 0.1rem 0.3rem; border-radius: 3px;
   text-transform: uppercase;
 }
 .live-card-meta {
-  display: flex; flex-direction: column; gap: 0.1rem;
-  padding: 0.4rem 0.6rem 0.5rem;
+  display: flex; flex-direction: column; gap: 0.05rem;
+  padding: 0.3rem 0.45rem 0.4rem;
 }
-.live-card-name { font-size: 0.85rem; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live-card-sub { font-size: 0.72rem; }
+.live-card-name { font-size: 0.78rem; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-card-sub { font-size: 0.66rem; }
 /* Click-to-play affordance on home pills */
 .media-pill.mp-clickable { cursor: pointer; }
 .media-pill.mp-clickable:focus-visible { outline: 2px solid var(--accent, #b07cff); outline-offset: 2px; }

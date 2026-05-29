@@ -1226,7 +1226,7 @@ function recordingsDashboardHtml(compact) {
   const rowEl = (title, count, html, empty, klass = "") => `
     <section class="dash-row${klass ? " " + klass : ""}">
       <h2 class="dash-row-title">${title}${count != null ? ` <span class="dash-count">${count}</span>` : ""}</h2>
-      <div class="media-list dash-scroll">${html || `<div class="empty sm">${empty}</div>`}</div>
+      <div class="dash-scroll">${html || `<div class="empty sm">${empty}</div>`}</div>
     </section>`;
 
   const heading = compact ? "" : `<h1 class="page-title">Home</h1>`;
