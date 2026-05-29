@@ -5414,6 +5414,10 @@ async function openRecordingInfo(jobId) {
       // .rec-beatgrid placeholder and Split at time… snaps to the
       // nearest beat within ±60 ms.
       let beatGridState = null; // { tempo_bpm, beats: number[], window_sec }
+      // Loudness gauge per-session cache, keyed by job. The full
+      // Loudness panel writes here on measure too so the topbar pill
+      // and the panel stay in sync without a refetch.
+      const loudnessGauge = (window.__strivoLoudnessGauge ||= new Map());
 
       const paint = () => {
         const dur = edl.cuts.reduce((a, c) => a + Math.max(0, c.end_sec - c.start_sec), 0);
@@ -5433,6 +5437,7 @@ async function openRecordingInfo(jobId) {
             <button class="sm rec-ed-beatgrid" type="button" title="Beat grid — onset-detect a tempo, paint vertical guides on the EDL strip. While the grid is loaded, Split at time… snaps to the nearest beat.">🎼 Beat grid…</button>
             <button class="sm rec-ed-history" type="button" title="Revision history — revert across saves (DAW-style undo)">↺ History…</button>
             <button class="sm rec-ed-scenes" type="button" title="Scenes — Ableton-style session save/recall bundling EDL + branding + automation + loudness + captions style">🎬 Scenes…</button>
+            <button class="sm rec-ed-loudgauge" type="button" title="Loudness gauge — measure EBU R128 I / TP / LRA against the YouTube target. Click to measure or refresh; reads from a per-session cache otherwise.">♪ <span class="rec-ed-lg-val">Measure</span></button>
             <button class="btn-primary rec-ed-render" type="button">⚡ Render to MKV</button>
           </div>
           <div class="rec-beatgrid" hidden></div>
@@ -5513,6 +5518,46 @@ async function openRecordingInfo(jobId) {
           });
         };
         paintBeatStrip();
+
+        // ── Loudness gauge ────────────────────────────────────────
+        // Inline I / TP / LRA pill next to ⚡ Render. Reads cached
+        // measurement when present; click re-measures.
+        const paintLoudGauge = () => {
+          const val = host.querySelector(".rec-ed-lg-val");
+          const btn = host.querySelector(".rec-ed-loudgauge");
+          if (!val || !btn) return;
+          const c = loudnessGauge.get(jobId);
+          if (!c) { val.textContent = "Measure"; btn.classList.remove("ok", "over", "under"); return; }
+          val.innerHTML = `I ${c.i.toFixed(1)} <span class="pg-cap-hint">LUFS</span> · TP ${c.tp.toFixed(1)} · LRA ${c.lra.toFixed(1)}`;
+          // Colour by integrated delta vs YouTube target (-14 LUFS).
+          // ±1 LUFS = ok, > +1 LUFS over = clipping risk, < -1 under = quiet.
+          btn.classList.remove("ok", "over", "under");
+          const d = c.i_delta;
+          if (Math.abs(d) <= 1.0) btn.classList.add("ok");
+          else if (d > 0) btn.classList.add("over");
+          else btn.classList.add("under");
+          btn.title = `EBU R128 vs ${c.platform || "youtube"} target · I Δ ${d >= 0 ? "+" : ""}${d.toFixed(2)} LUFS. Click to re-measure.`;
+        };
+        paintLoudGauge();
+        host.querySelector(".rec-ed-loudgauge")?.addEventListener("click", async (e2) => {
+          const gbtn = e2.currentTarget;
+          await withBusy(gbtn, "Measuring…", async () => {
+            const platform = "youtube";
+            const r = await API.loudnessMeasure(jobId, platform);
+            loudnessGauge.set(jobId, {
+              i: r.measurement.input_i,
+              tp: r.measurement.input_tp,
+              lra: r.measurement.input_lra,
+              i_delta: r.delta.i_delta,
+              tp_delta: r.delta.tp_delta,
+              lra_delta: r.delta.lra_delta,
+              platform: r.platform,
+              measured_at: Date.now(),
+            });
+            paintLoudGauge();
+            Toast.success(`Loudness · I ${r.measurement.input_i.toFixed(2)} LUFS (Δ ${r.delta.i_delta >= 0 ? "+" : ""}${r.delta.i_delta.toFixed(2)})`);
+          }).catch((err) => Toast.error(`Loudness failed: ${err.message}`));
+        });
 
         host.querySelector(".rec-ed-beatgrid")?.addEventListener("click", async (e2) => {
           const bbtn = e2.currentTarget;
@@ -6089,6 +6134,13 @@ async function openRecordingInfo(jobId) {
                 const r = await API.loudnessMeasure(jobId, platform);
                 const m = r.measurement;
                 const d = r.delta;
+                // Mirror into the topbar gauge cache.
+                loudnessGauge.set(jobId, {
+                  i: m.input_i, tp: m.input_tp, lra: m.input_lra,
+                  i_delta: d.i_delta, tp_delta: d.tp_delta, lra_delta: d.lra_delta,
+                  platform: r.platform, measured_at: Date.now(),
+                });
+                paintLoudGauge();
                 const dRow = (label, value, target, delta, unit) => `
                   <div class="rec-loud-row">
                     <span class="rec-loud-label">${htmlEscape(label)}</span>

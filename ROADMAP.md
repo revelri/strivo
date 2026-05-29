@@ -88,8 +88,8 @@ surfaces it on the SPA.
 | `/logs` | Tail-follow + regex filter + level chips + copy + download |
 | `/history` | Per-row Play/Info/Delete + filter + state chips + group-by-channel/date |
 
-### Editor topbar workflow (13 buttons)
-`Split at time… · Ripple-delete range… · ▢ Trim dead air… · ▢ Voice gate… · 🦆 Sidechain duck… · 🎛 Insert FX… · 🎚 Pitch/time… · ★ Branding… · ♪ Loudness… · 🎼 Beat grid… · ↺ History… · 🎬 Scenes… · ⚡ Render to MKV`
+### Editor topbar workflow (14 buttons)
+`Split at time… · Ripple-delete range… · ▢ Trim dead air… · ▢ Voice gate… · 🦆 Sidechain duck… · 🎛 Insert FX… · 🎚 Pitch/time… · ★ Branding… · ♪ Loudness… · 🎼 Beat grid… · ↺ History… · 🎬 Scenes… · ♪ I/TP/LRA gauge · ⚡ Render to MKV`
 
 ### Plugin sub-routes
 - `#/plugins/crunchr` + `#/plugins/crunchr/rec/<id>` — Pro upsell when not entitled
@@ -241,7 +241,6 @@ Three previously-listed gaps (sidechain, insert effects, pitch/time-stretch) shi
 - **Review-request workflow** — share a scene + checkbox approval log.
 
 ### SPA-side polish
-- **Loudness gauge in the EDL editor topbar** — show the current measured I / TP / LRA next to the render button so users see the loudness state at a glance.
 - **Insights / chat-density → schedule-optimizer auto-feed** — pickable per-recording on the optimizer page; one-click "use this stream's engagement curve".
 - **Heatmap row clicks → publish-time recommender deep link** — `audience_retention` row → schedule optimizer pre-loaded with the recording's bucket data.
 - **Multistream layout presets** — Quadrant / Highlight / Theatre overrides on top of the existing Auto / Focus / PiP modes.
