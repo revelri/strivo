@@ -1444,21 +1444,27 @@ function livePreviewHtml(c) {
   if (!c.is_live) return "";
   const src = liveEmbedSrc(c);
   const thumb = liveThumbUrl(c);
+  // Stream id matches the backend's `{Platform:?}:{id}` shape so a
+  // ▶ click on this poster routes to the Player and pre-fills the
+  // single slot with this channel.
+  const focus = `${c.platform}:${c.id}`;
   // No thumbnail but we have an embed → mount the player directly.
   // No `loading="lazy"`: this iframe is the live player. Chromium
   // viewport-throttles lazy iframes during the top-layer transition that
   // fullscreen triggers on cross-origin embeds, which stalls Twitch playback.
   if (!thumb && src) {
-    return `<div class="cd-preview" data-embed-src="${htmlEscape(src)}">
+    return `<div class="cd-preview" data-embed-src="${htmlEscape(src)}" data-focus="${htmlEscape(focus)}">
       <iframe src="${htmlEscape(src)}" title="Live preview"
               allow="autoplay; fullscreen; picture-in-picture; encrypted-media; clipboard-write" allowfullscreen></iframe>
     </div>`;
   }
   if (!thumb) return "";
-  // Poster + (if embeddable) a play overlay to upgrade to the player.
-  return `<div class="cd-preview poster" ${src ? `data-embed-src="${htmlEscape(src)}"` : ""}>
+  // Poster + (if embeddable) a play overlay that routes to the Player
+  // tab with this channel pre-loaded — no in-place upgrade. The user
+  // already 'hit play' so we don't make them pick the stream again.
+  return `<div class="cd-preview poster" ${src ? `data-embed-src="${htmlEscape(src)}" data-focus="${htmlEscape(focus)}"` : ""}>
     <img id="cd-poster-img" src="${htmlEscape(thumb)}" alt="Live thumbnail" />
-    ${src ? `<button class="cd-play" id="cd-play" aria-label="Play live preview">▶</button>` : ""}
+    ${src ? `<button class="cd-play" id="cd-play" aria-label="Open in Player">▶</button>` : ""}
   </div>`;
 }
 
@@ -1525,15 +1531,14 @@ function wireChannelDetail() {
       }, 30000);
     }
     const playBtn = poster.querySelector("#cd-play");
-    const src = poster.dataset.embedSrc;
-    if (playBtn && src) {
+    const focus = poster.dataset.focus;
+    if (playBtn && focus) {
+      // ▶ on a channel poster routes straight to the Player tab with
+      // this channel as the single-slot stream. User already clicked
+      // play; don't open the 'pick a stream' picker (audit follow-up).
       playBtn.addEventListener("click", () => {
         teardownLivePreview();
-        poster.classList.remove("poster");
-        poster.innerHTML = `<iframe src="${htmlEscape(src)}" title="Live preview"
-          allow="autoplay; fullscreen; picture-in-picture; encrypted-media; clipboard-write" allowfullscreen></iframe>`;
-        // Re-bind the fullscreen bug-fix on the upgraded preview.
-        attachFullscreenBugfix(poster);
+        window.location.hash = `#/watch?focus=${encodeURIComponent(focus)}&fresh=1`;
       });
     }
   }
