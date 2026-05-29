@@ -4618,13 +4618,19 @@ function paintPlayerStage(watch, streams) {
   });
 
   // ── Drag-and-drop: rail channels → empty slot · tile ↔ tile swap ──
+  // Sentinels are mandatory because getData("missing type") returns
+  // the empty string — indistinguishable from a tile drag whose path
+  // happens to be "" (the root single slot). We disambiguate with
+  // non-empty prefixes:
+  //   strivo-tile:<path>      — populated tile drag (incl. root)
+  //   strivo-stream:<id>      — rail channel drag (live stream)
+  // Both ride on text/plain (works cross-browser without permissions);
+  // the receiver parses the prefix.
   stage.querySelectorAll(".ms-leaf").forEach((tile) => {
-    // Make populated tiles draggable.
-    if (tile.dataset.streamId) {
+    if (tile.dataset.streamId || tile.dataset.recordingId) {
       tile.draggable = true;
       tile.addEventListener("dragstart", (e) => {
-        e.dataTransfer.setData("application/x-strivo-tile", tile.dataset.path || "");
-        e.dataTransfer.setData("text/plain", tile.dataset.streamId);
+        e.dataTransfer.setData("text/plain", `strivo-tile:${tile.dataset.path || ""}`);
         e.dataTransfer.effectAllowed = "move";
         tile.classList.add("is-dragging");
       });
@@ -4639,31 +4645,49 @@ function paintPlayerStage(watch, streams) {
     tile.addEventListener("drop", (e) => {
       e.preventDefault();
       tile.classList.remove("is-drop-target");
-      const fromTilePath = e.dataTransfer.getData("application/x-strivo-tile");
-      const streamId = e.dataTransfer.getData("text/plain");
+      const payload = e.dataTransfer.getData("text/plain");
       const toPath = tile.dataset.path || "";
-      const toNode = getNodeAt(playerState.layout, toPath);
-      if (fromTilePath !== "" || fromTilePath === toPath) {
-        // Tile-to-tile swap (the empty-string case is the root).
-        if (fromTilePath === toPath) return;
-        const fromNode = getNodeAt(playerState.layout, fromTilePath);
-        let next = setNodeAt(playerState.layout, fromTilePath, _slot(toNode.streamId || null));
-        next = setNodeAt(next, toPath, _slot(fromNode.streamId || null));
+      if (payload.startsWith("strivo-tile:")) {
+        const fromPath = payload.slice("strivo-tile:".length);
+        if (fromPath === toPath) return;
+        const fromNode = getNodeAt(playerState.layout, fromPath);
+        const toNode = getNodeAt(playerState.layout, toPath);
+        // Swap streams between the two slots (preserving recording vs
+        // live identity per side).
+        let next = setNodeAt(
+          playerState.layout,
+          fromPath,
+          _slot(toNode.streamId || null, toNode.recordingId || null),
+        );
+        next = setNodeAt(
+          next,
+          toPath,
+          _slot(fromNode.streamId || null, fromNode.recordingId || null),
+        );
         playerState.layout = next;
-      } else if (streamId) {
-        // Rail-to-slot drop: drop streamId into target slot.
-        playerState.layout = setNodeAt(playerState.layout, toPath, _slot(streamId));
+      } else if (payload.startsWith("strivo-stream:")) {
+        const id = payload.slice("strivo-stream:".length);
+        if (!id) return;
+        playerState.layout = setNodeAt(playerState.layout, toPath, _slot(id, null));
+      } else {
+        // Unknown payload — ignore so a stray browser URL drag doesn't
+        // accidentally erase a tile.
+        return;
       }
       savePlayerLayout();
       paintPlayerStage(watch, streams);
     });
   });
-  // Make rail channel rows draggable as a stream source.
+  // Make rail channel rows draggable as a stream source. Note: <a>
+  // elements are already draggable by default (the browser drags the
+  // href). The custom dragstart MUST run AND set effectAllowed before
+  // the browser's URL-drag logic takes over.
   document.querySelectorAll(".ch-row[data-channel-key]").forEach((row) => {
     if (!row.dataset.liveStreamId) return;
     row.draggable = true;
     row.addEventListener("dragstart", (e) => {
-      e.dataTransfer.setData("text/plain", row.dataset.liveStreamId);
+      // setData first so the browser's URL-drag default is overridden.
+      e.dataTransfer.setData("text/plain", `strivo-stream:${row.dataset.liveStreamId}`);
       e.dataTransfer.effectAllowed = "copy";
     });
   });
