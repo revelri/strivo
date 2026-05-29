@@ -644,6 +644,18 @@ const root = document.getElementById("app");
 
 async function render() {
   const r = currentRoute();
+  // P0 perf: tear down per-route long-lived resources before painting
+  // the next route. Chat WebSockets, chat buffers, and dataviz resize
+  // listeners were accumulating across navigations.
+  if (r !== "chat" && typeof chatState !== "undefined") {
+    for (const room of Object.keys(chatState.sockets || {})) {
+      try { disconnectChatRoom(room); } catch (_) {}
+    }
+    chatState.buffers = {};
+  }
+  if (r !== "dataviz" && typeof teardownDataviz === "function") {
+    teardownDataviz();
+  }
   // Clear any prior per-page hint before the new route paints; it'll be
   // re-mounted (if applicable) by maybeMountPageHint after the route
   // renderer finishes. Avoids stale Library copy bleeding onto Chat etc.
@@ -1167,15 +1179,21 @@ function paintDashboard() {
   wireDashboard();
 }
 
-// ── Recordings dashboard ─────────────────────────────────────────────
+// ── Home dashboard (Jellyfin-style horizontal carousels) ─────────────
+//
+// Rows: Live Now → In Progress → Recently Finished → Upcoming.
+// Each row is a horizontal-scroll strip. Recently Finished pills are
+// click-to-play (per user request); Live Now cards deep-link to the
+// /watch route focused on that stream.
 function recordingsDashboardHtml(compact) {
   const inProgress = dashRecordings.filter((r) => isInProgress(r.state));
   const recent = dashRecordings
     .filter((r) => !isInProgress(r.state))
-    .slice(0, compact ? 6 : 24);
+    .slice(0, compact ? 12 : 24);
   const upcoming = [...dashSchedule]
     .filter((s) => s.next_fire)
     .sort((a, b) => new Date(a.next_fire) - new Date(b.next_fire));
+  const liveChannels = (channelCache || []).filter((c) => c.is_live);
 
   const schedPillEl = (s) => `
     <div class="media-pill">
@@ -1187,17 +1205,45 @@ function recordingsDashboardHtml(compact) {
       <div class="mp-meta"><span class="mp-badge">scheduled</span></div>
     </div>`;
 
-  const rowEl = (title, count, html, empty) => `
-    <section class="dash-row">
+  // Live-now card: thumbnail + channel name + viewer count + LIVE
+  // chip. Whole card is a hash link to /watch?focus=<id>.
+  const liveCardEl = (c) => {
+    const thumb = liveThumbUrl(c);
+    const focus = `${c.platform}:${c.id}`;
+    const href = `#/watch?mode=focus&focus=${encodeURIComponent(focus)}`;
+    const viewers = c.viewer_count != null ? formatCount(c.viewer_count) : "";
+    return `
+      <a class="live-card" href="${href}" data-live-focus="${htmlEscape(focus)}"
+         title="Open ${htmlEscape(c.display_name || c.name)} in the multi-stream viewer">
+        <div class="live-card-thumb">${thumb ? `<img loading="lazy" src="${htmlEscape(thumb)}" alt=""/>` : ""}<span class="live-card-badge">LIVE</span></div>
+        <div class="live-card-meta">
+          <span class="live-card-name">${htmlEscape(c.display_name || c.name)}</span>
+          <span class="live-card-sub pg-cap-hint">${htmlEscape(c.platform)}${viewers ? ` · ${viewers}` : ""}</span>
+        </div>
+      </a>`;
+  };
+
+  const rowEl = (title, count, html, empty, klass = "") => `
+    <section class="dash-row${klass ? " " + klass : ""}">
       <h2 class="dash-row-title">${title}${count != null ? ` <span class="dash-count">${count}</span>` : ""}</h2>
-      <div class="media-list">${html || `<div class="empty sm">${empty}</div>`}</div>
+      <div class="media-list dash-scroll">${html || `<div class="empty sm">${empty}</div>`}</div>
     </section>`;
 
-  const heading = compact ? "" : `<h1 class="page-title">Recordings dashboard</h1>`;
+  const heading = compact ? "" : `<h1 class="page-title">Home</h1>`;
+  // Live Now hidden when zero live (avoids "No channels live" noise on
+  // dashboards where the rail's offline-only state already conveys
+  // that). Same for Upcoming when no schedule.
+  const liveRow = liveChannels.length
+    ? rowEl("Live Now", liveChannels.length, liveChannels.map(liveCardEl).join(""), "", "live-now-row")
+    : "";
+  const upcomingRow = upcoming.length
+    ? rowEl("Upcoming", upcoming.length, upcoming.map(schedPillEl).join(""), "", "")
+    : "";
   return `${heading}
+    ${liveRow}
     ${rowEl("In progress", inProgress.length, inProgress.map(recordingPillHtml).join(""), "Nothing recording")}
-    ${rowEl("Recent", null, recent.map(recordingPillHtml).join(""), "No recordings yet")}
-    ${rowEl("Upcoming", upcoming.length, upcoming.map(schedPillEl).join(""), "No scheduled recordings")}`;
+    ${rowEl("Recent", null, recent.map(recordingPillHtml).join(""), "No recordings yet — start one from the rail.")}
+    ${upcomingRow}`;
 }
 
 // Shared recording media-pill (used by the home dashboard + History): cover
@@ -1221,8 +1267,14 @@ function recordingPillHtml(j) {
   const sourceBadge = j.source_url
     ? '<span class="mp-source" title="From Twitch/YouTube VOD backfill">VOD</span>'
     : "";
+  // Finished recordings with a file → click-to-play; in-progress &
+  // file-missing rows stay inert (they don't have a playable artefact).
+  const playable = !isInProgress(j.state) && j.file_exists !== false;
+  const playAttrs = playable
+    ? ` data-action="play" data-job-id="${htmlEscape(j.id)}" role="button" tabindex="0"`
+    : "";
   return `
-    <div class="media-pill${j.file_exists === false ? " mp-broken" : ""}">
+    <div class="media-pill${j.file_exists === false ? " mp-broken" : ""}${playable ? " mp-clickable" : ""}"${playAttrs}>
       <div class="mp-thumb">${missingOverlay}<img class="mp-thumb-img" loading="lazy" alt=""
         src="/api/v1/recordings/${encodeURIComponent(j.id)}/thumb" onerror="this.remove()"></div>
       <div class="mp-info">
@@ -1238,6 +1290,24 @@ function recordingPillHtml(j) {
 }
 
 function wireDashboard() {
+  // Click-to-play on finished recording pills. Tile-level click opens
+  // the player at t=0; keyboard Enter/Space mirrors the click for
+  // tabbed users (W4 accessibility).
+  document.querySelectorAll('.media-pill[data-action="play"]').forEach((pill) => {
+    const open = () => {
+      const id = pill.dataset.jobId;
+      if (id) openRecordingPlayer(id);
+    };
+    pill.addEventListener("click", (e) => {
+      // Only fire when the click landed on the tile chrome, not a
+      // nested control (Stop button, future Play button, etc.).
+      if (e.target.closest("button, a, input")) return;
+      open();
+    });
+    pill.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    });
+  });
   document.querySelectorAll('[data-action="stop"]').forEach((btn) => {
     btn.addEventListener("click", async () => {
       if (!(await confirmDialog("Stop this recording?", { ok: "Stop", danger: true })))
@@ -1357,7 +1427,7 @@ function livePreviewHtml(c) {
   if (!thumb && src) {
     return `<div class="cd-preview" data-embed-src="${htmlEscape(src)}">
       <iframe src="${htmlEscape(src)}" title="Live preview"
-              allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>
+              allow="autoplay; fullscreen; picture-in-picture; encrypted-media; clipboard-write" allowfullscreen></iframe>
     </div>`;
   }
   if (!thumb) return "";
@@ -1376,6 +1446,32 @@ function teardownLivePreview() {
   }
 }
 
+// Bug fix: cross-origin embed iframes (Twitch / YouTube) freeze when
+// fullscreened from inside an .cd-preview parent that has
+// overflow:hidden + aspect-ratio. The iframe can't match the parent's
+// :fullscreen pseudo (different document scope), so we toggle a class
+// on the parent via the document's fullscreenchange event and use
+// .is-fullscreen + :has(iframe:fullscreen) in CSS to drop the clip.
+function attachFullscreenBugfix(previewEl) {
+  if (!previewEl || previewEl.dataset.fsBound === "1") return;
+  previewEl.dataset.fsBound = "1";
+  const onChange = () => {
+    const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+    const ours = !!fsEl && previewEl.contains(fsEl);
+    previewEl.classList.toggle("is-fullscreen", ours);
+  };
+  document.addEventListener("fullscreenchange", onChange);
+  document.addEventListener("webkitfullscreenchange", onChange);
+  // W6: ESC exits a fullscreened embed cleanly. Browsers handle the
+  // native fullscreen ESC themselves, but when the user has NOT
+  // fullscreened we let ESC back out of the embed to the channel
+  // detail's poster mode (parent toggles handled in wireChannelDetail).
+  previewEl.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (document.fullscreenElement) document.exitFullscreen?.();
+  });
+}
+
 function wireChannelDetail() {
   // Clear any preview refresh timer from a previously-open detail (item 23).
   teardownLivePreview();
@@ -1387,6 +1483,9 @@ function wireChannelDetail() {
 
   // Live preview: refresh the poster thumbnail every 30s, and upgrade to the
   // embed player on click (tap-to-play). Tears down when detail re-renders.
+  // Cover BOTH the poster-mode preview and the always-embedded preview
+  // — the freeze bug affects either form once the iframe is mounted.
+  document.querySelectorAll(".cd-preview").forEach(attachFullscreenBugfix);
   const poster = document.querySelector(".cd-preview.poster");
   if (poster) {
     const img = poster.querySelector("#cd-poster-img");
@@ -1408,7 +1507,9 @@ function wireChannelDetail() {
         teardownLivePreview();
         poster.classList.remove("poster");
         poster.innerHTML = `<iframe src="${htmlEscape(src)}" title="Live preview"
-          allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
+          allow="autoplay; fullscreen; picture-in-picture; encrypted-media; clipboard-write" allowfullscreen></iframe>`;
+        // Re-bind the fullscreen bug-fix on the upgraded preview.
+        attachFullscreenBugfix(poster);
       });
     }
   }
@@ -1471,7 +1572,7 @@ function loadChannelDetailData(c) {
             ? "Past Broadcasts"
             : "Recent uploads";
           el.innerHTML = `<h2 class="cd-section-title">${title}</h2>` +
-            `<div class="empty sm">Couldn't load — the daemon may be fetching, or the platform isn't authed. <a href="#" data-action="cd-retry">Retry</a></div>`;
+            `<div class="empty sm">Still loading VODs from the platform — this can take up to 15 seconds the first time. <a href="#" data-action="cd-retry">Retry now</a></div>`;
         }
       }
       document.querySelector('[data-action="cd-retry"]')?.addEventListener("click", (e) => {
@@ -2486,7 +2587,35 @@ function paintRecordings() {
   //   Shift+click                     → select range (anchor → here)
   //   Ctrl/Cmd+click                  → toggle just this row
   // Buttons/inputs/anchors still get their own handlers (early-return).
+  // W4 keyboard nav: rows are tabbable; Enter plays, I opens info, Del
+  // confirms delete. Delegated on body so we attach one handler total
+  // regardless of N rows (audit P1 perf #4).
+  if (!body.dataset.kbBound) {
+    body.dataset.kbBound = "1";
+    body.tabIndex = -1;
+    body.addEventListener("keydown", (e) => {
+      const tr = e.target.closest("tr[data-rec-row]");
+      if (!tr) return;
+      const id = tr.dataset.recRow;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const playable = tr.querySelector('button[data-action="play-rec"]') ||
+                         tr.querySelector('.rec-action-play');
+        if (playable) playable.click();
+        else if (typeof openRecordingPlayer === "function") openRecordingPlayer(id);
+      } else if (e.key === "i" || e.key === "I") {
+        e.preventDefault();
+        const info = tr.querySelector('[data-action="info"], .rec-action-info');
+        info?.click();
+      } else if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        const del = tr.querySelector('[data-action="delete"], .rec-action-del');
+        del?.click();
+      }
+    });
+  }
   body.querySelectorAll("tr[data-rec-row]").forEach((tr) => {
+    if (!tr.hasAttribute("tabindex")) tr.tabIndex = 0;
     tr.addEventListener("click", (e) => {
       if (e.target.closest("button, input, a")) return;
       const id = tr.dataset.recRow;
@@ -2608,7 +2737,7 @@ function updateMassbar() {
     setTimeout(() => render().catch(() => {}), 500);
   });
   document.getElementById("mass-rerecord")?.addEventListener("click", async () => {
-    if (!(await confirmDialog(`Re-record ${sel.length} channel(s) now?`, { ok: "Re-record" })))
+    if (!(await confirmDialog(`Re-record ${sel.length} channel(s) now? This starts fresh captures and may collide with any active recording on those channels.`, { ok: "Re-record", danger: true })))
       return;
     let ok = 0;
     for (const r of sel) {
@@ -3823,10 +3952,25 @@ async function renderDataviz() {
       Toast.success(`Ran ${exp.label} over ${episodes.length} episode(s)`);
     }).catch((err) => Toast.error(err.message || "Run failed"));
   });
-  // Re-render chart on resize so the SVG scales.
-  window.addEventListener("resize", () => {
+  // Re-render chart on resize so the SVG scales. Listener stored on
+  // datavizState so a route change can tear it down — without this
+  // each /dataviz visit added a permanent handler (P0 perf #1).
+  if (datavizState.resizeHandler) {
+    window.removeEventListener("resize", datavizState.resizeHandler);
+  }
+  datavizState.resizeHandler = () => {
     if (datavizState.series) renderDatavizChart(datavizState.series, document.getElementById("dz-chart"));
-  }, { passive: true });
+  };
+  window.addEventListener("resize", datavizState.resizeHandler, { passive: true });
+}
+
+// Called from the router when leaving /plugins/dataviz so the resize
+// handler doesn't accumulate across navigations.
+function teardownDataviz() {
+  if (datavizState && datavizState.resizeHandler) {
+    window.removeEventListener("resize", datavizState.resizeHandler);
+    datavizState.resizeHandler = null;
+  }
 }
 
 // Pure SVG bar / line / treemap renderer. Takes a Series, emits SVG
@@ -4480,9 +4624,13 @@ async function renderPluginHub() {
         ${statsHtml}
         ${verbs}
         ${dataDir}`;
+      // Idle/locked cards still need to be reachable so users can read
+      // the upsell. Route to the plugin's hash anyway; the renderer
+      // shows the Pro upsell card for gated routes.
+      const idleHref = p.route || `#/plugins/${encodeURIComponent(p.name)}`;
       return href
         ? `<a class="pg-card" href="${href}" data-plugin="${p.name}">${body}</a>`
-        : `<div class="pg-card pg-card-idle" data-plugin="${p.name}">${body}</div>`;
+        : `<a class="pg-card pg-card-idle" href="${idleHref}" data-plugin="${p.name}" title="Open the upsell — this plugin is part of StriVo Pro">${body}<span class="pg-card-lock" aria-hidden="true">🔒</span></a>`;
     })
     .join("");
   // Capability matrix + marketplace both render lazily so the plugin
@@ -6501,7 +6649,7 @@ async function openRecordingInfo(jobId) {
             const out_hi = elapsed + cd;
             if (t > elapsed + 0.001 && t < out_hi - 0.001) {
               const offset = t - elapsed;
-              const right = JSON.parse(JSON.stringify(c));
+              const right = structuredClone(c);
               const newSplit = c.start_sec + offset;
               right.start_sec = newSplit;
               c.end_sec = newSplit;
@@ -6536,20 +6684,20 @@ async function openRecordingInfo(jobId) {
             if (out_hi <= lo || out_lo >= hi) { next.push(cut); continue; }
             if (out_lo >= lo && out_hi <= hi) { continue; }
             if (out_lo < lo && out_hi <= hi) {
-              const trim = JSON.parse(JSON.stringify(cut));
+              const trim = structuredClone(cut);
               trim.end_sec = cut.start_sec + (lo - out_lo);
               next.push(trim);
               continue;
             }
             if (out_lo >= lo && out_hi > hi) {
-              const trim = JSON.parse(JSON.stringify(cut));
+              const trim = structuredClone(cut);
               trim.start_sec = cut.start_sec + (hi - out_lo);
               next.push(trim);
               continue;
             }
-            const left = JSON.parse(JSON.stringify(cut));
+            const left = structuredClone(cut);
             left.end_sec = cut.start_sec + (lo - out_lo);
-            const right = JSON.parse(JSON.stringify(cut));
+            const right = structuredClone(cut);
             right.start_sec = cut.start_sec + (hi - out_lo);
             next.push(left, right);
           }
@@ -6615,20 +6763,20 @@ async function openRecordingInfo(jobId) {
                 if (out_hi <= lo || out_lo >= hi) { next.push(c); continue; }
                 if (out_lo >= lo && out_hi <= hi) { continue; }
                 if (out_lo < lo && out_hi <= hi) {
-                  const trim = JSON.parse(JSON.stringify(c));
+                  const trim = structuredClone(c);
                   trim.end_sec = c.start_sec + (lo - out_lo);
                   next.push(trim);
                   continue;
                 }
                 if (out_lo >= lo && out_hi > hi) {
-                  const trim = JSON.parse(JSON.stringify(c));
+                  const trim = structuredClone(c);
                   trim.start_sec = c.start_sec + (hi - out_lo);
                   next.push(trim);
                   continue;
                 }
-                const left = JSON.parse(JSON.stringify(c));
+                const left = structuredClone(c);
                 left.end_sec = c.start_sec + (lo - out_lo);
-                const right = JSON.parse(JSON.stringify(c));
+                const right = structuredClone(c);
                 right.start_sec = c.start_sec + (hi - out_lo);
                 next.push(left, right);
               }
@@ -6682,20 +6830,20 @@ async function openRecordingInfo(jobId) {
                 if (out_hi <= lo || out_lo >= hi) { next.push(c); continue; }
                 if (out_lo >= lo && out_hi <= hi) { continue; }
                 if (out_lo < lo && out_hi <= hi) {
-                  const trim = JSON.parse(JSON.stringify(c));
+                  const trim = structuredClone(c);
                   trim.end_sec = c.start_sec + (lo - out_lo);
                   next.push(trim);
                   continue;
                 }
                 if (out_lo >= lo && out_hi > hi) {
-                  const trim = JSON.parse(JSON.stringify(c));
+                  const trim = structuredClone(c);
                   trim.start_sec = c.start_sec + (hi - out_lo);
                   next.push(trim);
                   continue;
                 }
-                const left = JSON.parse(JSON.stringify(c));
+                const left = structuredClone(c);
                 left.end_sec = c.start_sec + (lo - out_lo);
-                const right = JSON.parse(JSON.stringify(c));
+                const right = structuredClone(c);
                 right.start_sec = c.start_sec + (hi - out_lo);
                 next.push(left, right);
               }
@@ -8002,12 +8150,12 @@ function renderSettingsPane(slug, s) {
             row(
               "Recording failed",
               toggle("notifications.on_recording_failed", n.on_recording_failed !== false),
-              "Always recommended: silent failures are the worst class of PVR bug.",
+              "Recommended — notifies you the moment a capture fails so it doesn't go silently missed.",
             ),
             row(
               "VOD backfill ready",
               toggle("notifications.on_vod_ready", n.on_vod_ready === true),
-              "Banner when the Twitch auto-VOD-backfill pull lands. Off by default — most users don't track it manually.",
+              "Notify when a VOD becomes available after a live stream finishes. Off by default.",
             ),
           ].join("")),
         ].join("")}</div>`,

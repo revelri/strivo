@@ -469,6 +469,7 @@ th[data-sort]:hover {
 }
 .ch-name {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -477,11 +478,13 @@ th[data-sort]:hover {
   font-size: 0.7rem;
   color: var(--muted);
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 .ch-lastlive {
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   color: var(--dim);
   font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .ch-live {
@@ -615,7 +618,10 @@ th[data-sort]:hover {
   padding-top: 1rem;
 }
 .dash-row {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
+}
+.dash-row:first-of-type {
+  margin-top: 0.25rem;
 }
 .dash-row-title {
   font-size: 0.95rem;
@@ -625,8 +631,64 @@ th[data-sort]:hover {
 .dash-count {
   color: var(--muted);
   font-weight: 400;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
 }
+/* Home row variant: horizontal scroll strip for media-pills and the
+ * Jellyfin-style Live Now cards. Snap so flicked-scroll lands cleanly. */
+.dash-scroll {
+  display: flex;
+  flex-direction: row;
+  gap: 0.6rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.5rem;
+  scroll-snap-type: x proximity;
+  scrollbar-width: thin;
+}
+.dash-scroll > .media-pill,
+.dash-scroll > .live-card {
+  flex: 0 0 320px;
+  scroll-snap-align: start;
+}
+.dash-scroll > .empty.sm {
+  flex: 0 0 auto;
+}
+/* Live Now card — channel thumbnail + name + viewers + LIVE chip. */
+.live-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.live-card:hover { transform: translateY(-2px); border-color: var(--accent, #b07cff); }
+.live-card-thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(135deg, rgba(255, 68, 68, 0.18), rgba(176, 124, 255, 0.18));
+}
+.live-card-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.live-card-badge {
+  position: absolute; top: 0.4rem; left: 0.4rem;
+  background: var(--recording, #f04444); color: white;
+  font-size: 0.65rem; font-weight: 700; letter-spacing: 0.04em;
+  padding: 0.15rem 0.4rem; border-radius: 3px;
+  text-transform: uppercase;
+}
+.live-card-meta {
+  display: flex; flex-direction: column; gap: 0.1rem;
+  padding: 0.4rem 0.6rem 0.5rem;
+}
+.live-card-name { font-size: 0.85rem; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-card-sub { font-size: 0.72rem; }
+/* Click-to-play affordance on home pills */
+.media-pill.mp-clickable { cursor: pointer; }
+.media-pill.mp-clickable:focus-visible { outline: 2px solid var(--accent, #b07cff); outline-offset: 2px; }
+.media-pill.mp-clickable:hover { border-color: var(--accent, #b07cff); }
 .dash-strip {
   display: flex;
   gap: 0.75rem;
@@ -692,7 +754,7 @@ button.sm {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin: 0 0 0.75rem 0;
+  margin: 0 0 1rem 0;
   font-size: 1rem;
 }
 .live-now h2 .rec-dot {
@@ -702,7 +764,7 @@ button.sm {
 .live-now-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 0.75rem;
+  gap: 1rem;
 }
 
 .channel-grid {
@@ -795,6 +857,7 @@ button.sm {
   width: 100%;
   border-collapse: collapse;
 }
+.recordings-table { font-variant-numeric: tabular-nums; }
 .recordings-table th,
 .recordings-table td {
   text-align: left;
@@ -1082,20 +1145,30 @@ select[aria-invalid="true"] {
   height: 100%;
   border: 0;
 }
-/* When the cross-origin player enters fullscreen, override our absolute /
- * aspect-ratio positioning so the iframe fills the viewport rather than
- * staying boxed to the aspect-ratio parent's calculated size. Without this,
- * Chromium has been observed to strand the iframe's intrinsic box at 0
- * during the top-layer transition, freezing playback while the rest of the
- * app stays interactive. */
-.cd-preview iframe:fullscreen,
-.cd-preview iframe:-webkit-full-screen {
+/* Cross-origin iframe (Twitch/YouTube) can't match parent :fullscreen
+ * pseudo-selectors, so we toggle a marker class via fullscreenchange in
+ * JS. When the marker is on, drop the overflow:hidden + aspect-ratio
+ * clip that was stranding the iframe's intrinsic box at 0 during the
+ * top-layer transition, and lift the iframe into a fixed full-viewport
+ * rect. Restored on exit. */
+.cd-preview.is-fullscreen,
+.cd-preview:has(iframe:fullscreen) {
+  overflow: visible;
+  aspect-ratio: auto;
+  max-width: none;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+}
+.cd-preview.is-fullscreen iframe,
+.cd-preview:has(iframe:fullscreen) iframe {
   position: fixed;
   inset: 0;
   width: 100vw;
   height: 100vh;
   max-width: none;
   max-height: none;
+  z-index: 9999;
 }
 /* Progressive live preview (item 23): poster thumbnail + play overlay. */
 .cd-preview.poster { cursor: default; }
@@ -1125,7 +1198,9 @@ select[aria-invalid="true"] {
 /* ── Settings / System pages (item 7) ── */
 .cfg-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  /* Match channel-grid + live-now-grid 260px breakpoint so all card
+   * grids collapse at the same width (audit L4). */
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   gap: 1rem;
 }
 .cfg-card {
@@ -1135,7 +1210,7 @@ select[aria-invalid="true"] {
   border: 1px solid var(--border-light);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
-  padding: 1rem 1.1rem;
+  padding: 1rem;
 }
 .cfg-title {
   font-size: 0.95rem;
@@ -1162,7 +1237,7 @@ select[aria-invalid="true"] {
 .task-row:last-child { border-bottom: none; }
 .task-info { display: flex; flex-direction: column; gap: 0.1rem; }
 .task-name { font-size: 0.85rem; font-weight: 600; }
-.task-cadence { font-size: 0.72rem; color: var(--muted); }
+.task-cadence { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; font-family: var(--mono, monospace); }
 .agenda-time { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--fg); }
 
 /* Add-Channel wizard (item 19). */
@@ -1742,7 +1817,9 @@ a.media-pill:hover,
   transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1), border-color 150ms;
 }
 .pg-card:hover { transform: translateY(-2px); border-color: var(--border-light); }
-.pg-card-idle { opacity: 0.6; }
+.pg-card-idle { opacity: 0.6; position: relative; filter: grayscale(35%); }
+.pg-card-idle:hover { opacity: 0.85; filter: grayscale(0%); }
+.pg-card-lock { position: absolute; top: 0.5rem; right: 0.5rem; font-size: 0.9rem; opacity: 0.7; pointer-events: none; }
 .pg-getstarted {
   font-size: 0.82rem;
   color: var(--muted);
@@ -2030,7 +2107,7 @@ body.modal-open { overflow: hidden; }
 }
 
 /* Player card. */
-.rec-player-card { padding: 0; width: min(1100px, 96vw); display: flex; flex-direction: column; }
+.rec-player-card { padding: 0; width: min(1000px, 96vw); display: flex; flex-direction: column; }
 .rec-player-head {
   display: flex;
   align-items: center;
@@ -2397,6 +2474,7 @@ body.modal-open { overflow: hidden; }
   color: var(--text);
   font: inherit;
   font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
 }
 .stg-num:focus { outline: 0; border-color: var(--accent2); }
 .stg-text {
@@ -3680,8 +3758,15 @@ body.modal-open { overflow: hidden; }
 
 /* Conditional subgroup wrapper used by Settings → Notifications. When
  * the master switch is off the dependent group dims + becomes
- * non-interactive without removing it from the DOM. */
-.stg-subgroup-conditional { transition: opacity 0.18s ease; }
+ * non-interactive without removing it from the DOM. Display + min-width
+ * containment prevent inline JS opacity from letting child rows bleed
+ * over the master-toggle row above (audit T1 overlap). */
+.stg-subgroup-conditional {
+  display: flex; flex-direction: column;
+  min-width: 0;
+  margin-top: 0.8rem;
+  transition: opacity 0.18s ease;
+}
 
 /* State filter chips above the recordings table. Each chip is a pill
  * with a coloured dot matching the state's pill colour + a count. */
@@ -3924,8 +4009,9 @@ body.modal-open { overflow: hidden; }
 }
 
 /* Settings → Plugins manager rows + collapsible advanced details. */
-.stg-plugin-row .stg-plugin-name { font-weight: 600; }
-.stg-plugin-tags { margin-left: 0.5rem; display: inline-flex; gap: 0.25rem; vertical-align: middle; }
+.stg-plugin-row .stg-row-label { min-width: 0; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+.stg-plugin-row .stg-plugin-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.stg-plugin-tags { margin-left: 0.5rem; display: inline-flex; gap: 0.25rem; vertical-align: middle; flex-shrink: 0; }
 .stg-plugin-actions {
   display: inline-flex; gap: 0.6rem; align-items: center;
   justify-content: flex-end;

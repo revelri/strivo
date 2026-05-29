@@ -635,15 +635,20 @@ async fn gantt(
     match state.ipc.snapshot().await {
         Ok(ServerMessage::StateSnapshot { recordings, .. }) => {
             let cutoff = chrono::Utc::now() - chrono::Duration::hours(24);
-            let mut items: Vec<_> = recordings
+            // Sort by the actual timestamp before serialising into JSON
+            // values (audit P1 perf #6). The previous implementation
+            // stringified every JSON value per pairwise compare —
+            // O(N log N) string allocations for a hot dashboard endpoint.
+            let mut sorted: Vec<_> = recordings
                 .values()
                 .filter(|r| r.started_at > cutoff)
+                .collect();
+            sorted.sort_by_key(|r| r.started_at);
+            let items: Vec<_> = sorted
+                .into_iter()
                 .map(|r| {
                     // RecordingJob has no separate ended_at field;
-                    // compute end as start + duration_secs (live
-                    // recordings track duration too). For active
-                    // jobs that's "now-ish" — close enough for a
-                    // 24h Gantt.
+                    // compute end as start + duration_secs.
                     let end = r.started_at
                         + chrono::Duration::milliseconds((r.duration_secs * 1000.0) as i64);
                     json!({
@@ -658,7 +663,6 @@ async fn gantt(
                     })
                 })
                 .collect();
-            items.sort_by(|a, b| a["start_at"].to_string().cmp(&b["start_at"].to_string()));
             Json(json!({ "window_hours": 24, "items": items })).into_response()
         }
         _ => Json(json!({ "window_hours": 24, "items": [] })).into_response(),
