@@ -498,8 +498,8 @@ function confirmDialog(message, opts = {}) {
     modal.innerHTML = `<div class="card" role="alertdialog" aria-modal="true">
       <p class="confirm-msg"></p>
       <div class="confirm-actions">
-        <button class="confirm-cancel">${escape(opts.cancel || "Cancel")}</button>
-        <button class="confirm-ok ${opts.danger ? "danger" : "primary"}">${escape(opts.ok || "Confirm")}</button>
+        <button class="confirm-cancel">${htmlEscape(opts.cancel || "Cancel")}</button>
+        <button class="confirm-ok ${opts.danger ? "danger" : "primary"}">${htmlEscape(opts.ok || "Confirm")}</button>
       </div></div>`;
     modal.querySelector(".confirm-msg").textContent = message;
     document.body.appendChild(modal);
@@ -822,12 +822,12 @@ function paintChannelList() {
     if (c.is_live && c.viewer_count) {
       viewers = `<span class="ch-viewers">${formatCount(c.viewer_count)}</span>`;
     } else if (!c.is_live && !isPatreon && c.last_live_at) {
-      viewers = `<span class="ch-lastlive" title="last live: ${escape(lastLiveLong(c.last_live_at))}">${escape(relTime(c.last_live_at))}</span>`;
+      viewers = `<span class="ch-lastlive" title="last live: ${htmlEscape(lastLiveLong(c.last_live_at))}">${htmlEscape(relTime(c.last_live_at))}</span>`;
     }
     // Patreon rows are visually distinct (item 6): a pledged-tier chip
     // (stored in stream_title) and a patreon-accented platform glyph.
     const tier = isPatreon && c.stream_title
-      ? `<span class="ch-tier" title="pledged tier">${escape(c.stream_title)}</span>`
+      ? `<span class="ch-tier" title="pledged tier">${htmlEscape(c.stream_title)}</span>`
       : "";
     // Filter Recordings + History by this channel when clicked. Live
     // channels link to the recording dashboard so you can spot the
@@ -841,7 +841,7 @@ function paintChannelList() {
          data-channel-key="${key}" data-channel-id="${c.id}"
          data-platform="${c.platform}" href="${href}">
         <span class="ch-plat ${c.platform.toLowerCase()}" aria-hidden="true">${platformGlyph(c.platform)}</span>
-        <span class="ch-name">${escape(c.display_name || c.name)}</span>
+        <span class="ch-name">${htmlEscape(c.display_name || c.name)}</span>
         ${tier}${viewers}${liveDot}${rec}
       </a>`;
   };
@@ -930,13 +930,13 @@ function renderLogin(errorMsg) {
         <p class="subtitle">Sign in to the web console</p>
         <label for="api-key">API Key</label>
         <input type="password" id="api-key" autocomplete="current-password"
-               value="${escape(remembered)}" autofocus />
+               value="${htmlEscape(remembered)}" autofocus />
         <label class="login-remember">
           <input type="checkbox" id="api-remember" ${remembered ? "checked" : ""} />
           <span>Remember on this browser</span>
         </label>
         <button type="submit" class="primary">Sign in</button>
-        ${errorMsg ? `<div class="error">${escape(errorMsg)}</div>` : ""}
+        ${errorMsg ? `<div class="error">${htmlEscape(errorMsg)}</div>` : ""}
         <div class="hint">
           API key lives in <code>~/.config/strivo/config.toml</code> under
           <code>[web]</code>. <br />
@@ -980,12 +980,12 @@ function renderFirstRun(setup) {
     <div class="fr-step ${done ? "done" : "todo"}">
       <span class="fr-mark">${done ? "✓" : "○"}</span>
       <div class="fr-body">
-        <div class="fr-label">${escape(label)}</div>
+        <div class="fr-label">${htmlEscape(label)}</div>
         <div class="fr-detail">${detail}</div>
       </div>
     </div>`;
   const plat = (name, ok) =>
-    `<span class="fr-pill ${ok ? "ok" : ""}">${ok ? "✓" : "○"} ${escape(name)}</span>`;
+    `<span class="fr-pill ${ok ? "ok" : ""}">${ok ? "✓" : "○"} ${htmlEscape(name)}</span>`;
   const anyPlatform =
     setup.twitch_configured || setup.youtube_configured || setup.patreon_configured;
   const recDir = setup.recording_dir || "(unset)";
@@ -1007,7 +1007,7 @@ function renderFirstRun(setup) {
       ${step(
         !!setup.recording_dir,
         "2 · Recording directory",
-        `Where captures are written: <code>${escape(recDir)}</code>.
+        `Where captures are written: <code>${htmlEscape(recDir)}</code>.
          Change it in <code>~/.config/strivo/config.toml</code> if needed.`,
       )}
       ${step(
@@ -1120,8 +1120,8 @@ function recordingsDashboardHtml(compact) {
     <div class="media-pill">
       <div class="mp-thumb"></div>
       <div class="mp-info">
-        <div class="mp-title">${escape(s.channel)}</div>
-        <div class="mp-sub">${escape(new Date(s.next_fire).toLocaleString())}${s.duration ? ` · ${escape(s.duration)}` : ""}</div>
+        <div class="mp-title">${htmlEscape(s.channel)}</div>
+        <div class="mp-sub">${htmlEscape(new Date(s.next_fire).toLocaleString())}${s.duration ? ` · ${htmlEscape(s.duration)}` : ""}</div>
       </div>
       <div class="mp-meta"><span class="mp-badge">scheduled</span></div>
     </div>`;
@@ -1144,7 +1144,7 @@ function recordingsDashboardHtml(compact) {
 function recordingPillHtml(j) {
   const when = j.started_at ? new Date(j.started_at).toLocaleString() : "—";
   const stop = isInProgress(j.state)
-    ? `<button class="danger sm" data-action="stop" data-job-id="${escape(j.id)}">Stop</button>`
+    ? `<button class="danger sm" data-action="stop" data-job-id="${htmlEscape(j.id)}">Stop</button>`
     : "";
   // FILE MISSING overlay on the thumbnail mirrors the Recordings page
   // treatment so the Library dashboard doesn't quietly hide broken
@@ -1165,11 +1165,11 @@ function recordingPillHtml(j) {
       <div class="mp-thumb">${missingOverlay}<img class="mp-thumb-img" loading="lazy" alt=""
         src="/api/v1/recordings/${encodeURIComponent(j.id)}/thumb" onerror="this.remove()"></div>
       <div class="mp-info">
-        <div class="mp-title">${escape(niceTitle(j.stream_title) || j.channel_name || "(recording)")} ${sourceBadge}</div>
-        <div class="mp-sub">${escape(j.channel_name || "")} · ${escape(when)}</div>
+        <div class="mp-title">${htmlEscape(niceTitle(j.stream_title) || j.channel_name || "(recording)")} ${sourceBadge}</div>
+        <div class="mp-sub">${htmlEscape(j.channel_name || "")} · ${htmlEscape(when)}</div>
       </div>
       <div class="mp-meta">
-        ${(() => { const d = recordingDisplayState(j); return `<span class="state-pill ${d.className}">${escape(d.label)}</span>`; })()}
+        ${(() => { const d = recordingDisplayState(j); return `<span class="state-pill ${d.className}">${htmlEscape(d.label)}</span>`; })()}
         <span class="mp-size">${formatBytes(j.bytes_written || 0)}</span>
         ${stop}
       </div>
@@ -1201,17 +1201,17 @@ function channelDetailHtml(c) {
     <div class="actions">
       ${c.is_live ? `
         <button class="primary" data-action="record" data-channel-id="${c.id}"
-                data-channel-name="${escape(c.name)}"
-                data-display-name="${escape(c.display_name || c.name)}"
+                data-channel-name="${htmlEscape(c.name)}"
+                data-display-name="${htmlEscape(c.display_name || c.name)}"
                 data-platform="${c.platform}"
-                data-thumbnail="${escape(c.thumbnail_url || "")}"
-                data-stream-title="${escape(c.stream_title || "")}">● Record</button>
+                data-thumbnail="${htmlEscape(c.thumbnail_url || "")}"
+                data-stream-title="${htmlEscape(c.stream_title || "")}">● Record</button>
         <button data-action="record" data-from-start="true" data-channel-id="${c.id}"
-                data-channel-name="${escape(c.name)}"
-                data-display-name="${escape(c.display_name || c.name)}"
+                data-channel-name="${htmlEscape(c.name)}"
+                data-display-name="${htmlEscape(c.display_name || c.name)}"
                 data-platform="${c.platform}"
-                data-thumbnail="${escape(c.thumbnail_url || "")}"
-                data-stream-title="${escape(c.stream_title || "")}">● From start</button>
+                data-thumbnail="${htmlEscape(c.thumbnail_url || "")}"
+                data-stream-title="${htmlEscape(c.stream_title || "")}">● From start</button>
       ` : ""}
       ${!isPatreon ? `
         <button data-action="auto-record" data-channel-key="${key}"
@@ -1221,10 +1221,10 @@ function channelDetailHtml(c) {
         ${bulkButton(c)}
         ${c.platform === "YouTube" ? `
           <button data-action="bulk-playlist" data-channel-id="${c.id}"
-                  data-channel-name="${escape(c.display_name || c.name)}">⛁ Playlist…</button>` : ""}
+                  data-channel-name="${htmlEscape(c.display_name || c.name)}">⛁ Playlist…</button>` : ""}
         <button data-action="block-channel" data-channel-id="${c.id}"
                 data-platform="${c.platform}"
-                data-channel-name="${escape(c.display_name || c.name)}"
+                data-channel-name="${htmlEscape(c.display_name || c.name)}"
                 title="Stop auto-grabbing this channel">⊘ Block</button>
       ` : ""}
     </div>`;
@@ -1246,12 +1246,12 @@ function channelDetailHtml(c) {
     <div class="channel-detail">
       <div class="cd-header">
         <span class="platform-icon ${c.platform.toLowerCase()}">${c.platform}</span>
-        <h1 class="cd-name">${escape(c.display_name || c.name)}</h1>
+        <h1 class="cd-name">${htmlEscape(c.display_name || c.name)}</h1>
         ${liveBadge}
         ${c.viewer_count ? `<span class="cd-viewers">${formatCount(c.viewer_count)} viewers</span>` : ""}
         <button class="cd-close" data-action="cd-close" title="Close">×</button>
       </div>
-      ${c.stream_title ? `<div class="stream-title">${escape(c.stream_title)}</div>` : ""}
+      ${c.stream_title ? `<div class="stream-title">${htmlEscape(c.stream_title)}</div>` : ""}
       ${livePreviewHtml(c)}
       ${actions}
       ${sections}
@@ -1294,15 +1294,15 @@ function livePreviewHtml(c) {
   // viewport-throttles lazy iframes during the top-layer transition that
   // fullscreen triggers on cross-origin embeds, which stalls Twitch playback.
   if (!thumb && src) {
-    return `<div class="cd-preview" data-embed-src="${escape(src)}">
-      <iframe src="${escape(src)}" title="Live preview"
+    return `<div class="cd-preview" data-embed-src="${htmlEscape(src)}">
+      <iframe src="${htmlEscape(src)}" title="Live preview"
               allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>
     </div>`;
   }
   if (!thumb) return "";
   // Poster + (if embeddable) a play overlay to upgrade to the player.
-  return `<div class="cd-preview poster" ${src ? `data-embed-src="${escape(src)}"` : ""}>
-    <img id="cd-poster-img" src="${escape(thumb)}" alt="Live thumbnail" />
+  return `<div class="cd-preview poster" ${src ? `data-embed-src="${htmlEscape(src)}"` : ""}>
+    <img id="cd-poster-img" src="${htmlEscape(thumb)}" alt="Live thumbnail" />
     ${src ? `<button class="cd-play" id="cd-play" aria-label="Play live preview">▶</button>` : ""}
   </div>`;
 }
@@ -1346,7 +1346,7 @@ function wireChannelDetail() {
       playBtn.addEventListener("click", () => {
         teardownLivePreview();
         poster.classList.remove("poster");
-        poster.innerHTML = `<iframe src="${escape(src)}" title="Live preview"
+        poster.innerHTML = `<iframe src="${htmlEscape(src)}" title="Live preview"
           allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
       });
     }
@@ -1564,7 +1564,7 @@ function fmtEta(secs) {
 function updateVodProgressDom(job) {
   if (!job || !job.source_url) return;
   if (vodDownloadState[job.source_url] !== "downloading") return;
-  const sel = `[data-action=vod-download][data-url="${CSS.escape(job.source_url)}"]`;
+  const sel = `[data-action=vod-download][data-url="${CSS.htmlEscape(job.source_url)}"]`;
   document.querySelectorAll(sel).forEach((btn) => {
     btn.innerHTML = vodProgressHtml(
       job.download_pct,
@@ -1608,12 +1608,12 @@ function vodSectionHtml(title, vods, ctx) {
   // sits next to it so we don't nest interactive elements.
   const rows = vods
     .map((v) => {
-      const href = /^https?:\/\//i.test(v.url || "") ? escape(v.url) : "#";
+      const href = /^https?:\/\//i.test(v.url || "") ? htmlEscape(v.url) : "#";
       const thumb = vodThumb(v.thumbnail_url);
       const date = (v.published_at || "").slice(0, 10);
       const dur = fmtDur(v.duration);
       const live = v.kind === "Live" || v.kind === "live";
-      const meta = [date, dur].filter(Boolean).map(escape).join(" · ");
+      const meta = [date, dur].filter(Boolean).map(htmlEscape).join(" · ");
       const downloadable = !!(v.url && channelName && platform);
       const state = vodDownloadState[v.url] || "idle";
       // For the downloading state, embed a live progress widget instead of
@@ -1634,18 +1634,18 @@ function vodSectionHtml(title, vods, ctx) {
       }
       const btn = downloadable
         ? `<button class="vod-dl vod-dl-${state}" data-action="vod-download"
-              data-url="${escape(v.url)}"
-              data-channel="${escape(channelName)}"
-              data-platform="${escape(platform)}"
-              data-title="${escape(v.title || "")}"
+              data-url="${htmlEscape(v.url)}"
+              data-channel="${htmlEscape(channelName)}"
+              data-platform="${htmlEscape(platform)}"
+              data-title="${htmlEscape(v.title || "")}"
               ${state !== "idle" ? "disabled" : ""}>${inner}</button>`
         : "";
       return `
     <div class="media-pill">
       <a class="mp-link" href="${href}" target="_blank" rel="noopener">
-        <div class="mp-thumb">${thumb ? `<img class="mp-thumb-img" loading="lazy" alt="" src="${escape(thumb)}" onerror="this.remove()">` : ""}</div>
+        <div class="mp-thumb">${thumb ? `<img class="mp-thumb-img" loading="lazy" alt="" src="${htmlEscape(thumb)}" onerror="this.remove()">` : ""}</div>
         <div class="mp-info">
-          <div class="mp-title">${escape(niceTitle(v.title))}</div>
+          <div class="mp-title">${htmlEscape(niceTitle(v.title))}</div>
           <div class="mp-sub">${meta}</div>
         </div>
         <div class="mp-meta">${live ? '<span class="mp-badge live">LIVE VOD</span>' : '<span class="mp-badge">Upload</span>'}</div>
@@ -1672,7 +1672,7 @@ function renderPatreonPosts(c) {
     ? posts
         .map((p) => {
           const thumb = p.thumbnail_url
-            ? `<img class="mp-thumb-img" loading="lazy" alt="" src="${escape(p.thumbnail_url)}" onerror="this.remove()">`
+            ? `<img class="mp-thumb-img" loading="lazy" alt="" src="${htmlEscape(p.thumbnail_url)}" onerror="this.remove()">`
             : "";
           const url = p.embed_url || "";
           const state = vodDownloadState[url] || "idle";
@@ -1687,10 +1687,10 @@ function renderPatreonPosts(c) {
           const btn = url
             ? `<button class="vod-dl vod-dl-${state}" data-action="vod-download"
                   data-via="patreon"
-                  data-url="${escape(url)}"
-                  data-channel="${escape(channelName)}"
+                  data-url="${htmlEscape(url)}"
+                  data-channel="${htmlEscape(channelName)}"
                   data-platform="Patreon"
-                  data-title="${escape(p.title)}"
+                  data-title="${htmlEscape(p.title)}"
                   ${state !== "idle" ? "disabled" : ""}>${inner}</button>`
             : "";
           return `
@@ -1698,8 +1698,8 @@ function renderPatreonPosts(c) {
         <div class="mp-link" style="cursor: default;">
           <div class="mp-thumb">${thumb}</div>
           <div class="mp-info">
-            <div class="mp-title">${escape(p.title)}</div>
-            <div class="mp-sub">${escape((p.published_at || "").slice(0, 10))}</div>
+            <div class="mp-title">${htmlEscape(p.title)}</div>
+            <div class="mp-sub">${htmlEscape((p.published_at || "").slice(0, 10))}</div>
           </div>
           <div class="mp-meta"></div>
         </div>
@@ -1859,9 +1859,9 @@ async function openCommandPalette() {
     out.innerHTML = hits
       .map(
         (it, i) =>
-          `<a class="cmd-item${i === active ? " is-active" : ""}" href="${escape(it.href)}" data-i="${i}">
-            <span class="cmd-label">${escape(it.label)}</span>
-            <span class="cmd-sub">${escape(it.sub)}</span>
+          `<a class="cmd-item${i === active ? " is-active" : ""}" href="${htmlEscape(it.href)}" data-i="${i}">
+            <span class="cmd-label">${htmlEscape(it.label)}</span>
+            <span class="cmd-sub">${htmlEscape(it.sub)}</span>
           </a>`,
       )
       .join("");
@@ -1908,10 +1908,10 @@ function paintAddWizardSearch(modal, opts = {}) {
           <option value="Patreon"${sel("Patreon")}>Patreon</option>
         </select>
         <input id="aw-query" type="text" placeholder="Twitch login, or YouTube/Patreon id"
-               value="${escape(opts.query || "")}" autofocus />
+               value="${htmlEscape(opts.query || "")}" autofocus />
         <button id="aw-search" class="primary">Search</button>
       </div>
-      <div id="aw-result" class="wizard-result">${escape(opts.message || "")}</div>
+      <div id="aw-result" class="wizard-result">${htmlEscape(opts.message || "")}</div>
     </div>`;
   const doSearch = async () => {
     const platform = modal.querySelector("#aw-platform").value;
@@ -1922,7 +1922,7 @@ function paintAddWizardSearch(modal, opts = {}) {
     try {
       await API.resolveChannel(platform, query);
     } catch (e) {
-      modal.querySelector("#aw-result").innerHTML = `<div class="empty sm">Search failed: ${escape(e.message)}</div>`;
+      modal.querySelector("#aw-result").innerHTML = `<div class="empty sm">Search failed: ${htmlEscape(e.message)}</div>`;
     }
   };
   modal.querySelector("#aw-search")?.addEventListener("click", doSearch);
@@ -1940,7 +1940,7 @@ function paintAddWizardConfirm(ev) {
   const result = modal.querySelector("#aw-result");
   if (!result) return;
   if (ev.error || !ev.channel_id) {
-    result.innerHTML = `<div class="empty sm">Not found: ${escape(ev.error || "no match")}</div>`;
+    result.innerHTML = `<div class="empty sm">Not found: ${htmlEscape(ev.error || "no match")}</div>`;
     return;
   }
   const name = ev.display_name || ev.channel_id;
@@ -1949,11 +1949,11 @@ function paintAddWizardConfirm(ev) {
       <p class="wizard-step">Step 2 of 2 — confirm</p>
       <div class="task-row">
         <div class="task-info">
-          <span class="task-name">${escape(name)}</span>
-          <span class="task-cadence">${escape(ev.platform)} · ${escape(ev.channel_id)}</span>
+          <span class="task-name">${htmlEscape(name)}</span>
+          <span class="task-cadence">${htmlEscape(ev.platform)} · ${htmlEscape(ev.channel_id)}</span>
         </div>
       </div>
-      <button id="aw-confirm" class="primary" data-key="${escape(ev.platform)}:${escape(ev.channel_id)}">
+      <button id="aw-confirm" class="primary" data-key="${htmlEscape(ev.platform)}:${htmlEscape(ev.channel_id)}">
         Add &amp; enable auto-record
       </button>
     </div>`;
@@ -1988,14 +1988,14 @@ function showPlaylistModal(opts) {
         `<div class="pl-row" data-pl=""><b>▣ Whole channel</b> (all uploads)</div>`,
         ...opts.playlists.map(
           (p) =>
-            `<div class="pl-row" data-pl="${escape(p.id)}">≡ ${escape(p.title)}${
+            `<div class="pl-row" data-pl="${htmlEscape(p.id)}">≡ ${htmlEscape(p.title)}${
               p.item_count != null ? ` (${p.item_count})` : ""
             }</div>`,
         ),
       ].join("");
   modal.innerHTML = `
     <div class="card">
-      <h2>Bulk download — ${escape(opts.name)}</h2>
+      <h2>Bulk download — ${htmlEscape(opts.name)}</h2>
       <div class="pl-list">${rows}</div>
     </div>`;
   modal.classList.add("open");
@@ -2029,12 +2029,12 @@ function bulkButton(c) {
     const label = st.total > 0 ? `⇩ ${st.done}/${st.total} — Stop` : "⇩ … — Stop";
     return `<button data-action="bulk" data-bulk-active="true"
               data-channel-id="${c.id}"
-              data-channel-name="${escape(c.display_name || c.name)}"
+              data-channel-name="${htmlEscape(c.display_name || c.name)}"
               data-platform="${c.platform}">${label}</button>`;
   }
   return `<button data-action="bulk" data-bulk-active="false"
             data-channel-id="${c.id}"
-            data-channel-name="${escape(c.display_name || c.name)}"
+            data-channel-name="${htmlEscape(c.display_name || c.name)}"
             data-platform="${c.platform}">⇩ Bulk DL</button>`;
 }
 
@@ -2089,7 +2089,7 @@ async function renderRecordings() {
   } catch (e) {
     if (e.message.includes("unauthorized")) return;
     root.innerHTML = chrome(
-      `<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`,
+      `<div class="empty"><div class="glyph">⚠</div>${htmlEscape(e.message)}</div>`,
     );
     setupChromeHandlers();
     return;
@@ -2115,7 +2115,7 @@ async function renderRecordings() {
     <div class="rec-toolbar">
       <input id="rec-filter" class="grid-filter" type="search"
              placeholder="Filter by channel or title… (/)"
-             aria-label="Filter recordings" value="${escape(recFilter)}">
+             aria-label="Filter recordings" value="${htmlEscape(recFilter)}">
       <button id="rec-groupby" class="sm" title="Group rows by channel">
         ${recGroupBy === "channel" ? "▼ Grouped by channel" : "≣ Group by channel"}
       </button>
@@ -2223,10 +2223,10 @@ function paintRecStateChips() {
   const chips = sorted
     .map(([state, n]) => {
       const active = recStateFilter.size === 0 || recStateFilter.has(state);
-      return `<button class="rec-state-chip state-${escape(state)} ${active ? "active" : ""}"
-                data-state="${escape(state)}" type="button">
+      return `<button class="rec-state-chip state-${htmlEscape(state)} ${active ? "active" : ""}"
+                data-state="${htmlEscape(state)}" type="button">
         <span class="rec-state-chip-dot"></span>
-        ${escape(stateChipLabel(state))}
+        ${htmlEscape(stateChipLabel(state))}
         <span class="rec-state-chip-count">${n}</span>
       </button>`;
     })
@@ -2335,7 +2335,7 @@ function paintRecordings() {
       const list = byChannel.get(ch);
       const totalBytes = list.reduce((a, b) => a + (b.bytes_written || 0), 0);
       return `<tr class="rec-group-head"><td colspan="7">
-        <span class="rec-group-name">${escape(ch)}</span>
+        <span class="rec-group-name">${htmlEscape(ch)}</span>
         <span class="rec-group-meta">${list.length} recording${list.length === 1 ? "" : "s"} · ${formatBytes(totalBytes)}</span>
       </td></tr>${list.map(recordingRow).join("")}`;
     }).join("");
@@ -2589,7 +2589,7 @@ function recThumb(r) {
   // recording's output_path is gone from disk (moved / deleted / external
   // drive offline) so we surface it as a red-caps overlay over the thumb.
   const missing = r.file_exists === false ? " rec-thumb-missing" : "";
-  return `<span class="rec-thumb-wrap${missing}" data-init="${escape(initials)}"
+  return `<span class="rec-thumb-wrap${missing}" data-init="${htmlEscape(initials)}"
     style="--ch-hue:${hue}deg">
     <img class="rec-thumb" loading="lazy" alt=""
       src="/api/v1/recordings/${encodeURIComponent(r.id)}/thumb"
@@ -2631,15 +2631,15 @@ function recordingRow(r) {
   // a process error — file-error means the journal-vs-disk drifted.
   const fileErrorBtns = stateClass === "file-error"
     ? `<button class="sm" data-action="rec-rescan" data-job-id="${r.id}" title="Re-check whether the file exists">↻ Re-scan</button>
-       <button class="sm" data-action="rec-locate" data-job-id="${r.id}" data-path="${escape(r.output_path || "")}" title="Show the expected file path">📂 Show path</button>`
+       <button class="sm" data-action="rec-locate" data-job-id="${r.id}" data-path="${htmlEscape(r.output_path || "")}" title="Show the expected file path">📂 Show path</button>`
     : "";
   const actions = `${playBtn}${fileErrorBtns}${tailBtns}`;
   return `
-    <tr class="${recSelected.has(r.id) ? "rec-sel" : ""}" data-rec-row="${escape(r.id)}">
-      <td class="rec-check"><input type="checkbox" class="rec-row-check" data-job-id="${escape(r.id)}" ${recSelected.has(r.id) ? "checked" : ""} aria-label="Select recording"></td>
+    <tr class="${recSelected.has(r.id) ? "rec-sel" : ""}" data-rec-row="${htmlEscape(r.id)}">
+      <td class="rec-check"><input type="checkbox" class="rec-row-check" data-job-id="${htmlEscape(r.id)}" ${recSelected.has(r.id) ? "checked" : ""} aria-label="Select recording"></td>
       <td><span class="state-pill ${stateClass}">${state}</span></td>
-      <td>${escape(r.channel_name)}</td>
-      <td><div class="rec-title-cell">${recThumb(r)}<span>${escape(niceTitle(r.stream_title) || "(no title)")}</span></div></td>
+      <td>${htmlEscape(r.channel_name)}</td>
+      <td><div class="rec-title-cell">${recThumb(r)}<span>${htmlEscape(niceTitle(r.stream_title) || "(no title)")}</span></div></td>
       <td>${new Date(r.started_at).toLocaleString()}</td>
       <td>${formatBytes(r.bytes_written || 0)}</td>
       <td class="rec-actions"><div class="rec-actions-inner">${actions}</div></td>
@@ -2691,7 +2691,7 @@ function showRecordingPath(path) {
       </header>
       <p class="pg-cap-hint">The recording was written here. The SPA can't open your file manager directly — copy the path and open it yourself.</p>
       <div class="rec-locate-row">
-        <code class="rec-locate-path">${escape(path)}</code>
+        <code class="rec-locate-path">${htmlEscape(path)}</code>
         <button class="primary sm rec-locate-copy">Copy path</button>
       </div>
     </div>`;
@@ -2780,12 +2780,12 @@ function renderGantt(items) {
               : "var(--muted)";
           return `<rect x="${xPct}%" y="${y + 3}" width="${wPct}%" height="14"
                      fill="${stateColor}" rx="2"
-                     data-title="${escape(it.stream_title || ch)} · ${formatBytes(it.bytes_written || 0)}"></rect>`;
+                     data-title="${htmlEscape(it.stream_title || ch)} · ${formatBytes(it.bytes_written || 0)}"></rect>`;
         })
         .join("");
       return `
         <text x="0" y="${y + 14}" fill="var(--muted)" font-size="11" font-family="ui-monospace, monospace">
-          ${escape(ch.slice(0, 18))}
+          ${htmlEscape(ch.slice(0, 18))}
         </text>
         ${chBars}
       `;
@@ -2850,10 +2850,10 @@ async function renderPipelines() {
       if (!node) continue;
       const statusClass = node.status === "available" ? "is-avail" : "is-roadmap";
       const produces = (node.produces || [])
-        .map((c) => `<span class="pl-cap pl-cap-produces">${escape(c.replace(/_/g, " "))}</span>`)
+        .map((c) => `<span class="pl-cap pl-cap-produces">${htmlEscape(c.replace(/_/g, " "))}</span>`)
         .join("");
       const consumes = (node.consumes || [])
-        .map((c) => `<span class="pl-cap pl-cap-consumes">${escape(c.replace(/_/g, " "))}</span>`)
+        .map((c) => `<span class="pl-cap pl-cap-consumes">${htmlEscape(c.replace(/_/g, " "))}</span>`)
         .join("");
       // Every node is a clickable anchor — routes to the plugin's own
       // sub-page when one exists, else to the plugin-hub catalog. The
@@ -2862,12 +2862,12 @@ async function renderPipelines() {
       const href = PIPELINE_NODE_ROUTES.has(node.id)
         ? `#/plugins/${node.id}`
         : `#/plugins`;
-      cells.push(`<a class="pl-node ${statusClass}" href="${escape(href)}"
-          title="${escape(node.blurb)} · click to open ${escape(node.label)}"
-          data-plugin="${escape(node.id)}">
+      cells.push(`<a class="pl-node ${statusClass}" href="${htmlEscape(href)}"
+          title="${htmlEscape(node.blurb)} · click to open ${htmlEscape(node.label)}"
+          data-plugin="${htmlEscape(node.id)}">
           <div class="pl-node-head">
-            <span class="pl-node-label">${escape(node.label)}</span>
-            <span class="pl-node-status">${escape(node.status)}</span>
+            <span class="pl-node-label">${htmlEscape(node.label)}</span>
+            <span class="pl-node-status">${htmlEscape(node.status)}</span>
           </div>
           <div class="pl-node-caps">${consumes}${produces}</div>
         </a>`);
@@ -2875,9 +2875,9 @@ async function renderPipelines() {
       if (next) {
         const eRec = edgeBetween(node.id, next);
         const viaLabel = eRec ? eRec.via.replace(/_/g, " ") : "";
-        cells.push(`<div class="pl-arrow${eRec ? "" : " pl-arrow-loose"}" title="${escape(viaLabel)}">
+        cells.push(`<div class="pl-arrow${eRec ? "" : " pl-arrow-loose"}" title="${htmlEscape(viaLabel)}">
           <span class="pl-arrow-line"></span>
-          ${eRec ? `<span class="pl-arrow-via">${escape(viaLabel)}</span>` : ""}
+          ${eRec ? `<span class="pl-arrow-via">${htmlEscape(viaLabel)}</span>` : ""}
           <span class="pl-arrow-tip">▸</span>
         </div>`);
       }
@@ -2893,7 +2893,7 @@ async function renderPipelines() {
       return `
     <section class="cfg-card pl-pipe-card">
       <header class="pl-pipe-head">
-        <h2 class="cfg-title">${escape(p.name)} <span class="pg-cap-hint">${escape(p.description)}</span></h2>
+        <h2 class="cfg-title">${htmlEscape(p.name)} <span class="pg-cap-hint">${htmlEscape(p.description)}</span></h2>
         <div class="pl-pipe-actions">
           <span class="pl-pipe-readiness ${pct === 100 ? "complete" : "partial"}"
                 title="${availNodes} of ${totalNodes} stages available">
@@ -2941,16 +2941,16 @@ function openRecordingPickerForPipeline(pipe, recs) {
   overlay.innerHTML = `
     <div class="modal-card pl-picker-card">
       <header class="pl-picker-head">
-        <h2>Run "${escape(pipe.name)}" on a recording</h2>
+        <h2>Run "${htmlEscape(pipe.name)}" on a recording</h2>
         <button class="modal-close" data-action="modal-close" aria-label="Close">✕</button>
       </header>
       <p class="pg-cap-hint">Pick a recording. Its Info panel surfaces a button for every stage's plugin — we open straight to it so you can fire the chain.</p>
       <div class="pl-picker-list">
         ${recs.slice(0, 12).map((r) => `
-          <button class="pl-picker-row" data-job-id="${escape(r.id)}" type="button">
-            <span class="pl-picker-channel">${escape(r.channel_name || "(channel)")}</span>
-            <span class="pl-picker-title">${escape(niceTitle(r.stream_title) || "(no title)")}</span>
-            <span class="pl-picker-meta">${escape(new Date(r.started_at).toLocaleDateString())} · ${formatBytes(r.bytes_written || 0)}</span>
+          <button class="pl-picker-row" data-job-id="${htmlEscape(r.id)}" type="button">
+            <span class="pl-picker-channel">${htmlEscape(r.channel_name || "(channel)")}</span>
+            <span class="pl-picker-title">${htmlEscape(niceTitle(r.stream_title) || "(no title)")}</span>
+            <span class="pl-picker-meta">${htmlEscape(new Date(r.started_at).toLocaleDateString())} · ${formatBytes(r.bytes_written || 0)}</span>
           </button>`).join("")}
       </div>
     </div>`;
@@ -3204,13 +3204,13 @@ function paintChatBody() {
     .slice(-200)
     .map((m) => {
       const cls = `chat-msg${m.deleted ? " deleted" : ""}${m.is_action ? " action" : ""}`;
-      const senderCol = m.sender_color ? `style="color:${escape(m.sender_color)}"` : "";
+      const senderCol = m.sender_color ? `style="color:${htmlEscape(m.sender_color)}"` : "";
       const badges = renderChatBadges(m.badges || []);
       const tokens = renderChatTokens(m.text, m.emote_ranges || []);
       const mentioned = chatState.watched_user && msgMentionsUser(m.text, chatState.watched_user)
         ? " mentioned" : "";
       return `<div class="${cls}${mentioned}">
-        ${badges}<span class="chat-sender" ${senderCol}>${escape(m.sender)}</span><span class="chat-sep">:</span> <span class="chat-text">${tokens}</span>
+        ${badges}<span class="chat-sender" ${senderCol}>${htmlEscape(m.sender)}</span><span class="chat-sep">:</span> <span class="chat-text">${tokens}</span>
       </div>`;
     })
     .join("");
@@ -3234,7 +3234,7 @@ const BADGE_UUIDS = {
 function renderChatBadges(badges) {
   return badges.map((b) => {
     const url = BADGE_CDN(b.id, b.version);
-    return `<img class="chat-badge-img" alt="${escape(b.id)}" title="${escape(b.id)}/${escape(b.version)}" src="${escape(url)}" onerror="this.outerHTML='<span class=&quot;chat-badge&quot;>${escape(b.id)}</span>'">`;
+    return `<img class="chat-badge-img" alt="${htmlEscape(b.id)}" title="${htmlEscape(b.id)}/${htmlEscape(b.version)}" src="${htmlEscape(url)}" onerror="this.outerHTML='<span class=&quot;chat-badge&quot;>${htmlEscape(b.id)}</span>'">`;
   }).join("");
 }
 
@@ -3248,17 +3248,17 @@ function renderChatTokens(text, ranges = []) {
     if (run.startsWith("@")) {
       const user = run.replace(/[.,!?]+$/, "").slice(1);
       if (/^[A-Za-z0-9_]+$/.test(user)) {
-        return `<span class="chat-mention">@${escape(user)}</span>`;
+        return `<span class="chat-mention">@${htmlEscape(user)}</span>`;
       }
     }
     if (/^https?:\/\//.test(run)) {
-      return `<a class="chat-link" href="${escape(run)}" target="_blank" rel="noopener noreferrer">${escape(run)}</a>`;
+      return `<a class="chat-link" href="${htmlEscape(run)}" target="_blank" rel="noopener noreferrer">${htmlEscape(run)}</a>`;
     }
     const bttv = bttvCache.map.get(run);
     if (bttv) {
-      return `<img class="chat-emote" loading="lazy" alt="${escape(run)}" title="${escape(run)}" src="${escape(bttv)}">`;
+      return `<img class="chat-emote" loading="lazy" alt="${htmlEscape(run)}" title="${htmlEscape(run)}" src="${htmlEscape(bttv)}">`;
     }
-    return escape(run);
+    return htmlEscape(run);
   };
   // Plain text path when there are no Twitch emote ranges.
   const renderPlain = (s) =>
@@ -3275,7 +3275,7 @@ function renderChatTokens(text, ranges = []) {
     const end = Math.min(r.end + 1, chars.length);
     const name = chars.slice(r.start, end).join("");
     const url = `https://static-cdn.jtvnw.net/emoticons/v2/${r.id}/default/dark/1.0`;
-    out.push(`<img class="chat-emote" loading="lazy" alt="${escape(name)}" title="${escape(name)}" src="${escape(url)}">`);
+    out.push(`<img class="chat-emote" loading="lazy" alt="${htmlEscape(name)}" title="${htmlEscape(name)}" src="${htmlEscape(url)}">`);
     cursor = end;
   }
   if (cursor < chars.length) out.push(renderPlain(chars.slice(cursor).join("")));
@@ -3293,8 +3293,8 @@ function paintChatTabs() {
       ? `<span class="chat-tab-unread">${buf.unread}</span>` : "";
     const liveDot = r.is_live ? `<span class="chat-tab-live" title="live">◉</span>` : "";
     const offline = r.connectable === false ? " offline" : "";
-    return `<button class="chat-tab ${active}${offline}" data-room="${escape(r.room)}" ${!r.connectable ? "disabled" : ""}>
-      ${liveDot}<span class="chat-tab-name">${escape(r.display_name)}</span>${mentionPill}${unreadPill}
+    return `<button class="chat-tab ${active}${offline}" data-room="${htmlEscape(r.room)}" ${!r.connectable ? "disabled" : ""}>
+      ${liveDot}<span class="chat-tab-name">${htmlEscape(r.display_name)}</span>${mentionPill}${unreadPill}
     </button>`;
   }).join("");
   tabs.querySelectorAll(".chat-tab").forEach((t) => {
@@ -3344,7 +3344,7 @@ async function renderChat() {
     rooms = (await API.chatRooms()).rooms || [];
   } catch (e) {
     document.getElementById("chat-root").innerHTML =
-      `<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`;
+      `<div class="empty"><div class="glyph">⚠</div>${htmlEscape(e.message)}</div>`;
     return;
   }
   // Live first, then alpha.
@@ -3424,7 +3424,7 @@ async function renderWatch() {
   try {
     resp = await API.multistreamTiles(cw, ch, mode, window.location.host);
   } catch (e) {
-    watch.innerHTML = `<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`;
+    watch.innerHTML = `<div class="empty"><div class="glyph">⚠</div>${htmlEscape(e.message)}</div>`;
     return;
   }
   const streams = resp.streams || [];
@@ -3445,7 +3445,7 @@ async function renderWatch() {
     <div class="watch-toolbar">
       <span class="watch-count pg-cap-hint">${streams.length} live</span>
       ${modeBtn("auto", "▦ Auto")}
-      ${streams.map((s) => modeBtn("focus", `◉ ${escape(s.channel_name)}`, s.stream_id)).join("")}
+      ${streams.map((s) => modeBtn("focus", `◉ ${htmlEscape(s.channel_name)}`, s.stream_id)).join("")}
       ${streams.length >= 2 ? modeBtn("pip", "⧉ PiP", `${streams[0].stream_id}|${streams[1].stream_id}`) : ""}
       <span class="watch-tb-sep" aria-hidden="true">·</span>
       <button class="sm watch-mute-all ${muteAllPressed}" id="watch-mute-all" title="Mute every tile">🔇 Mute all</button>
@@ -3467,19 +3467,19 @@ async function renderWatch() {
     });
     const muted = effectiveSolo ? s.stream_id !== effectiveSolo : true;
     const audioBtn = muted
-      ? `<button class="watch-tile-btn watch-tile-unmute" title="Unmute this stream (mutes all others)" data-stream="${escape(s.stream_id)}">🔇</button>`
-      : `<button class="watch-tile-btn watch-tile-mute" title="Mute this stream" data-stream="${escape(s.stream_id)}">🔊</button>`;
+      ? `<button class="watch-tile-btn watch-tile-unmute" title="Unmute this stream (mutes all others)" data-stream="${htmlEscape(s.stream_id)}">🔇</button>`
+      : `<button class="watch-tile-btn watch-tile-mute" title="Mute this stream" data-stream="${htmlEscape(s.stream_id)}">🔊</button>`;
     tile.innerHTML = `
       <div class="watch-tile-head">
-        <span class="watch-tile-name">${escape(s.channel_name)}</span>
+        <span class="watch-tile-name">${htmlEscape(s.channel_name)}</span>
         <span class="watch-tile-meta">
-          <span class="watch-tile-plat pg-cap-hint" data-watch-meta="plat">${escape(s.platform)}${s.viewer_count != null ? ` · <span data-watch-meta="viewers">${formatCount(s.viewer_count)}</span>` : ""}</span>
+          <span class="watch-tile-plat pg-cap-hint" data-watch-meta="plat">${htmlEscape(s.platform)}${s.viewer_count != null ? ` · <span data-watch-meta="viewers">${formatCount(s.viewer_count)}</span>` : ""}</span>
           ${audioBtn}
-          <button class="watch-tile-btn watch-tile-fs" title="Fullscreen this tile" data-stream="${escape(s.stream_id)}">⛶</button>
+          <button class="watch-tile-btn watch-tile-fs" title="Fullscreen this tile" data-stream="${htmlEscape(s.stream_id)}">⛶</button>
         </span>
       </div>
       <iframe class="watch-tile-iframe" loading="lazy" allow="autoplay; fullscreen"
-              src="${escape(withMuted(s.embed_url, muted))}" allowfullscreen frameborder="0"></iframe>`;
+              src="${htmlEscape(withMuted(s.embed_url, muted))}" allowfullscreen frameborder="0"></iframe>`;
     stage.appendChild(tile);
   }
   watch.innerHTML = "";
@@ -3654,9 +3654,9 @@ function renderProUpsell(plugin, licence) {
     <div class="pg-upsell-card">
       <div class="pg-upsell-icon">★</div>
       <div class="pg-upsell-body">
-        <h2 class="pg-upsell-title">${escape(toTitleCase(plugin))} is a Strivo Pro plugin</h2>
-        <p class="pg-upsell-pitch">${escape(pitch)}</p>
-        <p class="pg-upsell-trial-note pg-cap-hint">${escape(trialNote)}</p>
+        <h2 class="pg-upsell-title">${htmlEscape(toTitleCase(plugin))} is a Strivo Pro plugin</h2>
+        <p class="pg-upsell-pitch">${htmlEscape(pitch)}</p>
+        <p class="pg-upsell-trial-note pg-cap-hint">${htmlEscape(trialNote)}</p>
         <div class="pg-upsell-actions">
           ${trialBtn}
           <span class="pg-upsell-sep">or</span>
@@ -3735,7 +3735,7 @@ async function renderPlugins() {
       return;
     }
     root.innerHTML = chrome(
-      `${pluginHeader("Plugins", "")}<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`,
+      `${pluginHeader("Plugins", "")}<div class="empty"><div class="glyph">⚠</div>${htmlEscape(e.message)}</div>`,
     );
     setupChromeHandlers();
   }
@@ -3748,7 +3748,7 @@ function pluginHeader(title, subtitle, backHref) {
     : "";
   return `
     ${back}
-    <h1 class="page-title">${escape(title)}</h1>
+    <h1 class="page-title">${htmlEscape(title)}</h1>
     ${subtitle ? `<p class="page-subtitle">${subtitle}</p>` : ""}
   `;
 }
@@ -3779,7 +3779,7 @@ async function renderPluginHub() {
       const statBits = Object.entries(stats)
         .map(
           ([k, v]) =>
-            `<span class="pg-stat"><strong>${formatCount(v)}</strong> ${escape(k.replace(/_/g, " "))}</span>`,
+            `<span class="pg-stat"><strong>${formatCount(v)}</strong> ${htmlEscape(k.replace(/_/g, " "))}</span>`,
         )
         .join("");
       // Locked Pro plugins never reach the SPA — the server filters
@@ -3794,29 +3794,29 @@ async function renderPluginHub() {
       const statsHtml = statBits
         ? `<div class="pg-stats">${statBits}</div>`
         : totalStats === 0 && PLUGIN_GETSTARTED[p.name]
-          ? `<div class="pg-getstarted"><strong>Get started:</strong> ${escape(PLUGIN_GETSTARTED[p.name])}</div>`
+          ? `<div class="pg-getstarted"><strong>Get started:</strong> ${htmlEscape(PLUGIN_GETSTARTED[p.name])}</div>`
           : '<div class="pg-stats"><span class="pg-stat muted">no data yet</span></div>';
       const verbs = Array.isArray(p.verbs) && p.verbs.length
         ? `<div class="pg-verbs">${p.verbs
             .map(
               (v) =>
-                `<span class="pg-verb-chip" title="${escape(v.scope ? `Scope: ${v.scope}` : "")}">${escape(v.label || v.verb)}</span>`,
+                `<span class="pg-verb-chip" title="${htmlEscape(v.scope ? `Scope: ${v.scope}` : "")}">${htmlEscape(v.label || v.verb)}</span>`,
             )
             .join("")}</div>`
         : "";
       const dataDir = p.data_dir
-        ? `<div class="pg-meta"><code title="Plugin data folder">${escape(p.data_dir)}</code></div>`
+        ? `<div class="pg-meta"><code title="Plugin data folder">${htmlEscape(p.data_dir)}</code></div>`
         : "";
       const body = `
         <div class="pg-card-head">
-          <span class="pg-icon pg-icon-${p.name}" aria-hidden="true">${escape((p.display || p.name)[0])}</span>
-          <span class="pg-card-name">${escape(p.display || p.name)}</span>
+          <span class="pg-icon pg-icon-${p.name}" aria-hidden="true">${htmlEscape((p.display || p.name)[0])}</span>
+          <span class="pg-card-name">${htmlEscape(p.display || p.name)}</span>
           ${status}
           <a class="pg-card-gear" href="#/settings/plugins"
              title="Open plugin manager"
              onclick="event.stopPropagation()">⚙</a>
         </div>
-        <p class="pg-card-desc">${escape(p.description || "")}</p>
+        <p class="pg-card-desc">${htmlEscape(p.description || "")}</p>
         ${statsHtml}
         ${verbs}
         ${dataDir}`;
@@ -3859,15 +3859,15 @@ function renderCapabilityMatrix(matrix) {
             // Two visible spans so CSS can give the state badge a pill of
             // its own — without the explicit element, `name+status` ran
             // together visually ("crunchravailable" / "chaptersroadmap").
-            `<a class="pg-cap-chip pg-cap-${escape(p.status)}" href="#/plugins/${escape(p.plugin)}" title="${escape(p.plugin)} · ${escape(p.status)}">
-              <span class="pg-cap-name">${escape(p.plugin)}</span>
-              <span class="pg-cap-state pg-cap-state-${escape(p.status)}">${escape(p.status)}</span>
+            `<a class="pg-cap-chip pg-cap-${htmlEscape(p.status)}" href="#/plugins/${htmlEscape(p.plugin)}" title="${htmlEscape(p.plugin)} · ${htmlEscape(p.status)}">
+              <span class="pg-cap-name">${htmlEscape(p.plugin)}</span>
+              <span class="pg-cap-state pg-cap-state-${htmlEscape(p.status)}">${htmlEscape(p.status)}</span>
             </a>`,
         )
         .join("");
       const label = row.capability.replace(/_/g, " ");
       return `<div class="pg-cap-row">
-        <span class="pg-cap-label">${escape(label)}</span>
+        <span class="pg-cap-label">${htmlEscape(label)}</span>
         <span class="pg-cap-providers">${chips}</span>
       </div>`;
     })
@@ -3908,35 +3908,35 @@ function renderMarketplaceSection(payload) {
       const status = entryStatus(m.entry_point);
       const caps = (m.capabilities || [])
         .slice(0, 6)
-        .map((c) => `<span class="pl-cap pl-cap-produces" title="provides">${escape(c.replace(/_/g, " "))}</span>`)
+        .map((c) => `<span class="pl-cap pl-cap-produces" title="provides">${htmlEscape(c.replace(/_/g, " "))}</span>`)
         .join("");
       const consumes = (m.consumes || [])
         .slice(0, 4)
-        .map((c) => `<span class="pl-cap pl-cap-consumes" title="needs">${escape(c.replace(/_/g, " "))}</span>`)
+        .map((c) => `<span class="pl-cap pl-cap-consumes" title="needs">${htmlEscape(c.replace(/_/g, " "))}</span>`)
         .join("");
       return `<div class="mk-card" style="--mk-c:${sColour}">
         <div class="mk-card-head">
-          <span class="mk-card-name">${escape(m.name)}</span>
-          <span class="mk-source">${escape(e.source)}</span>
+          <span class="mk-card-name">${htmlEscape(m.name)}</span>
+          <span class="mk-source">${htmlEscape(e.source)}</span>
         </div>
         <div class="mk-card-meta">
-          <span class="mk-version">v${escape(m.version)}</span>
-          <span class="mk-author">${escape(m.author)}</span>
+          <span class="mk-version">v${htmlEscape(m.version)}</span>
+          <span class="mk-author">${htmlEscape(m.author)}</span>
           ${fmtPrice(m.price_cents)}
         </div>
-        <p class="mk-desc">${escape(m.description)}</p>
+        <p class="mk-desc">${htmlEscape(m.description)}</p>
         <div class="mk-caps">${caps}${consumes}</div>
         <div class="mk-card-foot">
-          <span class="mk-status">${escape(status.label)}</span>
-          ${m.repository ? `<a class="pg-linkbtn" href="${escape(m.repository)}" target="_blank" rel="noopener">repository →</a>` : ""}
-          <button class="sm" type="button" disabled title="Install endpoint lands in a follow-up">${escape(status.action)}</button>
+          <span class="mk-status">${htmlEscape(status.label)}</span>
+          ${m.repository ? `<a class="pg-linkbtn" href="${htmlEscape(m.repository)}" target="_blank" rel="noopener">repository →</a>` : ""}
+          <button class="sm" type="button" disabled title="Install endpoint lands in a follow-up">${htmlEscape(status.action)}</button>
         </div>
       </div>`;
     })
     .join("");
   host.innerHTML = `
     <details class="pg-cap-matrix mk-section" open>
-      <summary><strong>Marketplace</strong> <span class="pg-cap-hint">third-party plugins · host v${escape(payload.host_version)}</span></summary>
+      <summary><strong>Marketplace</strong> <span class="pg-cap-hint">third-party plugins · host v${htmlEscape(payload.host_version)}</span></summary>
       <div class="mk-grid">${cards}</div>
     </details>`;
 }
@@ -3951,7 +3951,7 @@ function renderUpgradeCard(licence) {
   const implemented = licence.implemented === true;
   const trialDisabled = implemented ? "" : "disabled";
   return `
-    <section class="upgrade-card" data-tier="${escape(licence.tier || "free")}">
+    <section class="upgrade-card" data-tier="${htmlEscape(licence.tier || "free")}">
       <img class="upgrade-logo" src="/assets/img/chorosyne-logo.png" alt="Chorosyne" />
       <div class="upgrade-body">
         <h2 class="upgrade-title">Strivo Pro</h2>
@@ -4123,7 +4123,7 @@ async function runScheduleOptimizer() {
     schedOptState.lastResp = resp;
     paintScheduleOptimizer();
   } catch (err) {
-    out.innerHTML = `<h2 class="cfg-title">Recommendations</h2><div class="empty"><div class="glyph">⚠</div>${escape(err.message)}</div>`;
+    out.innerHTML = `<h2 class="cfg-title">Recommendations</h2><div class="empty"><div class="glyph">⚠</div>${htmlEscape(err.message)}</div>`;
   }
 }
 
@@ -4202,11 +4202,11 @@ async function renderCrunchr() {
       return `
         <a class="pg-row" href="#/plugins/crunchr/rec/${encodeURIComponent(r.recording_id)}">
           <span class="pg-row-main">
-            <span class="pg-row-title">${escape(niceTitle(r.title) || "(untitled)")}</span>
-            <span class="pg-row-sub">${escape(r.channel_name)} · ${escape(r.created_at || "")}</span>
+            <span class="pg-row-title">${htmlEscape(niceTitle(r.title) || "(untitled)")}</span>
+            <span class="pg-row-sub">${htmlEscape(r.channel_name)} · ${htmlEscape(r.created_at || "")}</span>
           </span>
           <span class="pg-row-meta">
-            <span class="cfg-badge status-${escape(r.status)}">${escape(r.status)}</span>
+            <span class="cfg-badge status-${htmlEscape(r.status)}">${htmlEscape(r.status)}</span>
             <span class="pg-row-num">${formatCount(r.segment_count)} segs</span>
             ${an}
           </span>
@@ -4245,15 +4245,15 @@ async function renderCrunchr() {
                 (h) => `
             <a class="pg-row" href="#/plugins/crunchr/rec/${encodeURIComponent(findRecIdForHit(recs, h))}">
               <span class="pg-row-main">
-                <span class="pg-row-title">${escape(h.snippet)}</span>
-                <span class="pg-row-sub">${escape(h.video_title)} · ${escape(h.channel_name)} · ${fmtClock(h.start_sec)}</span>
+                <span class="pg-row-title">${htmlEscape(h.snippet)}</span>
+                <span class="pg-row-sub">${htmlEscape(h.video_title)} · ${htmlEscape(h.channel_name)} · ${fmtClock(h.start_sec)}</span>
               </span>
             </a>`,
               )
               .join("")}</div>`
           : '<div class="empty sm">No matches.</div>';
       } catch (e) {
-        out.innerHTML = `<div class="empty sm">${escape(e.message)}</div>`;
+        out.innerHTML = `<div class="empty sm">${htmlEscape(e.message)}</div>`;
       }
     }, 220);
   });
@@ -4272,15 +4272,15 @@ async function renderCrunchrRecording(id) {
   const d = await API.crunchrRecording(id);
   root.removeAttribute("aria-busy");
   const topics = (d.topics || [])
-    .map((t) => `<span class="pg-chip">${escape(t)}</span>`)
+    .map((t) => `<span class="pg-chip">${htmlEscape(t)}</span>`)
     .join("");
   const sentiment = d.sentiment
-    ? `<span class="cfg-badge sentiment-${escape(d.sentiment)}">${escape(d.sentiment)}</span>`
+    ? `<span class="cfg-badge sentiment-${htmlEscape(d.sentiment)}">${htmlEscape(d.sentiment)}</span>`
     : "";
   const analysis = d.summary || topics || sentiment
     ? `<section class="cfg-card">
          <h2 class="cfg-title">Analysis ${sentiment}</h2>
-         ${d.summary ? `<p class="pg-summary">${escape(d.summary)}</p>` : ""}
+         ${d.summary ? `<p class="pg-summary">${htmlEscape(d.summary)}</p>` : ""}
          ${topics ? `<div class="pg-chips">${topics}</div>` : ""}
        </section>`
     : "";
@@ -4316,7 +4316,7 @@ async function renderCrunchrRecording(id) {
         ${speakers
           .map(
             (s) =>
-              `<button class="cr-chip is-active" data-spk="${escape(s)}" style="--cr-spk:${speakerColour(s)}" type="button"><span class="cr-chip-dot"></span>${escape(s)}</button>`,
+              `<button class="cr-chip is-active" data-spk="${htmlEscape(s)}" style="--cr-spk:${speakerColour(s)}" type="button"><span class="cr-chip-dot"></span>${htmlEscape(s)}</button>`,
           )
           .join("")}
       </div>`
@@ -4329,13 +4329,13 @@ async function renderCrunchrRecording(id) {
       const linesHtml = b.lines
         .map(
           (line) =>
-            `<span class="cr-line" data-seek="${line.start_sec ?? 0}" title="Open player at ${fmtClock(line.start_sec)}">${escape(line.text)}</span>`,
+            `<span class="cr-line" data-seek="${line.start_sec ?? 0}" title="Open player at ${fmtClock(line.start_sec)}">${htmlEscape(line.text)}</span>`,
         )
         .join(" ");
-      return `<div class="cr-block" data-spk="${escape(b.speaker || "")}">
+      return `<div class="cr-block" data-spk="${htmlEscape(b.speaker || "")}">
         <div class="cr-block-meta">
           <button class="cr-block-jump" data-seek="${firstStart}" title="Jump to ${fmtClock(firstStart)}">${fmtClock(firstStart)}</button>
-          ${b.speaker ? `<span class="cr-block-spk" style="--cr-spk:${colour}"><span class="cr-spk-dot"></span>${escape(b.speaker)}</span>` : ""}
+          ${b.speaker ? `<span class="cr-block-spk" style="--cr-spk:${colour}"><span class="cr-spk-dot"></span>${htmlEscape(b.speaker)}</span>` : ""}
         </div>
         <div class="cr-block-body">${linesHtml}</div>
       </div>`;
@@ -4343,9 +4343,9 @@ async function renderCrunchrRecording(id) {
     .join("");
 
   root.innerHTML = chrome(`
-    ${pluginHeader(d.title || "Transcript", `${escape(d.channel_name)} · ${escape(d.status)}`, "#/plugins/crunchr")}
+    ${pluginHeader(d.title || "Transcript", `${htmlEscape(d.channel_name)} · ${htmlEscape(d.status)}`, "#/plugins/crunchr")}
     <div class="pg-verbs">
-      <button id="retranscribe" data-rec="${escape(d.recording_id)}">↻ Re-transcribe</button>
+      <button id="retranscribe" data-rec="${htmlEscape(d.recording_id)}">↻ Re-transcribe</button>
       <a class="pg-linkbtn" href="#/plugins/insights/rec/${encodeURIComponent(d.recording_id)}">View insights →</a>
       <button id="cr-export-vtt" class="pg-linkbtn" type="button">Export .vtt</button>
       <button id="cr-export-md" class="pg-linkbtn" type="button">Copy as markdown</button>
@@ -4353,9 +4353,9 @@ async function renderCrunchrRecording(id) {
       <button id="cr-brandsafe" class="pg-linkbtn" type="button" title="Pre-publish brand-safety scan (slurs / profanity / restricted games / music mentions)">⚠ Brand-safety scan</button>
       <div class="cr-caption-export">
         <span class="cr-caption-label">Captions:</span>
-        <a class="pg-linkbtn" download href="${escape(API.captionsExportUrl(d.recording_id, "srt", "en"))}">.srt</a>
-        <a class="pg-linkbtn" download href="${escape(API.captionsExportUrl(d.recording_id, "vtt", "en"))}">.vtt</a>
-        <a class="pg-linkbtn" download href="${escape(API.captionsExportUrl(d.recording_id, "txt", "en"))}">.txt</a>
+        <a class="pg-linkbtn" download href="${htmlEscape(API.captionsExportUrl(d.recording_id, "srt", "en"))}">.srt</a>
+        <a class="pg-linkbtn" download href="${htmlEscape(API.captionsExportUrl(d.recording_id, "vtt", "en"))}">.vtt</a>
+        <a class="pg-linkbtn" download href="${htmlEscape(API.captionsExportUrl(d.recording_id, "txt", "en"))}">.txt</a>
         <select id="cr-caption-lang" title="Target language (translation backend ships in a follow-up; today returns identity)">
           <option value="en">en (identity)</option>
           <option value="es">es</option>
@@ -4408,7 +4408,7 @@ async function renderCrunchrRecording(id) {
         const bars = buckets
           .map((b) => `<span class="cr-hm-cell" style="--cr-hm-h:${Math.round(b[key] * 100)}%;--cr-hm-c:${colour};" title="${fmtClock(b.bucket_start)} · ${label} ${(b[key] * 100).toFixed(0)}%"></span>`)
           .join("");
-        return `<div class="cr-hm-row"><span class="cr-hm-label">${escape(label)}</span><div class="cr-hm-bars">${bars}</div></div>`;
+        return `<div class="cr-hm-row"><span class="cr-hm-label">${htmlEscape(label)}</span><div class="cr-hm-bars">${bars}</div></div>`;
       };
       const fusedRow = `<div class="cr-hm-row cr-hm-row-fused"><span class="cr-hm-label"><strong>fused</strong></span><div class="cr-hm-bars">${buckets
         .map((b) => `<a class="cr-hm-cell cr-hm-fused-bar" data-seek="${b.bucket_start}" href="#" style="--cr-hm-h:${Math.round(b.fused * 100)}%;--cr-hm-hue:${200 - Math.round((b.highlight - b.brandsafe) * 60)};" title="${fmtClock(b.bucket_start)} · retention ${(b.fused * 100).toFixed(0)}%"></a>`)
@@ -4571,7 +4571,7 @@ async function renderCrunchrRecording(id) {
       if (!card || !list || !count) return;
       card.hidden = false;
       count.innerHTML = verdicts.length
-        ? `<span class="pg-cap-hint">${verdicts.length} verdict${verdicts.length === 1 ? "" : "s"} · category "${escape(resp.category)}"</span>`
+        ? `<span class="pg-cap-hint">${verdicts.length} verdict${verdicts.length === 1 ? "" : "s"} · category "${htmlEscape(resp.category)}"</span>`
         : '<span class="cfg-badge ok">all clear</span>';
       if (!verdicts.length) {
         list.innerHTML = '<div class="empty sm">No content-safety risks detected. Scan covers slurs, profanity, restricted game categories, and music mentions.</div>';
@@ -4586,16 +4586,16 @@ async function renderCrunchrRecording(id) {
       list.innerHTML = verdicts
         .map(
           (v) => `
-        <div class="cr-bs-row sev-${escape(v.severity)}" style="--bs-c:${sevColour[v.severity] || sevColour.low}">
-          <span class="cr-bs-sev">${escape(v.severity)}</span>
+        <div class="cr-bs-row sev-${htmlEscape(v.severity)}" style="--bs-c:${sevColour[v.severity] || sevColour.low}">
+          <span class="cr-bs-sev">${htmlEscape(v.severity)}</span>
           <div class="cr-bs-body">
             <div class="cr-bs-head">
-              <span class="cr-bs-kind">${escape(v.kind.replace(/_/g, " "))}</span>
-              ${v.platform ? `<span class="mon-plat plat-${escape(v.platform.toLowerCase())}">${escape(v.platform)}</span>` : ""}
+              <span class="cr-bs-kind">${htmlEscape(v.kind.replace(/_/g, " "))}</span>
+              ${v.platform ? `<span class="mon-plat plat-${htmlEscape(v.platform.toLowerCase())}">${htmlEscape(v.platform)}</span>` : ""}
               ${typeof v.at_sec === "number" ? `<button class="cr-bs-jump" data-seek="${v.at_sec}">${fmtClock(v.at_sec)}</button>` : ""}
             </div>
-            <div class="cr-bs-snippet">${escape(v.snippet)}</div>
-            <div class="cr-bs-fix">${escape(v.fix_hint)}</div>
+            <div class="cr-bs-snippet">${htmlEscape(v.snippet)}</div>
+            <div class="cr-bs-fix">${htmlEscape(v.fix_hint)}</div>
           </div>
         </div>`,
         )
@@ -4619,7 +4619,7 @@ async function renderCrunchrRecording(id) {
       list.innerHTML = (resp.chapters || [])
         .map(
           (c) =>
-            `<a class="cr-chapter" href="#" data-seek="${c.start_sec}"><span class="cr-chapter-time">${fmtClock(c.start_sec)}</span><span class="cr-chapter-title">${escape(c.title)}</span></a>`,
+            `<a class="cr-chapter" href="#" data-seek="${c.start_sec}"><span class="cr-chapter-time">${fmtClock(c.start_sec)}</span><span class="cr-chapter-title">${htmlEscape(c.title)}</span></a>`,
         )
         .join("") || '<div class="empty sm">No chapter boundaries detected.</div>';
       pre.textContent = resp.description || "";
@@ -4674,8 +4674,8 @@ async function renderArchiver() {
       return `
         <a class="pg-row" href="#/plugins/archiver/${encodeURIComponent(c.id)}">
           <span class="pg-row-main">
-            <span class="pg-row-title">${escape(c.name)}</span>
-            <span class="pg-row-sub plat-${escape((c.platform || "").toLowerCase())}">${escape(c.platform)} · ${escape(c.last_scan || "never scanned")}</span>
+            <span class="pg-row-title">${htmlEscape(c.name)}</span>
+            <span class="pg-row-sub plat-${htmlEscape((c.platform || "").toLowerCase())}">${htmlEscape(c.platform)} · ${htmlEscape(c.last_scan || "never scanned")}</span>
           </span>
           <span class="pg-row-meta">
             <span class="pg-row-num">${formatCount(c.downloaded_count)} / ${formatCount(c.video_count)}</span>
@@ -4701,8 +4701,8 @@ async function renderArchiverVideos(channelId) {
       (v) => `
       <div class="pg-row pg-row-static">
         <span class="pg-row-main">
-          <span class="pg-row-title">${escape(niceTitle(v.title))}</span>
-          <span class="pg-row-sub">${escape(v.upload_date || "")}${v.playlist ? " · " + escape(v.playlist) : ""}${v.duration ? " · " + fmtClock(v.duration) : ""}</span>
+          <span class="pg-row-title">${htmlEscape(niceTitle(v.title))}</span>
+          <span class="pg-row-sub">${htmlEscape(v.upload_date || "")}${v.playlist ? " · " + htmlEscape(v.playlist) : ""}${v.duration ? " · " + fmtClock(v.duration) : ""}</span>
         </span>
         <span class="pg-row-meta">
           ${v.downloaded ? '<span class="cfg-badge ok">downloaded</span>' : '<span class="cfg-badge">pending</span>'}
@@ -4735,7 +4735,7 @@ async function renderViewguard() {
           const name = c.kind || c.detector || c.name || "signal";
           const score = c.score != null ? c.score : c.weight != null ? c.weight : 0;
           return `<div class="vg-contrib">
-              <span class="vg-contrib-name">${escape(String(name))}</span>
+              <span class="vg-contrib-name">${htmlEscape(String(name))}</span>
               <span class="vg-bar"><span style="width:${Math.round(score * 100)}%"></span></span>
             </div>`;
         })
@@ -4743,15 +4743,15 @@ async function renderViewguard() {
       return `
         <section class="cfg-card vg-card">
           <div class="vg-head">
-            <span class="vg-channel">${escape(v.channel_id)}</span>
-            <span class="cfg-badge vg-band vg-band-${escape((v.band || "").toLowerCase())}">${escape(v.band)}</span>
+            <span class="vg-channel">${htmlEscape(v.channel_id)}</span>
+            <span class="cfg-badge vg-band vg-band-${htmlEscape((v.band || "").toLowerCase())}">${htmlEscape(v.band)}</span>
           </div>
           <div class="vg-score">
             <span class="vg-score-num">${pct}%</span>
             <span class="vg-score-label">suspicion</span>
           </div>
           ${bars ? `<div class="vg-contribs">${bars}</div>` : ""}
-          <div class="vg-when">${escape(v.stream_started_at || "")}</div>
+          <div class="vg-when">${htmlEscape(v.stream_started_at || "")}</div>
         </section>`;
     })
     .join("");
@@ -4798,19 +4798,19 @@ function renderViewguardTrend(resp) {
         .map(
           (t) => `
         <div class="vg-trend-row" style="--vg-c:${colour}">
-          <span class="vg-trend-name">${escape(t.channel_name)}</span>
+          <span class="vg-trend-name">${htmlEscape(t.channel_name)}</span>
           <span class="vg-trend-score">${(t.latest_score * 100).toFixed(0)}%</span>
           <span class="vg-trend-dir" title="latest ${t.latest_score.toFixed(2)} vs rolling mean ${t.rolling_mean.toFixed(2)} (Δ ${t.delta >= 0 ? "+" : ""}${(t.delta * 100).toFixed(0)}pp)">
-            ${escape(directionGlyph[t.direction] || "→")} ${escape(t.direction)}
+            ${htmlEscape(directionGlyph[t.direction] || "→")} ${htmlEscape(t.direction)}
           </span>
           ${t.anomaly ? '<span class="vg-trend-anomaly" title="latest deviates from rolling mean by >20pp">anomaly</span>' : ""}
           <span class="vg-trend-samples">${t.samples} sample${t.samples === 1 ? "" : "s"}</span>
-          <span class="vg-trend-action">${escape(actionLabel[t.suggested_action] || t.suggested_action)}</span>
+          <span class="vg-trend-action">${htmlEscape(actionLabel[t.suggested_action] || t.suggested_action)}</span>
         </div>`,
         )
         .join("");
-      return `<details class="vg-trend-band" open data-band="${escape(key)}" style="--vg-c:${colour}">
-        <summary><strong>${escape(label)}</strong> <span class="pg-cap-hint">${list.length} channel${list.length === 1 ? "" : "s"}</span></summary>
+      return `<details class="vg-trend-band" open data-band="${htmlEscape(key)}" style="--vg-c:${colour}">
+        <summary><strong>${htmlEscape(label)}</strong> <span class="pg-cap-hint">${list.length} channel${list.length === 1 ? "" : "s"}</span></summary>
         <div class="vg-trend-list">${rows}</div>
       </details>`;
     })
@@ -4844,7 +4844,7 @@ async function renderInsights() {
     .map(
       (w) => `
       <div class="wf-row">
-        <span class="wf-word">${escape(w.word)}</span>
+        <span class="wf-word">${htmlEscape(w.word)}</span>
         <span class="wf-bar"><span style="width:${Math.round((w.count / max) * 100)}%"></span></span>
         <span class="wf-count">${formatCount(w.count)}</span>
       </div>`,
@@ -4855,7 +4855,7 @@ async function renderInsights() {
     .slice(0, 60)
     .map(
       (t) =>
-        `<span class="pg-chip" title="${escape(t.first_seen)} → ${escape(t.last_seen)}">${escape(t.topic)} <em>${t.count}</em></span>`,
+        `<span class="pg-chip" title="${htmlEscape(t.first_seen)} → ${htmlEscape(t.last_seen)}">${htmlEscape(t.topic)} <em>${t.count}</em></span>`,
     )
     .join("");
 
@@ -4864,7 +4864,7 @@ async function renderInsights() {
   const recOptions = allRecs
     .map(
       (r) =>
-        `<option value="${escape(r.recording_id)}">${escape(niceTitle(r.title) || r.recording_id)} · ${escape(r.channel_name)}</option>`,
+        `<option value="${htmlEscape(r.recording_id)}">${htmlEscape(niceTitle(r.title) || r.recording_id)} · ${htmlEscape(r.channel_name)}</option>`,
     )
     .join("");
 
@@ -4927,11 +4927,11 @@ async function renderInsights() {
         .slice(0, 30)
         .map(
           (s) =>
-            `<tr><td>${escape(s.word)}</td><td>${s.count_a}</td><td>${s.count_b}</td><td>${isFinite(s.a_over_b) ? s.a_over_b.toFixed(2) : "∞"}</td></tr>`,
+            `<tr><td>${htmlEscape(s.word)}</td><td>${s.count_a}</td><td>${s.count_b}</td><td>${isFinite(s.a_over_b) ? s.a_over_b.toFixed(2) : "∞"}</td></tr>`,
         )
         .join("");
-      const onlyA = (c.only_a || []).slice(0, 20).map((w) => `<li>${escape(w.word)} <em>${w.count}</em></li>`).join("");
-      const onlyB = (c.only_b || []).slice(0, 20).map((w) => `<li>${escape(w.word)} <em>${w.count}</em></li>`).join("");
+      const onlyA = (c.only_a || []).slice(0, 20).map((w) => `<li>${htmlEscape(w.word)} <em>${w.count}</em></li>`).join("");
+      const onlyB = (c.only_b || []).slice(0, 20).map((w) => `<li>${htmlEscape(w.word)} <em>${w.count}</em></li>`).join("");
       host.innerHTML = `
         <div class="ins-cmp-summary">
           <span class="cfg-badge">Jaccard ${(c.jaccard * 100).toFixed(0)}%</span>
@@ -4955,7 +4955,7 @@ async function renderInsights() {
           </div>
         </div>`;
     } catch (err) {
-      host.innerHTML = `<div class="empty sm">Compare failed: ${escape(err.message)}</div>`;
+      host.innerHTML = `<div class="empty sm">Compare failed: ${htmlEscape(err.message)}</div>`;
     }
   });
 }
@@ -4968,12 +4968,12 @@ async function loadInsightsSpeakers(recId) {
     const speakers = (r && r.speakers) || [];
     const max = speakers.reduce((m, s) => Math.max(m, s.seconds), 0) || 1;
     host.innerHTML = speakers.length
-      ? `${r.sentiment ? `<p class="page-subtitle">sentiment: <span class="cfg-badge sentiment-${escape(r.sentiment)}">${escape(r.sentiment)}</span></p>` : ""}
+      ? `${r.sentiment ? `<p class="page-subtitle">sentiment: <span class="cfg-badge sentiment-${htmlEscape(r.sentiment)}">${htmlEscape(r.sentiment)}</span></p>` : ""}
          ${speakers
            .map(
              (s) => `
         <div class="wf-row">
-          <span class="wf-word">${escape(s.speaker)}</span>
+          <span class="wf-word">${htmlEscape(s.speaker)}</span>
           <span class="wf-bar"><span style="width:${Math.round((s.seconds / max) * 100)}%"></span></span>
           <span class="wf-count">${fmtClock(s.seconds)}</span>
         </div>`,
@@ -4981,7 +4981,7 @@ async function loadInsightsSpeakers(recId) {
            .join("")}`
       : '<div class="empty sm">No diarized speakers for this recording.</div>';
   } catch (e) {
-    host.innerHTML = `<div class="empty sm">${escape(e.message)}</div>`;
+    host.innerHTML = `<div class="empty sm">${htmlEscape(e.message)}</div>`;
   }
 }
 
@@ -5093,33 +5093,33 @@ function probeSectionHtml(p) {
       <div class="empty sm">ffprobe unavailable or recording file missing.</div>
     </section>`;
   }
-  const meta = (k, v) => v ? `<dt>${escape(k)}</dt><dd>${v}</dd>` : "";
+  const meta = (k, v) => v ? `<dt>${htmlEscape(k)}</dt><dd>${v}</dd>` : "";
   const headBits = [
-    p.container && escape(p.container),
+    p.container && htmlEscape(p.container),
     fmtBitrate(p.bit_rate || 0),
   ].filter(Boolean).join(" · ");
   const vRows = (p.video || []).map((v) => {
     const bits = [
-      v.codec && escape(v.codec),
+      v.codec && htmlEscape(v.codec),
       (v.width && v.height) ? `${v.width}×${v.height}` : null,
       v.fps ? `${(+v.fps).toFixed(v.fps % 1 === 0 ? 0 : 2)} fps` : null,
       fmtBitrate(v.bit_rate || 0),
-      v.pix_fmt && escape(v.pix_fmt),
+      v.pix_fmt && htmlEscape(v.pix_fmt),
     ].filter(Boolean).join(" · ");
     return bits ? `<div class="rec-info-track">${bits}</div>` : "";
   }).join("");
   const aRows = (p.audio || []).map((a) => {
     const bits = [
-      a.codec && escape(a.codec),
-      a.channel_layout ? escape(a.channel_layout) : (a.channels ? `${a.channels} ch` : null),
+      a.codec && htmlEscape(a.codec),
+      a.channel_layout ? htmlEscape(a.channel_layout) : (a.channels ? `${a.channels} ch` : null),
       fmtHz(a.sample_rate || 0),
       fmtBitrate(a.bit_rate || 0),
-      a.language && escape(a.language),
+      a.language && htmlEscape(a.language),
     ].filter(Boolean).join(" · ");
     return bits ? `<div class="rec-info-track">${bits}</div>` : "";
   }).join("");
   const sRows = (p.subtitle || []).map((s) => {
-    const bits = [s.codec && escape(s.codec), s.language && escape(s.language)]
+    const bits = [s.codec && htmlEscape(s.codec), s.language && htmlEscape(s.language)]
       .filter(Boolean).join(" · ");
     return bits ? `<div class="rec-info-track">${bits}</div>` : "";
   }).join("");
@@ -5153,14 +5153,14 @@ async function openRecordingInfo(jobId) {
     ]);
   } catch (e) {
     overlay.querySelector(".modal-card").innerHTML =
-      `<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`;
+      `<div class="empty"><div class="glyph">⚠</div>${htmlEscape(e.message)}</div>`;
     return;
   }
 
   const state = stateLabel(rec.state);
   const stateClass = stateClassName(rec.state);
   const isFinished = stateClass === "finished";
-  const meta = (k, v) => `<dt>${escape(k)}</dt><dd>${v}</dd>`;
+  const meta = (k, v) => `<dt>${htmlEscape(k)}</dt><dd>${v}</dd>`;
   // Bullet-proof scope match: accept the canonical lowercase "recording",
   // the Rust-debug form "Item(Recording)", or any string whose lowercase
   // contains "recording". Keeps the SPA right whether the index handler
@@ -5187,31 +5187,31 @@ async function openRecordingInfo(jobId) {
     : "";
   const verbBtns = recordingVerbs.map((v) => `
       <button class="sm" data-action="rec-info-verb"
-              data-plugin="${escape(v.plugin)}"
-              data-verb="${escape(v.verb)}">
-        ${escape(v.label || v.verb)}
+              data-plugin="${htmlEscape(v.plugin)}"
+              data-verb="${htmlEscape(v.verb)}">
+        ${htmlEscape(v.label || v.verb)}
       </button>`).join("");
   const actionsHtml = (verbBtns + showTranscriptHtml) ||
     `<div class="empty sm">No plugin actions available.</div>`;
 
   overlay.querySelector(".modal-card").innerHTML = `
     <header class="rec-info-head">
-      <span class="state-pill ${stateClass}">${escape(state)}</span>
-      <h2>${escape(niceTitle(rec.stream_title) || "(no title)")}</h2>
+      <span class="state-pill ${stateClass}">${htmlEscape(state)}</span>
+      <h2>${htmlEscape(niceTitle(rec.stream_title) || "(no title)")}</h2>
       <button class="modal-close" aria-label="Close" data-action="modal-close">✕</button>
     </header>
     <div class="rec-info-body">
       <div class="rec-info-thumb">${recThumb(rec)}</div>
       <dl class="rec-info-stats">
-        ${meta("Channel", escape(rec.channel_name || ""))}
-        ${meta("Platform", `<span class="plat-${escape((rec.platform || "").toLowerCase())}">${escape(rec.platform || "")}</span>`)}
-        ${meta("Started", escape(rec.started_at ? new Date(rec.started_at).toLocaleString() : "—"))}
-        ${meta("Duration", escape(rec.duration_secs ? fmtClock(rec.duration_secs) : "—"))}
-        ${meta("Size", escape(formatBytes(rec.bytes_written || 0)))}
+        ${meta("Channel", htmlEscape(rec.channel_name || ""))}
+        ${meta("Platform", `<span class="plat-${htmlEscape((rec.platform || "").toLowerCase())}">${htmlEscape(rec.platform || "")}</span>`)}
+        ${meta("Started", htmlEscape(rec.started_at ? new Date(rec.started_at).toLocaleString() : "—"))}
+        ${meta("Duration", htmlEscape(rec.duration_secs ? fmtClock(rec.duration_secs) : "—"))}
+        ${meta("Size", htmlEscape(formatBytes(rec.bytes_written || 0)))}
         ${meta("Transcode", rec.transcode ? "yes" : "no")}
-        ${rec.source_url ? meta("Source", `<a href="${escape(rec.source_url)}" target="_blank" rel="noopener">${escape(rec.source_url)}</a>`) : ""}
-        ${rec.output_path ? meta("File", `<span class="rec-info-pathwrap"><code class="rec-info-path">${escape(rec.output_path)}</code><button class="rec-copy" data-copy="${escape(rec.output_path)}" title="Copy path">⧉</button></span>`) : ""}
-        ${rec.error ? meta("Error", `<span class="cfg-badge err">${escape(rec.error)}</span>`) : ""}
+        ${rec.source_url ? meta("Source", `<a href="${htmlEscape(rec.source_url)}" target="_blank" rel="noopener">${htmlEscape(rec.source_url)}</a>`) : ""}
+        ${rec.output_path ? meta("File", `<span class="rec-info-pathwrap"><code class="rec-info-path">${htmlEscape(rec.output_path)}</code><button class="rec-copy" data-copy="${htmlEscape(rec.output_path)}" title="Copy path">⧉</button></span>`) : ""}
+        ${rec.error ? meta("Error", `<span class="cfg-badge err">${htmlEscape(rec.error)}</span>`) : ""}
       </dl>
     </div>
     ${probeSectionHtml(probe)}
@@ -5318,7 +5318,7 @@ async function openRecordingInfo(jobId) {
                 </span>
                 <span class="rec-hl-meta">${h.density} cuepoint${h.density === 1 ? "" : "s"} · ${h.suggested_duration}s</span>
                 ${cut
-                  ? `<span class="cfg-badge ok" title="${escape(cut.clip_path)}">✓ cut · ${formatBytes(cut.bytes)}</span>`
+                  ? `<span class="cfg-badge ok" title="${htmlEscape(cut.clip_path)}">✓ cut · ${formatBytes(cut.bytes)}</span>`
                   : `<button class="sm rec-hl-cut" data-start="${h.time_sec}" data-dur="${h.suggested_duration}">Cut clip</button>`}
               </div>`;
             })
@@ -5341,7 +5341,7 @@ async function openRecordingInfo(jobId) {
               stem: `${niceTitle(rec.stream_title).replace(/[^a-zA-Z0-9_-]+/g, "_").slice(0, 60)}_${Math.round(parseFloat(cb.dataset.start))}`,
             });
             Toast.success(`Cut ${formatBytes(res.bytes)} → ${res.clip_path}`);
-            cb.outerHTML = `<span class="cfg-badge ok" title="${escape(res.clip_path)}">✓ cut · ${formatBytes(res.bytes)}</span>`;
+            cb.outerHTML = `<span class="cfg-badge ok" title="${htmlEscape(res.clip_path)}">✓ cut · ${formatBytes(res.bytes)}</span>`;
           }).catch((err) => Toast.error(`Cut failed: ${err.message}`));
         });
       });
@@ -5371,8 +5371,8 @@ async function openRecordingInfo(jobId) {
             .map(
               (c, i) =>
                 `<figure class="rec-thumb-card" data-i="${i}">
-                  <a class="rec-thumb-img" href="${escape(API.thumbnailFileUrl(c.path))}" target="_blank" rel="noopener">
-                    <img loading="lazy" alt="" src="${escape(API.thumbnailFileUrl(c.path))}" />
+                  <a class="rec-thumb-img" href="${htmlEscape(API.thumbnailFileUrl(c.path))}" target="_blank" rel="noopener">
+                    <img loading="lazy" alt="" src="${htmlEscape(API.thumbnailFileUrl(c.path))}" />
                     <span class="rec-thumb-time">${fmtClock(c.time_sec)}</span>
                   </a>
                   <figcaption>
@@ -5380,7 +5380,7 @@ async function openRecordingInfo(jobId) {
                       <span class="rec-hl-bar" style="--rec-hl-pct:${(c.score * 100).toFixed(0)}%"></span>
                       <span>${Math.round(c.score * 100)}%</span>
                     </span>
-                    ${c.crop_path ? `<a class="pg-linkbtn" href="${escape(API.thumbnailFileUrl(c.crop_path))}" target="_blank" rel="noopener" title="9:16 facecam crop">9:16 crop</a>` : ""}
+                    ${c.crop_path ? `<a class="pg-linkbtn" href="${htmlEscape(API.thumbnailFileUrl(c.crop_path))}" target="_blank" rel="noopener" title="9:16 facecam crop">9:16 crop</a>` : ""}
                   </figcaption>
                 </figure>`,
             )
@@ -5427,8 +5427,8 @@ async function openRecordingInfo(jobId) {
                 (c, i) => `
               <div class="rec-ed-row" data-i="${i}">
                 <span class="rec-ed-idx">${i + 1}</span>
-                <span class="rec-ed-kind ${escape(c.kind.kind || "source")}">${escape(c.kind.kind || "source")}</span>
-                <span class="rec-ed-src">${escape((c.kind.source_path || c.kind.broll_path || "").split("/").slice(-1)[0])}</span>
+                <span class="rec-ed-kind ${htmlEscape(c.kind.kind || "source")}">${htmlEscape(c.kind.kind || "source")}</span>
+                <span class="rec-ed-src">${htmlEscape((c.kind.source_path || c.kind.broll_path || "").split("/").slice(-1)[0])}</span>
                 <span class="rec-ed-time">${fmtClock(c.start_sec)} → ${fmtClock(c.end_sec)} · ${fmtClock(c.end_sec - c.start_sec)}</span>
                 <button class="sm rec-ed-trim" data-i="${i}" type="button" title="Trim this cut">trim</button>
                 <button class="sm danger rec-ed-rm" data-i="${i}" type="button" title="Remove this cut">✕</button>
@@ -5726,11 +5726,11 @@ async function openRecordingInfo(jobId) {
             const renderStages = () => (chain.effects || []).map((eff, i) => {
               const params = Object.entries(eff)
                 .filter(([k]) => k !== "kind")
-                .map(([k, v]) => `${k}=${typeof v === "number" ? v : escape(String(v))}`)
+                .map(([k, v]) => `${k}=${typeof v === "number" ? v : htmlEscape(String(v))}`)
                 .join(" · ");
               return `<div class="rec-ifx-stage" data-i="${i}">
                 <span class="rec-ifx-num">${i + 1}</span>
-                <span class="rec-ifx-kind">${escape(eff.kind || "?")}</span>
+                <span class="rec-ifx-kind">${htmlEscape(eff.kind || "?")}</span>
                 <span class="rec-ifx-params pg-cap-hint">${params}</span>
                 <button class="sm danger rec-ifx-rm" type="button" title="Remove stage">✕</button>
               </div>`;
@@ -5749,7 +5749,7 @@ async function openRecordingInfo(jobId) {
                   <button class="btn-primary rec-ifx-save" type="button">Save chain</button>
                   <span class="pg-cap-hint">Saved chains bake into one ffmpeg <code>-af</code> at render.</span>
                 </div>
-                <pre class="rec-ifx-filter" title="ffmpeg -af value this chain produces">${escape(r.audio_filter || chain_to_filter_preview(chain))}</pre>
+                <pre class="rec-ifx-filter" title="ffmpeg -af value this chain produces">${htmlEscape(r.audio_filter || chain_to_filter_preview(chain))}</pre>
               `;
               panel.querySelector(".rec-ifx-voice").addEventListener("click", async (ev) => {
                 await withBusy(ev.currentTarget, "Installing voice…", async () => {
@@ -5895,7 +5895,7 @@ async function openRecordingInfo(jobId) {
             const renderBanners = () => (spec.banners || []).map((b, i) => `
               <div class="rec-br-banner" data-i="${i}">
                 <select class="rec-br-slot"><option value="intro"${b.slot==="intro"?" selected":""}>intro</option><option value="outro"${b.slot==="outro"?" selected":""}>outro</option></select>
-                <input class="rec-br-text" type="text" value="${escape(b.text||"")}" placeholder="Banner text"/>
+                <input class="rec-br-text" type="text" value="${htmlEscape(b.text||"")}" placeholder="Banner text"/>
                 <select class="rec-br-anchor">${anchorOpts(b.anchor)}</select>
                 <input class="rec-br-dur" type="number" step="0.5" min="0.5" max="60" value="${b.duration_secs||3}" title="Visible duration (sec)"/>
                 <button class="sm danger rec-br-rmb" type="button" title="Remove banner">✕</button>
@@ -5905,7 +5905,7 @@ async function openRecordingInfo(jobId) {
               <h5>Branding overlay</h5>
               <div class="rec-br-wm">
                 <label class="rec-br-on"><input type="checkbox" class="rec-br-enabled" ${spec.watermark ? "checked" : ""}/> Watermark</label>
-                <input class="rec-br-wtext" type="text" value="${escape(wm.source?.text||"@channel")}" placeholder="Watermark text"/>
+                <input class="rec-br-wtext" type="text" value="${htmlEscape(wm.source?.text||"@channel")}" placeholder="Watermark text"/>
                 <select class="rec-br-wanchor">${anchorOpts(wm.anchor)}</select>
                 <input class="rec-br-wop" type="number" step="0.05" min="0" max="1" value="${wm.opacity ?? 0.7}" title="Opacity (0–1)"/>
               </div>
@@ -5915,7 +5915,7 @@ async function openRecordingInfo(jobId) {
                 <button class="btn-primary rec-br-save" type="button">Save</button>
                 <span class="rec-br-preview pg-cap-hint"></span>
               </div>
-              <pre class="rec-br-filter" title="filter_complex this spec produces">${escape(r.filter_complex||"")}</pre>
+              <pre class="rec-br-filter" title="filter_complex this spec produces">${htmlEscape(r.filter_complex||"")}</pre>
             `;
             const collect = () => {
               const enabled = panel.querySelector(".rec-br-enabled").checked;
@@ -5965,8 +5965,7 @@ async function openRecordingInfo(jobId) {
             });
           }).catch((err) => Toast.error(`Branding failed: ${err.message}`));
         });
-        host.querySelector(".rec-ed-loudness")?.addEventListener("click", async (e2) => {
-          const lbtn = e2.currentTarget;
+        host.querySelector(".rec-ed-loudness")?.addEventListener("click", async (_e2) => {
           const panel = host.querySelector(".rec-loudness");
           if (!panel) return;
           panel.hidden = false;
@@ -5999,7 +5998,7 @@ async function openRecordingInfo(jobId) {
                 const d = r.delta;
                 const dRow = (label, value, target, delta, unit) => `
                   <div class="rec-loud-row">
-                    <span class="rec-loud-label">${escape(label)}</span>
+                    <span class="rec-loud-label">${htmlEscape(label)}</span>
                     <span class="rec-loud-meas">${value.toFixed(2)} ${unit}</span>
                     <span class="rec-loud-target">target ${target.toFixed(2)} ${unit}</span>
                     <span class="rec-loud-delta ${delta >= 0 ? "over" : "under"}">${delta >= 0 ? "+" : ""}${delta.toFixed(2)} ${unit}</span>
@@ -6011,11 +6010,11 @@ async function openRecordingInfo(jobId) {
                   ${dRow("Loudness range (LRA)", m.input_lra,  r.target.lra, d.lra_delta, "LU")}
                   <details class="rec-loud-filter">
                     <summary>Pass-2 ffmpeg filter</summary>
-                    <pre>${escape(r.pass2_filter)}</pre>
+                    <pre>${htmlEscape(r.pass2_filter)}</pre>
                   </details>`;
                 Toast.success(`Measured · I=${m.input_i.toFixed(2)} LUFS (Δ ${d.i_delta >= 0 ? "+" : ""}${d.i_delta.toFixed(2)})`);
               } catch (err) {
-                out.innerHTML = `<div class="empty sm">⚠ ${escape(err.message)}</div>`;
+                out.innerHTML = `<div class="empty sm">⚠ ${htmlEscape(err.message)}</div>`;
               }
             });
           });
@@ -6038,8 +6037,8 @@ async function openRecordingInfo(jobId) {
                 ${revs.map((v, i) => `
                   <div class="rec-hist-row" data-rev="${v.revision_id}">
                     <span class="rec-hist-idx">v${revs.length - i}</span>
-                    <span class="rec-hist-label">${escape(v.label)}</span>
-                    <span class="rec-hist-meta pg-cap-hint">${v.cut_count} cut${v.cut_count===1?"":"s"} · ${fmtClock(v.total_duration_sec)} · ${escape(v.created_at.replace("T"," ").split(".")[0])}</span>
+                    <span class="rec-hist-label">${htmlEscape(v.label)}</span>
+                    <span class="rec-hist-meta pg-cap-hint">${v.cut_count} cut${v.cut_count===1?"":"s"} · ${fmtClock(v.total_duration_sec)} · ${htmlEscape(v.created_at.replace("T"," ").split(".")[0])}</span>
                     <button class="sm rec-hist-restore" type="button" title="Restore this revision as the current EDL">Restore</button>
                   </div>`).join("")}
               </div>
@@ -6069,13 +6068,13 @@ async function openRecordingInfo(jobId) {
             const scenes = r.scenes || [];
             panel.hidden = false;
             const sceneRows = scenes.map((s) => `
-              <div class="rec-scene-row" data-scene-id="${escape(s.id)}">
+              <div class="rec-scene-row" data-scene-id="${htmlEscape(s.id)}">
                 <div class="rec-scene-head">
-                  <span class="rec-scene-name">${escape(s.name)}</span>
-                  <span class="rec-scene-meta pg-cap-hint">${(s.component_keys || []).length} component${(s.component_keys||[]).length===1?"":"s"} · ${formatBytes(s.size_bytes || 0)} · ${escape(s.created_at.replace("T"," ").split(".")[0])}</span>
+                  <span class="rec-scene-name">${htmlEscape(s.name)}</span>
+                  <span class="rec-scene-meta pg-cap-hint">${(s.component_keys || []).length} component${(s.component_keys||[]).length===1?"":"s"} · ${formatBytes(s.size_bytes || 0)} · ${htmlEscape(s.created_at.replace("T"," ").split(".")[0])}</span>
                 </div>
                 <div class="rec-scene-tags">
-                  ${(s.component_keys || []).map(k => `<span class="rec-scene-tag">${escape(k)}</span>`).join("")}
+                  ${(s.component_keys || []).map(k => `<span class="rec-scene-tag">${htmlEscape(k)}</span>`).join("")}
                 </div>
                 <div class="rec-scene-actions">
                   <button class="sm rec-scene-restore" type="button" title="Restore this scene as the current state">Restore</button>
@@ -6164,18 +6163,18 @@ async function openRecordingInfo(jobId) {
       const sectionHtml = (report.sections || [])
         .map(
           (s) => `<details class="rec-cb-section" open>
-            <summary><span class="rec-cb-h">${escape(s.heading)}</span></summary>
+            <summary><span class="rec-cb-h">${htmlEscape(s.heading)}</span></summary>
             <div class="rec-cb-body">${md_to_html(s.body)}</div>
           </details>`,
         )
         .join("");
       const titlesHtml = (report.suggested_titles || [])
-        .map((t) => `<li>${escape(t)}</li>`)
+        .map((t) => `<li>${htmlEscape(t)}</li>`)
         .join("");
       host.innerHTML = `
-        <h4 class="rec-cp-title">Casebook · ${escape(report.title || "")} <span class="pg-cap-hint">${report.sections.length} sections · ${report.suggested_titles.length} title ideas</span></h4>
+        <h4 class="rec-cp-title">Casebook · ${htmlEscape(report.title || "")} <span class="pg-cap-hint">${report.sections.length} sections · ${report.suggested_titles.length} title ideas</span></h4>
         <div class="rec-cb-actions">
-          <a class="pg-linkbtn" href="${escape(API.casebookMarkdownUrl(jobId))}" download>Download .md</a>
+          <a class="pg-linkbtn" href="${htmlEscape(API.casebookMarkdownUrl(jobId))}" download>Download .md</a>
           <button class="sm rec-cb-copy" type="button">Copy markdown</button>
         </div>
         ${titlesHtml ? `<details class="rec-cb-section"><summary><span class="rec-cb-h">Suggested titles</span></summary><ul class="rec-cb-titles">${titlesHtml}</ul></details>` : ""}
@@ -6228,15 +6227,15 @@ async function openRecordingInfo(jobId) {
               (d, i) => `
             <details class="rec-ru-card" style="--ru-c:${fmtColour[d.format] || fmtColour.blog}" data-i="${i}">
               <summary>
-                <span class="rec-ru-fmt">${escape(fmtLabel[d.format] || d.format)}</span>
-                <span class="rec-ru-meta">${escape(d.aspect)} · ${d.duration_sec > 0 ? fmtClock(d.duration_sec) : "—"}${d.clip_starts.length ? ` · ${d.clip_starts.length} clips` : ""}</span>
+                <span class="rec-ru-fmt">${htmlEscape(fmtLabel[d.format] || d.format)}</span>
+                <span class="rec-ru-meta">${htmlEscape(d.aspect)} · ${d.duration_sec > 0 ? fmtClock(d.duration_sec) : "—"}${d.clip_starts.length ? ` · ${d.clip_starts.length} clips` : ""}</span>
               </summary>
               <div class="rec-ru-body">
                 <h5>Title</h5>
-                <div class="rec-ru-title">${escape(d.title)}</div>
+                <div class="rec-ru-title">${htmlEscape(d.title)}</div>
                 <h5>Description</h5>
-                <pre class="rec-ru-desc">${escape(d.description)}</pre>
-                ${d.hashtags.length ? `<h5>Hashtags</h5><div class="rec-ru-tags">${d.hashtags.map((t) => `<span class="cfg-badge">${escape(t)}</span>`).join("")}</div>` : ""}
+                <pre class="rec-ru-desc">${htmlEscape(d.description)}</pre>
+                ${d.hashtags.length ? `<h5>Hashtags</h5><div class="rec-ru-tags">${d.hashtags.map((t) => `<span class="cfg-badge">${htmlEscape(t)}</span>`).join("")}</div>` : ""}
                 <div class="rec-ru-actions">
                   <button class="sm rec-ru-copy-title" data-i="${i}">Copy title</button>
                   <button class="sm rec-ru-copy-desc" data-i="${i}">Copy description</button>
@@ -6292,10 +6291,10 @@ async function openRecordingInfo(jobId) {
             .map(
               (t) => `
             <div class="rec-tk-row" data-idx="${t.index}">
-              <span class="rec-tk-kind" style="--rec-tk-c:${KIND_COLOUR[t.inferred_kind] || KIND_COLOUR.other}">${escape(t.inferred_kind)}</span>
-              <span class="rec-tk-label">${escape(t.title || `track ${t.index}`)}</span>
+              <span class="rec-tk-kind" style="--rec-tk-c:${KIND_COLOUR[t.inferred_kind] || KIND_COLOUR.other}">${htmlEscape(t.inferred_kind)}</span>
+              <span class="rec-tk-label">${htmlEscape(t.title || `track ${t.index}`)}</span>
               <span class="rec-tk-meta">${t.codec} · ${t.channels}ch · ${t.sample_rate ? t.sample_rate + " Hz" : "?"}</span>
-              <button class="sm rec-tk-extract" data-idx="${t.index}" data-stem="${escape((t.title || `track_${t.index}`).replace(/[^A-Za-z0-9_-]+/g, "_"))}">Extract</button>
+              <button class="sm rec-tk-extract" data-idx="${t.index}" data-stem="${htmlEscape((t.title || `track_${t.index}`).replace(/[^A-Za-z0-9_-]+/g, "_"))}">Extract</button>
             </div>`,
             )
             .join("")}
@@ -6309,7 +6308,7 @@ async function openRecordingInfo(jobId) {
               stem: b.dataset.stem,
             });
             Toast.success(`Cut ${formatBytes(res.bytes)} → ${res.output_path}`);
-            b.outerHTML = `<span class="cfg-badge ok" title="${escape(res.output_path)}">✓ ${formatBytes(res.bytes)}</span>`;
+            b.outerHTML = `<span class="cfg-badge ok" title="${htmlEscape(res.output_path)}">✓ ${formatBytes(res.bytes)}</span>`;
           }).catch((err) => Toast.error(`Extract failed: ${err.message}`));
         });
       });
@@ -6366,7 +6365,7 @@ async function openRecordingInfo(jobId) {
 // video API allows. State is owned by the modal; no globals (except the
 // modal-open class) leak out.
 
-async function openRecordingPlayer(jobId, opts = {}) {
+async function openRecordingPlayer(jobId, _opts = {}) {
   closeRecordingModals();
   // Defensive: if the keymap was left open from an earlier session it
   // shouldn't obscure the player. Belt to the Shift+I binding above.
@@ -6381,7 +6380,7 @@ async function openRecordingPlayer(jobId, opts = {}) {
     rec = await API.recordingOne(jobId);
   } catch (e) {
     overlay.querySelector(".modal-card").innerHTML =
-      `<div class="empty"><div class="glyph">⚠</div>${escape(e.message)}</div>`;
+      `<div class="empty"><div class="glyph">⚠</div>${htmlEscape(e.message)}</div>`;
     return;
   }
 
@@ -6389,7 +6388,7 @@ async function openRecordingPlayer(jobId, opts = {}) {
   const captionsUrl = `/api/v1/recordings/${encodeURIComponent(jobId)}/captions.vtt`;
   overlay.querySelector(".modal-card").innerHTML = `
     <header class="rec-player-head">
-      <h2 class="rec-player-title">${escape(niceTitle(rec.stream_title) || rec.channel_name || "Recording")}</h2>
+      <h2 class="rec-player-title">${htmlEscape(niceTitle(rec.stream_title) || rec.channel_name || "Recording")}</h2>
       <button class="modal-close" aria-label="Close" data-action="modal-close">✕</button>
     </header>
     <div class="rec-player-stage">
@@ -6598,10 +6597,10 @@ function wirePlayer(overlay, v) {
 function renderStub(title, msg) {
   root.removeAttribute("aria-busy");
   root.innerHTML = chrome(`
-    <h1 class="page-title">${escape(title)}</h1>
+    <h1 class="page-title">${htmlEscape(title)}</h1>
     <div class="empty">
       <div class="glyph">🚧</div>
-      ${escape(msg)}
+      ${htmlEscape(msg)}
     </div>
   `);
   setupChromeHandlers();
@@ -6644,7 +6643,7 @@ async function renderSettings() {
     <a class="stg-rail-item ${sec.slug === known ? "is-active" : ""}"
        href="#/settings/${sec.slug}">
       <span class="stg-rail-icon" aria-hidden="true">${sec.icon}</span>
-      <span class="stg-rail-label">${escape(sec.label)}</span>
+      <span class="stg-rail-label">${htmlEscape(sec.label)}</span>
     </a>`).join("");
 
   const pane = renderSettingsPane(known, s);
@@ -6727,7 +6726,7 @@ function wireSettingsControls() {
     render().catch(() => {});
   });
   pane.querySelectorAll("[data-stg-path]").forEach((el) => {
-    el.addEventListener("change", async (e) => {
+    el.addEventListener("change", async () => {
       const path = el.getAttribute("data-stg-path");
       let value;
       if (el.type === "checkbox") value = el.checked;
@@ -6757,27 +6756,27 @@ function renderSettingsPane(slug, s) {
   const ui = s.ui || {};
   const badge = (ok, okText, noText) =>
     `<span class="cfg-badge ${ok ? "ok" : "warn"}">${ok ? okText : noText}</span>`;
-  const code = (v) => `<code>${escape(v || "—")}</code>`;
+  const code = (v) => `<code>${htmlEscape(v || "—")}</code>`;
   // Editable controls: rendered as live inputs bound to a config path.
   // wireSettingsControls() picks them up via [data-stg-path].
   const toggle = (path, checked) => `
     <label class="stg-toggle">
-      <input type="checkbox" data-stg-path="${escape(path)}" ${checked ? "checked" : ""} />
+      <input type="checkbox" data-stg-path="${htmlEscape(path)}" ${checked ? "checked" : ""} />
       <span class="stg-toggle-track"><span class="stg-toggle-knob"></span></span>
     </label>`;
   const numInput = (path, value, min, max) => `
-    <input class="stg-num" type="number" data-stg-path="${escape(path)}"
+    <input class="stg-num" type="number" data-stg-path="${htmlEscape(path)}"
            data-prev="${value ?? ""}" value="${value ?? ""}"
            min="${min}" max="${max}" step="1" />`;
   const textInput = (path, value, placeholder = "") => `
-    <input class="stg-text" type="text" data-stg-path="${escape(path)}"
-           data-prev="${escape(value ?? "")}" value="${escape(value ?? "")}"
-           placeholder="${escape(placeholder)}" spellcheck="false" />`;
+    <input class="stg-text" type="text" data-stg-path="${htmlEscape(path)}"
+           data-prev="${htmlEscape(value ?? "")}" value="${htmlEscape(value ?? "")}"
+           placeholder="${htmlEscape(placeholder)}" spellcheck="false" />`;
   const selectInput = (path, value, opts) => {
     const options = opts
-      .map((o) => `<option value="${escape(o)}"${o === value ? " selected" : ""}>${escape(o)}</option>`)
+      .map((o) => `<option value="${htmlEscape(o)}"${o === value ? " selected" : ""}>${htmlEscape(o)}</option>`)
       .join("");
-    return `<select class="stg-select" data-stg-path="${escape(path)}" data-prev="${escape(value ?? "")}">${options}</select>`;
+    return `<select class="stg-select" data-stg-path="${htmlEscape(path)}" data-prev="${htmlEscape(value ?? "")}">${options}</select>`;
   };
   // Filename template token reference shown via the ⓘ hover hint.
   const TEMPLATE_TOKENS_HINT =
@@ -6787,14 +6786,14 @@ function renderSettingsPane(slug, s) {
   const row = (label, value, hint) => `
     <div class="stg-row">
       <div class="stg-row-label">
-        ${escape(label)}
-        ${hint ? `<span class="stg-hint" title="${escape(hint)}" aria-label="${escape(hint)}">ⓘ</span>` : ""}
+        ${htmlEscape(label)}
+        ${hint ? `<span class="stg-hint" title="${htmlEscape(hint)}" aria-label="${htmlEscape(hint)}">ⓘ</span>` : ""}
       </div>
       <div class="stg-row-value">${value}</div>
     </div>`;
   const group = (title, rows) => `
     <section class="stg-group">
-      <h3 class="stg-group-title">${escape(title)}</h3>
+      <h3 class="stg-group-title">${htmlEscape(title)}</h3>
       <div class="stg-rows">${rows}</div>
     </section>`;
 
@@ -6910,7 +6909,7 @@ function renderSettingsPane(slug, s) {
           <div class="stg-row-label">Status</div>
           <div class="stg-row-value">
             ${badge(statusOk, "configured", "not configured")}
-            <button class="stg-linkbtn stg-cfg-btn" data-platform="${escape(key)}" type="button">
+            <button class="stg-linkbtn stg-cfg-btn" data-platform="${htmlEscape(key)}" type="button">
               ${statusOk ? "Reconfigure" : "Configure"} →
             </button>
           </div>
@@ -6954,13 +6953,13 @@ function renderSettingsPane(slug, s) {
       };
       const pluginRow = (meta) => {
         const open = meta.route
-          ? `<a href="${escape(meta.route)}" class="stg-linkbtn">Open →</a>`
+          ? `<a href="${htmlEscape(meta.route)}" class="stg-linkbtn">Open →</a>`
           : `<a href="#/plugins" class="stg-linkbtn">View in hub →</a>`;
         return `
-          <div class="stg-row stg-plugin-row" data-plugin-name="${escape(meta.name)}">
+          <div class="stg-row stg-plugin-row" data-plugin-name="${htmlEscape(meta.name)}">
             <div class="stg-row-label">
-              <span class="stg-plugin-name">${escape(meta.label)}</span>
-              <span class="stg-hint" title="${escape(meta.description)}">ⓘ</span>
+              <span class="stg-plugin-name">${htmlEscape(meta.label)}</span>
+              <span class="stg-hint" title="${htmlEscape(meta.description)}">ⓘ</span>
               <span class="stg-plugin-tags">
                 ${meta.proGated ? '<span class="cfg-badge ok" title="Strivo Pro plugin">Pro</span>' : ""}
                 ${meta.installed === false ? '<span class="cfg-badge warn">not installed</span>' : ""}
@@ -7095,10 +7094,10 @@ function openPlatformWizard(platform) {
     .map(
       (f) => `
         <label class="modal-field">
-          <span class="modal-field-label">${escape(f.label)}${f.required ? " *" : ""}</span>
-          <input class="modal-input" name="${escape(f.name)}" type="${escape(f.type)}"
+          <span class="modal-field-label">${htmlEscape(f.label)}${f.required ? " *" : ""}</span>
+          <input class="modal-input" name="${htmlEscape(f.name)}" type="${htmlEscape(f.type)}"
             ${f.required ? "required" : ""}
-            ${f.placeholder ? `placeholder="${escape(f.placeholder)}"` : ""} />
+            ${f.placeholder ? `placeholder="${htmlEscape(f.placeholder)}"` : ""} />
         </label>`,
     )
     .join("");
@@ -7107,13 +7106,13 @@ function openPlatformWizard(platform) {
   dlg.innerHTML = `
     <form class="modal" role="dialog" aria-labelledby="pf-title">
       <header class="modal-head">
-        <h2 id="pf-title">${escape(spec.title)}</h2>
+        <h2 id="pf-title">${htmlEscape(spec.title)}</h2>
         <button type="button" class="modal-close" aria-label="Close">×</button>
       </header>
       <div class="modal-body">
         ${fieldHtml}
         <p class="modal-notes">${spec.notes}
-          <a href="${escape(spec.docsUrl)}" target="_blank" rel="noopener">${escape(spec.docsLabel)} →</a>
+          <a href="${htmlEscape(spec.docsUrl)}" target="_blank" rel="noopener">${htmlEscape(spec.docsLabel)} →</a>
         </p>
       </div>
       <footer class="modal-foot">
@@ -7151,7 +7150,7 @@ function openPlatformWizard(platform) {
 // minimising attack surface anyway). Until we add a /api/v1/env route
 // in Phase 3, surface the placeholder.
 function envOrDefault(_name, dflt) {
-  return `<span class="muted">${escape(dflt)}</span>`;
+  return `<span class="muted">${htmlEscape(dflt)}</span>`;
 }
 
 // ── System (item 7) — version, daemon connectivity, severity-tiered
@@ -7194,13 +7193,13 @@ async function renderSystem() {
             return `
     <div class="sys-check ${c.severity}">
       <span class="sys-sev">${sevGlyph[c.severity] || "•"}</span>
-      <span class="sys-label">${escape(c.name)}</span>
-      <span class="sys-msg">${escape(c.message)}${c.fix ? ` <span class="sys-fix">— ${escape(c.fix)}</span>` : ""}${reauth}</span>
+      <span class="sys-label">${htmlEscape(c.name)}</span>
+      <span class="sys-msg">${htmlEscape(c.message)}${c.fix ? ` <span class="sys-fix">— ${htmlEscape(c.fix)}</span>` : ""}${reauth}</span>
     </div>`;
           },
         )
         .join("");
-      return `<div class="sys-domain"><h3 class="sys-domain-title">${escape(domain)}</h3>${rows}</div>`;
+      return `<div class="sys-domain"><h3 class="sys-domain-title">${htmlEscape(domain)}</h3>${rows}</div>`;
     })
     .join("");
 
@@ -7222,7 +7221,7 @@ async function renderSystem() {
 
   root.innerHTML = chrome(`
     <h1 class="page-title">System</h1>
-    <p class="page-subtitle">StriVo v${health ? escape(health.version || "?") : "?"} ·
+    <p class="page-subtitle">StriVo v${health ? htmlEscape(health.version || "?") : "?"} ·
       overall <span class="cfg-badge ${worst === "ok" ? "ok" : worst === "warn" ? "warn" : "err"}">${worst}</span></p>
     <div class="cfg-grid">
       <section class="cfg-card">
@@ -7267,8 +7266,8 @@ async function renderSystem() {
             (s) => `
         <div class="task-row">
           <div class="task-info">
-            <span class="task-name">⏱ ${escape(s.channel || "scheduled")}</span>
-            <span class="task-cadence">${escape(s.cron || "")}${s.duration ? ` · ${escape(s.duration)}` : ""}</span>
+            <span class="task-name">⏱ ${htmlEscape(s.channel || "scheduled")}</span>
+            <span class="task-cadence">${htmlEscape(s.cron || "")}${s.duration ? ` · ${htmlEscape(s.duration)}` : ""}</span>
           </div>
         </div>`,
           )
@@ -7330,15 +7329,15 @@ async function paintBlocklist() {
     }
     el.innerHTML = rows
       .map((b) => {
-        const scope = b.vod_id ? `VOD ${escape(b.vod_id)}` : "whole channel";
+        const scope = b.vod_id ? `VOD ${htmlEscape(b.vod_id)}` : "whole channel";
         return `
       <div class="task-row">
         <div class="task-info">
-          <span class="task-name">${escape(b.platform)} · ${escape(b.channel_id)}</span>
-          <span class="task-cadence">${scope}${b.reason ? ` · ${escape(b.reason)}` : ""}</span>
+          <span class="task-name">${htmlEscape(b.platform)} · ${htmlEscape(b.channel_id)}</span>
+          <span class="task-cadence">${scope}${b.reason ? ` · ${htmlEscape(b.reason)}` : ""}</span>
         </div>
-        <button class="sm unblock" data-platform="${escape(b.platform)}"
-                data-channel="${escape(b.channel_id)}" data-vod="${escape(b.vod_id || "")}">Unblock</button>
+        <button class="sm unblock" data-platform="${htmlEscape(b.platform)}"
+                data-channel="${htmlEscape(b.channel_id)}" data-vod="${htmlEscape(b.vod_id || "")}">Unblock</button>
       </div>`;
       })
       .join("");
@@ -7359,7 +7358,7 @@ async function paintBlocklist() {
       });
     });
   } catch (e) {
-    el.innerHTML = `<div class="empty sm">Could not load blocklist: ${escape(e.message)}</div>`;
+    el.innerHTML = `<div class="empty sm">Could not load blocklist: ${htmlEscape(e.message)}</div>`;
   }
 }
 
@@ -7378,13 +7377,13 @@ async function paintBackups() {
         (b) => `
       <div class="task-row">
         <div class="task-info">
-          <span class="task-name">${escape(b.name)}</span>
-          <span class="task-cadence">${formatBytes(b.bytes || 0)} · ${(b.files || []).map(escape).join(", ")}</span>
+          <span class="task-name">${htmlEscape(b.name)}</span>
+          <span class="task-cadence">${formatBytes(b.bytes || 0)} · ${(b.files || []).map(htmlEscape).join(", ")}</span>
         </div>
         <a class="sm" href="/api/v1/backups/${encodeURIComponent(b.name)}/download"
-           download="strivo-backup-${escape(b.name)}.tar.gz"
+           download="strivo-backup-${htmlEscape(b.name)}.tar.gz"
            title="Download backup as tarball">Download</a>
-        <button class="sm restore-backup" data-name="${escape(b.name)}">Restore</button>
+        <button class="sm restore-backup" data-name="${htmlEscape(b.name)}">Restore</button>
       </div>`,
       )
       .join("");
@@ -7407,7 +7406,7 @@ async function paintBackups() {
       });
     });
   } catch (e) {
-    el.innerHTML = `<div class="empty sm">Could not load backups: ${escape(e.message)}</div>`;
+    el.innerHTML = `<div class="empty sm">Could not load backups: ${htmlEscape(e.message)}</div>`;
   }
 }
 
@@ -7460,7 +7459,7 @@ async function renderLogs() {
       <label>Min level <select id="logs-level">${options}</select></label>
       <input id="logs-search" class="logs-search" type="search"
              placeholder="${logsRegex ? "Regex (case-insensitive)…" : "Search log text…"}"
-             value="${escape(logsQuery)}" />
+             value="${htmlEscape(logsQuery)}" />
       <label class="logs-toggle" title="Search as case-insensitive regex">
         <input type="checkbox" id="logs-regex" ${logsRegex ? "checked" : ""}/> regex
       </label>
@@ -7492,7 +7491,7 @@ async function renderLogs() {
           .concat(
             sources.map(
               (s) =>
-                `<button class="logs-chip${s === logsSourceFilter ? " is-active" : ""}" data-src="${escape(s)}">${escape(s.replace(/^strivo_/, ""))}</button>`,
+                `<button class="logs-chip${s === logsSourceFilter ? " is-active" : ""}" data-src="${htmlEscape(s)}">${htmlEscape(s.replace(/^strivo_/, ""))}</button>`,
             ),
           )
           .join("");
@@ -7526,9 +7525,9 @@ async function renderLogs() {
       out.innerHTML = filtered.length
         ? filtered
             .map((e) => {
-              const head = escape(e.head);
+              const head = htmlEscape(e.head);
               if (!e.tail.length) return `<div class="log-line">${head}</div>`;
-              const tail = escape(e.tail.join("\n"));
+              const tail = htmlEscape(e.tail.join("\n"));
               return `<details class="log-line log-multi"><summary>${head} <span class="log-more">+${e.tail.length}</span></summary><pre>${tail}</pre></details>`;
             })
             .join("")
@@ -7576,8 +7575,7 @@ async function renderLogs() {
     }
   });
   document.getElementById("logs-refresh")?.addEventListener("click", load);
-  document.getElementById("logs-copy")?.addEventListener("click", async (e) => {
-    const btn = e.currentTarget;
+  document.getElementById("logs-copy")?.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(logsLastFilteredText || "");
       Toast.success("Logs copied to clipboard");
@@ -7665,10 +7663,10 @@ async function renderSchedule() {
       (e) => `
     <div class="task-row">
       <div class="task-info">
-        <span class="task-name">${escape(e.channel_name || e.channel_id)} <span class="mon-plat plat-${escape(e.platform.toLowerCase())}">${escape(e.platform)}</span></span>
-        <span class="task-cadence">${escape(e.key)}</span>
+        <span class="task-name">${htmlEscape(e.channel_name || e.channel_id)} <span class="mon-plat plat-${htmlEscape(e.platform.toLowerCase())}">${htmlEscape(e.platform)}</span></span>
+        <span class="task-cadence">${htmlEscape(e.key)}</span>
       </div>
-      <button class="sm mon-rec-rm" data-key="${escape(e.key)}" title="Stop auto-recording this channel">✕</button>
+      <button class="sm mon-rec-rm" data-key="${htmlEscape(e.key)}" title="Stop auto-recording this channel">✕</button>
     </div>`,
     )
     .join("");
@@ -7682,17 +7680,17 @@ async function renderSchedule() {
       return `
       <div class="task-row mon-dl-row">
         <div class="task-info">
-          <span class="task-name">${escape(name)} <span class="mon-plat plat-${escape(e.platform.toLowerCase())}">${escape(e.platform)}</span></span>
+          <span class="task-name">${htmlEscape(name)} <span class="mon-plat plat-${htmlEscape(e.platform.toLowerCase())}">${htmlEscape(e.platform)}</span></span>
           <span class="task-cadence">
             <label class="mon-scope">
               <span>Limit to playlists (optional, comma-separated)</span>
-              <input class="mon-playlists" type="text" data-key="${escape(e.key)}"
+              <input class="mon-playlists" type="text" data-key="${htmlEscape(e.key)}"
                      placeholder="PLxxx, PLyyy — leave empty for whole channel"
-                     value="${escape(playlistsValue)}" />
+                     value="${htmlEscape(playlistsValue)}" />
             </label>
           </span>
         </div>
-        <button class="sm mon-dl-rm" data-key="${escape(e.key)}" title="Stop auto-downloading uploads from this channel">✕</button>
+        <button class="sm mon-dl-rm" data-key="${htmlEscape(e.key)}" title="Stop auto-downloading uploads from this channel">✕</button>
       </div>`;
     })
     .join("");
@@ -7706,8 +7704,8 @@ async function renderSchedule() {
             (e, i) => `
           <div class="task-row">
             <div class="task-info">
-              <span class="task-name">${escape(e.channel || "scheduled")}</span>
-              <span class="task-cadence"><code>${escape(e.cron || "")}</code>${e.duration ? ` · ${escape(e.duration)}` : ""}${e.next_fire ? ` · next: ${escape(new Date(e.next_fire).toLocaleString())}` : ""}</span>
+              <span class="task-name">${htmlEscape(e.channel || "scheduled")}</span>
+              <span class="task-cadence"><code>${htmlEscape(e.cron || "")}</code>${e.duration ? ` · ${htmlEscape(e.duration)}` : ""}${e.next_fire ? ` · next: ${htmlEscape(new Date(e.next_fire).toLocaleString())}` : ""}</span>
             </div>
             <button class="sm sch-del" data-i="${i}" title="Delete this cron entry">✕</button>
           </div>`,
@@ -7794,7 +7792,7 @@ async function renderSchedule() {
         <select id="mon-dl-channel">
           <option value="">Pick a YouTube channel…</option>
           ${channelsAvailableForDownload
-            .map((c) => `<option value="${escape(`${c.platform}:${c.id}`)}">${escape(c.display_name || c.name)}</option>`)
+            .map((c) => `<option value="${htmlEscape(`${c.platform}:${c.id}`)}">${htmlEscape(c.display_name || c.name)}</option>`)
             .join("")}
         </select>
         <button class="btn-primary" type="submit">Enable</button>
@@ -7943,8 +7941,8 @@ async function _renderSchedule_legacy_cron_unused() {
   const row = (e) => `
     <div class="task-row">
       <div class="task-info">
-        <span class="task-name">${escape(e.channel || "scheduled")}</span>
-        <span class="task-cadence">${escape(e.cron || "")}${e.duration ? ` · ${escape(e.duration)}` : ""}</span>
+        <span class="task-name">${htmlEscape(e.channel || "scheduled")}</span>
+        <span class="task-cadence">${htmlEscape(e.cron || "")}${e.duration ? ` · ${htmlEscape(e.duration)}` : ""}</span>
       </div>
       <span class="agenda-time">${e.when ? e.when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}</span>
     </div>`;
@@ -7953,7 +7951,7 @@ async function _renderSchedule_legacy_cron_unused() {
     .map(
       (g) => `
     <section class="cfg-card">
-      <h2 class="cfg-title">${escape(g.label)}</h2>
+      <h2 class="cfg-title">${htmlEscape(g.label)}</h2>
       ${g.items.map(row).join("")}
     </section>`,
     )
@@ -7962,7 +7960,7 @@ async function _renderSchedule_legacy_cron_unused() {
   const undatedHtml = undated.length
     ? `<section class="cfg-card">
          <h2 class="cfg-title">Unscheduled</h2>
-         ${undated.map((e) => `<div class="task-row"><div class="task-info"><span class="task-name">${escape(e.channel || "")}</span><span class="task-cadence">${escape(e.cron || "")} · unparsed cron</span></div></div>`).join("")}
+         ${undated.map((e) => `<div class="task-row"><div class="task-info"><span class="task-name">${htmlEscape(e.channel || "")}</span><span class="task-cadence">${htmlEscape(e.cron || "")} · unparsed cron</span></div></div>`).join("")}
        </section>`
     : "";
 
@@ -7975,8 +7973,8 @@ async function _renderSchedule_legacy_cron_unused() {
       (e, i) => `
     <div class="task-row">
       <div class="task-info">
-        <span class="task-name">${escape(e.channel || "scheduled")}</span>
-        <span class="task-cadence"><code>${escape(e.cron || "")}</code>${e.duration ? ` · ${escape(e.duration)}` : ""}${e.next_fire ? ` · next: ${escape(new Date(e.next_fire).toLocaleString())}` : ""}</span>
+        <span class="task-name">${htmlEscape(e.channel || "scheduled")}</span>
+        <span class="task-cadence"><code>${htmlEscape(e.cron || "")}</code>${e.duration ? ` · ${htmlEscape(e.duration)}` : ""}${e.next_fire ? ` · next: ${htmlEscape(new Date(e.next_fire).toLocaleString())}` : ""}</span>
       </div>
       <button class="sm sch-del" data-i="${i}" title="Delete this schedule entry">✕</button>
     </div>`,
@@ -8092,7 +8090,7 @@ async function renderHistory() {
     <div class="rec-toolbar">
       <input id="hist-filter" class="grid-filter" type="search"
              placeholder="Filter by channel or title…"
-             aria-label="Filter history" value="${escape(histFilter)}">
+             aria-label="Filter history" value="${htmlEscape(histFilter)}">
       <button id="hist-groupby" class="sm" title="Group rows">
         ${histGroupBy === "channel" ? "▼ Grouped by channel"
           : histGroupBy === "date" ? "▼ Grouped by month"
@@ -8136,10 +8134,10 @@ function paintHistChips() {
     </button>
     ${sorted.map(([state, n]) => {
       const active = histStateFilter.size === 0 || histStateFilter.has(state);
-      return `<button class="rec-state-chip state-${escape(state)} ${active ? "active" : ""}"
-                data-state="${escape(state)}" type="button">
+      return `<button class="rec-state-chip state-${htmlEscape(state)} ${active ? "active" : ""}"
+                data-state="${htmlEscape(state)}" type="button">
         <span class="rec-state-chip-dot"></span>
-        ${escape(stateChipLabel(state))}
+        ${htmlEscape(stateChipLabel(state))}
         <span class="rec-state-chip-count">${n}</span>
       </button>`;
     }).join("")}`;
@@ -8200,7 +8198,7 @@ function paintHistory() {
       const totalBytes = list.reduce((a, b) => a + (b.bytes_written || 0), 0);
       return `<div class="hist-group">
         <div class="hist-group-head">
-          <span class="rec-group-name">${escape(ch)}</span>
+          <span class="rec-group-name">${htmlEscape(ch)}</span>
           <span class="rec-group-meta">${list.length} entr${list.length === 1 ? "y" : "ies"} · ${formatBytes(totalBytes)}</span>
         </div>
         ${list.map(historyPillHtml).join("")}
@@ -8223,7 +8221,7 @@ function paintHistory() {
         : new Date(mo + "-01").toLocaleString(undefined, { year: "numeric", month: "long" });
       return `<div class="hist-group">
         <div class="hist-group-head">
-          <span class="rec-group-name">${escape(niceMonth)}</span>
+          <span class="rec-group-name">${htmlEscape(niceMonth)}</span>
           <span class="rec-group-meta">${list.length} entr${list.length === 1 ? "y" : "ies"} · ${formatBytes(totalBytes)}</span>
         </div>
         ${list.map(historyPillHtml).join("")}
@@ -8289,30 +8287,30 @@ function historyPillHtml(j) {
   const isFinished = stateClassName(j.state) === "finished" && j.file_exists !== false;
   const isFileError = j.file_exists === false;
   const playBtn = isFinished
-    ? `<button class="primary sm" data-action="rec-play" data-job-id="${escape(j.id)}" title="Open player">▶ Play</button>`
+    ? `<button class="primary sm" data-action="rec-play" data-job-id="${htmlEscape(j.id)}" title="Open player">▶ Play</button>`
     : `<button class="primary sm rec-play-disabled" disabled aria-disabled="true" title="${isFileError ? "File missing" : "Not finished"}">▶ Play</button>`;
   const fileErrorBtns = isFileError
-    ? `<button class="sm" data-action="rec-rescan" data-job-id="${escape(j.id)}" title="Re-check whether the file exists">↻ Re-scan</button>
-       <button class="sm" data-action="rec-locate" data-job-id="${escape(j.id)}" data-path="${escape(j.output_path || "")}" title="Show the expected file path">📂 Show path</button>`
+    ? `<button class="sm" data-action="rec-rescan" data-job-id="${htmlEscape(j.id)}" title="Re-check whether the file exists">↻ Re-scan</button>
+       <button class="sm" data-action="rec-locate" data-job-id="${htmlEscape(j.id)}" data-path="${htmlEscape(j.output_path || "")}" title="Show the expected file path">📂 Show path</button>`
     : "";
   return `
     <div class="media-pill hist-pill${j.file_exists === false ? " mp-broken" : ""}"
-         data-job-id="${escape(j.id)}">
+         data-job-id="${htmlEscape(j.id)}">
       <div class="mp-thumb">${missingOverlay}<img class="mp-thumb-img" loading="lazy" alt=""
         src="/api/v1/recordings/${encodeURIComponent(j.id)}/thumb" onerror="this.remove()"></div>
       <div class="mp-info">
-        <div class="mp-title">${escape(niceTitle(j.stream_title) || j.channel_name || "(recording)")} ${sourceBadge}</div>
-        <div class="mp-sub">${escape(j.channel_name || "")} · ${escape(when)}</div>
+        <div class="mp-title">${htmlEscape(niceTitle(j.stream_title) || j.channel_name || "(recording)")} ${sourceBadge}</div>
+        <div class="mp-sub">${htmlEscape(j.channel_name || "")} · ${htmlEscape(when)}</div>
       </div>
       <div class="mp-meta">
-        ${(() => { const d = recordingDisplayState(j); return `<span class="state-pill ${d.className}">${escape(d.label)}</span>`; })()}
+        ${(() => { const d = recordingDisplayState(j); return `<span class="state-pill ${d.className}">${htmlEscape(d.label)}</span>`; })()}
         <span class="mp-size">${formatBytes(j.bytes_written || 0)}</span>
       </div>
       <div class="hist-actions">
         ${playBtn}
         ${fileErrorBtns}
-        <button class="sm" data-action="rec-info" data-job-id="${escape(j.id)}" title="Recording details">ⓘ Info</button>
-        <button class="danger sm" data-action="rec-delete" data-job-id="${escape(j.id)}" title="Delete (moves file to 7-day trash)">✕</button>
+        <button class="sm" data-action="rec-info" data-job-id="${htmlEscape(j.id)}" title="Recording details">ⓘ Info</button>
+        <button class="danger sm" data-action="rec-delete" data-job-id="${htmlEscape(j.id)}" title="Delete (moves file to 7-day trash)">✕</button>
       </div>
     </div>`;
 }
@@ -8330,7 +8328,7 @@ function updateLiveCount(n) {
 }
 
 // ── Utilities ────────────────────────────────────────────────────────
-function escape(s) {
+function htmlEscape(s) {
   if (s == null) return "";
   return String(s)
     .replace(/&/g, "&amp;")
@@ -8344,7 +8342,7 @@ function escape(s) {
 // Not a full markdown parser — Casebook only emits a tight subset.
 function md_to_html(text) {
   if (!text) return "";
-  const escaped = escape(text);
+  const escaped = htmlEscape(text);
   // Lists first: turn lines starting with "- " into <ul><li>.
   const lines = escaped.split("\n");
   const out = [];
@@ -8633,7 +8631,7 @@ function paintCmdk() {
   list.innerHTML = cmdkItems
     .map(
       (c, i) =>
-        `<div class="pl-row ${i === cmdkSelected ? "sel" : ""}" data-i="${i}">${escape(
+        `<div class="pl-row ${i === cmdkSelected ? "sel" : ""}" data-i="${i}">${htmlEscape(
           c.label,
         )}</div>`,
     )
@@ -8724,8 +8722,8 @@ function startOnboardingTour() {
       <div class="tour-spotlight" style="${rect ? `left:${rect.left - 6}px;top:${rect.top - 6}px;width:${rect.width + 12}px;height:${rect.height + 12}px;` : "display:none"}"></div>
       <div class="tour-card" style="left:${cardLeft}px;top:${cardTop}px;">
         <div class="tour-step-meta">Step ${idx + 1} of ${TOUR_STEPS.length}</div>
-        <h3 class="tour-title">${escape(step.title)}</h3>
-        <p class="tour-body">${escape(step.body)}</p>
+        <h3 class="tour-title">${htmlEscape(step.title)}</h3>
+        <p class="tour-body">${htmlEscape(step.body)}</p>
         <div class="tour-actions">
           <button class="sm tour-skip" type="button">Skip tour</button>
           <span class="spacer"></span>
@@ -8761,7 +8759,7 @@ function maybeMountPageHint(route) {
   banner.className = "page-hint";
   banner.innerHTML = `
     <span class="page-hint-icon" aria-hidden="true">💡</span>
-    <span class="page-hint-text">${escape(PAGE_HINTS[route])}</span>
+    <span class="page-hint-text">${htmlEscape(PAGE_HINTS[route])}</span>
     <button class="page-hint-dismiss sm" type="button" aria-label="Dismiss this hint">✕</button>`;
   // Insert as the first child of the main chrome region so it sits
   // above any page-specific page-title / subtitle.

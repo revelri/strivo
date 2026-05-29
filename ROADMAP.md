@@ -295,8 +295,8 @@ plugin swarm.
 - Workspace version bumped 0.3.0 → **0.4.0** to reflect the iter-50–53 DAW
   closeout (sidechain · insert-fx · pitch · the one-click sidechain workflow).
 - Branch `feat/strivo-pro-phase1` is fully reachable from `main`; iter
-  50–53 commits land directly on `main`. Stale `feat/webui` branch is
-  superseded (already noted in MEMORY.md as such) and pending pruning.
+  50+ commits land directly on `main`. Stale `feat/webui` worktree +
+  branch pruned at iter 54.
 - `strivo-plugins` submodule pinned at `8a06166` (`heads/main`); private repo,
   no pending changes.
 - All 35 in-tree Rust crates build clean in both Pro (`--features pro`) and
